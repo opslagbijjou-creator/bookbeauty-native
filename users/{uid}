@@ -1,0 +1,10 @@
+{
+  "role": "customer", 
+  "firstName": "Amira",
+  "lastName": "Douairi",
+  "email": "test@mail.com",
+  "companyName": "",
+  "kvk": "",
+  "createdAt": "serverTimestamp",
+  "updatedAt": "serverTimestamp"
+}

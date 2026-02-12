@@ -1,0 +1,7 @@
+await createCompanyForUser({
+  uid,
+  name: "Beauty by Amira",
+  city: "Amsterdam",
+  categories: ["Nagels", "Wimpers"],
+  minPrice: 30,
+});
