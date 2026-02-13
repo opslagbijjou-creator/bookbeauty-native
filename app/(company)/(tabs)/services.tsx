@@ -1,297 +1,221 @@
+// FILE: app/(company)/(tabs)/services.tsx
 import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
+  TextInput,
   Pressable,
   FlatList,
-  Modal,
-  TextInput,
-  StyleSheet,
   ActivityIndicator,
   Alert,
+  StyleSheet,
 } from "react-native";
-
-import { getAuth } from "firebase/auth";
-
+import { auth } from "../../../lib/firebase";
 import {
   CompanyService,
-  fetchMyServices,
   addMyService,
   deleteMyService,
+  fetchMyServices,
+  updateMyService,
 } from "../../../lib/serviceRepo";
 
-const BG = "#F7E6EE";
-const CARD = "#FFFFFF";
-const BORDER = "#E9D3DF";
-const PINK = "#E45AA6";
-const TEXT = "#1E1E1E";
-const MUTED = "#6B6B6B";
-
 export default function CompanyServices() {
-  const auth = getAuth();
-  const uid = auth.currentUser?.uid;
+  const companyId = auth.currentUser?.uid; // ✅ dit is je companyId
 
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<CompanyService[]>([]);
-
-  const [modalOpen, setModalOpen] = useState(false);
-
   const [name, setName] = useState("");
-  const [price, setPrice] = useState("");
-  const [duration, setDuration] = useState("");
+  const [price, setPrice] = useState("30");
+  const [durationMin, setDurationMin] = useState("30");
 
-  /** ✅ Load services */
   async function load() {
-    if (!uid) return;
-
+    if (!companyId) return;
     setLoading(true);
-    const data = await fetchMyServices(uid);
-    setItems(data);
-    setLoading(false);
+    try {
+      const data = await fetchMyServices(companyId);
+      setItems(data);
+    } catch (e: any) {
+      Alert.alert("Fout", e?.message ?? "Kon services niet laden");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     load();
-  }, [uid]);
+  }, [companyId]);
 
-  /** ✅ Add new service */
   async function onAdd() {
-    if (!uid) return;
+    if (!companyId) return;
+    if (!name.trim()) return Alert.alert("Naam ontbreekt", "Vul service naam in.");
 
-    if (!name.trim()) {
-      Alert.alert("Naam ontbreekt");
-      return;
+    const p = Number(price);
+    const d = Number(durationMin);
+    if (!Number.isFinite(p) || p <= 0) return Alert.alert("Prijs fout", "Prijs moet > 0 zijn.");
+    if (!Number.isFinite(d) || d <= 0) return Alert.alert("Duur fout", "Duur moet > 0 zijn.");
+
+    try {
+      await addMyService(companyId, {
+        name: name.trim(),
+        price: p,
+        durationMin: d,
+        isActive: true,
+      });
+      setName("");
+      await load();
+    } catch (e: any) {
+      Alert.alert("Fout", e?.message ?? "Kon service niet toevoegen");
     }
-
-    await addMyService({
-      companyId: uid,
-      name: name.trim(),
-      price: Number(price),
-      durationMin: Number(duration),
-      isActive: true,
-    });
-
-    setModalOpen(false);
-    setName("");
-    setPrice("");
-    setDuration("");
-
-    load();
   }
 
-  /** ✅ Delete */
+  async function toggleActive(s: CompanyService) {
+    try {
+      await updateMyService(s.id, { isActive: !s.isActive });
+      await load();
+    } catch (e: any) {
+      Alert.alert("Fout", e?.message ?? "Kon niet updaten");
+    }
+  }
+
   async function onDelete(id: string) {
-    await deleteMyService(id);
-    load();
+    Alert.alert("Verwijderen?", "Weet je het zeker?", [
+      { text: "Nee" },
+      {
+        text: "Ja",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteMyService(id);
+            await load();
+          } catch (e: any) {
+            Alert.alert("Fout", e?.message ?? "Kon niet verwijderen");
+          }
+        },
+      },
+    ]);
+  }
+
+  if (!companyId) {
+    return (
+      <View style={styles.center}>
+        <Text>Niet ingelogd als company.</Text>
+      </View>
+    );
   }
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Mijn Diensten</Text>
+      <Text style={styles.title}>Services</Text>
 
-      {/* Button */}
-      <Pressable style={styles.addBtn} onPress={() => setModalOpen(true)}>
-        <Text style={styles.addBtnText}>+ Dienst toevoegen</Text>
-      </Pressable>
+      <View style={styles.card}>
+        <Text style={styles.label}>Nieuwe service</Text>
+        <TextInput
+          value={name}
+          onChangeText={setName}
+          placeholder="Bijv. Knippen"
+          style={styles.input}
+        />
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <TextInput
+            value={price}
+            onChangeText={setPrice}
+            placeholder="Prijs"
+            keyboardType="numeric"
+            style={[styles.input, { flex: 1 }]}
+          />
+          <TextInput
+            value={durationMin}
+            onChangeText={setDurationMin}
+            placeholder="Minuten"
+            keyboardType="numeric"
+            style={[styles.input, { flex: 1 }]}
+          />
+        </View>
 
-      {/* Loading */}
+        <Pressable style={styles.btn} onPress={onAdd}>
+          <Text style={styles.btnText}>+ Toevoegen</Text>
+        </Pressable>
+      </View>
+
       {loading ? (
-        <ActivityIndicator size="large" color={PINK} />
+        <View style={styles.center}>
+          <ActivityIndicator />
+        </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={(x) => x.id}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 40 }}
           renderItem={({ item }) => (
-            <View style={styles.card}>
+            <View style={styles.serviceRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>{item.name}</Text>
-                <Text style={styles.cardMeta}>
-                  €{item.price} • {item.durationMin} min
+                <Text style={styles.serviceName}>{item.name}</Text>
+                <Text style={styles.serviceMeta}>
+                  €{item.price} • {item.durationMin} min • {item.isActive ? "Actief" : "Uit"}
                 </Text>
               </View>
 
-              <Pressable
-                onPress={() => onDelete(item.id)}
-                style={styles.deleteBtn}
-              >
-                <Text style={styles.deleteText}>X</Text>
+              <Pressable style={styles.smallBtn} onPress={() => toggleActive(item)}>
+                <Text style={styles.smallBtnText}>{item.isActive ? "Zet uit" : "Zet aan"}</Text>
+              </Pressable>
+
+              <Pressable style={[styles.smallBtn, { backgroundColor: "#ffebee" }]} onPress={() => onDelete(item.id)}>
+                <Text style={[styles.smallBtnText, { color: "#b71c1c" }]}>Delete</Text>
               </Pressable>
             </View>
           )}
           ListEmptyComponent={
-            <Text style={styles.empty}>Nog geen diensten toegevoegd.</Text>
+            <View style={styles.center}>
+              <Text>Nog geen services. Voeg er 1 toe.</Text>
+            </View>
           }
         />
       )}
-
-      {/* Modal */}
-      <Modal visible={modalOpen} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Nieuwe dienst</Text>
-
-            <TextInput
-              placeholder="Naam (bv. Knippen)"
-              value={name}
-              onChangeText={setName}
-              style={styles.input}
-            />
-
-            <TextInput
-              placeholder="Prijs (bv. 30)"
-              value={price}
-              onChangeText={setPrice}
-              keyboardType="numeric"
-              style={styles.input}
-            />
-
-            <TextInput
-              placeholder="Duur (bv. 45)"
-              value={duration}
-              onChangeText={setDuration}
-              keyboardType="numeric"
-              style={styles.input}
-            />
-
-            <Pressable style={styles.saveBtn} onPress={onAdd}>
-              <Text style={styles.saveText}>Opslaan</Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.cancelBtn}
-              onPress={() => setModalOpen(false)}
-            >
-              <Text style={styles.cancelText}>Annuleren</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
-/* Styles */
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: BG,
-    padding: 16,
-  },
-
-  title: {
-    fontSize: 22,
-    fontWeight: "900",
-    marginBottom: 12,
-    color: TEXT,
-  },
-
-  addBtn: {
-    backgroundColor: PINK,
-    padding: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    marginBottom: 14,
-  },
-
-  addBtnText: {
-    color: "white",
-    fontWeight: "900",
-    fontSize: 16,
-  },
-
+  screen: { flex: 1, padding: 16, backgroundColor: "#F7E6EE" },
+  title: { fontSize: 22, fontWeight: "900", marginBottom: 12 },
   card: {
-    flexDirection: "row",
-    backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
-    padding: 14,
+    backgroundColor: "white",
     borderRadius: 16,
-    marginBottom: 10,
-    alignItems: "center",
-  },
-
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: TEXT,
-  },
-
-  cardMeta: {
-    marginTop: 4,
-    fontWeight: "700",
-    color: MUTED,
-  },
-
-  deleteBtn: {
-    backgroundColor: "#FF3B30",
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  deleteText: {
-    color: "white",
-    fontWeight: "900",
-  },
-
-  empty: {
-    textAlign: "center",
-    marginTop: 40,
-    color: MUTED,
-    fontWeight: "800",
-  },
-
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  modalBox: {
-    width: "90%",
-    backgroundColor: CARD,
-    borderRadius: 18,
-    padding: 16,
-  },
-
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "900",
+    padding: 12,
     marginBottom: 12,
   },
-
+  label: { fontWeight: "900", marginBottom: 8 },
   input: {
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 14,
+    backgroundColor: "#f4f4f4",
     padding: 12,
+    borderRadius: 12,
     marginBottom: 10,
+    fontWeight: "800",
   },
-
-  saveBtn: {
-    backgroundColor: PINK,
+  btn: {
+    backgroundColor: "#E97AAE",
     padding: 14,
     borderRadius: 14,
     alignItems: "center",
-    marginTop: 6,
   },
-
-  saveText: {
-    color: "white",
-    fontWeight: "900",
-  },
-
-  cancelBtn: {
+  btnText: { color: "white", fontWeight: "900" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  serviceRow: {
+    backgroundColor: "white",
+    borderRadius: 14,
     padding: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    gap: 8,
     alignItems: "center",
   },
-
-  cancelText: {
-    fontWeight: "800",
-    color: MUTED,
+  serviceName: { fontWeight: "900", fontSize: 16 },
+  serviceMeta: { opacity: 0.7, marginTop: 2, fontWeight: "700" },
+  smallBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: "#f0f0f0",
   },
+  smallBtnText: { fontWeight: "900" },
 });

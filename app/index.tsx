@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+// FILE: app/index.tsx
+
+import { useEffect, useState } from "react";
 import { View, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "../lib/firebase";
-import { getUserRole } from "../lib/userRepo";
+import { doc, getDoc } from "firebase/firestore";
+import { useRouter } from "expo-router";
+import { auth, db } from "../lib/firebase";
 
 export default function Index() {
   const router = useRouter();
@@ -17,11 +19,30 @@ export default function Index() {
           return;
         }
 
-        const role = await getUserRole(user.uid);
+        const uid = user.uid;
+        const snap = await getDoc(doc(db, "users", uid));
 
-        if (role === "company") router.replace("/(company)/home" as any);
-        else if (role === "admin") router.replace("/(admin)/home" as any);
-        else router.replace("/(customer)/home" as any);
+        if (!snap.exists()) {
+          router.replace("/(auth)/login" as any);
+          return;
+        }
+
+        const role = snap.data()?.role;
+
+        // ✅ Company → company tabs
+        if (role === "company") {
+          router.replace("/(company)/(tabs)" as any);
+          return;
+        }
+
+        // ❌ Admin later pas toevoegen
+        // if (role === "admin") {
+        //   router.replace("/(admin)/(tabs)" as any);
+        //   return;
+        // }
+
+        // ✅ Default = customer
+        router.replace("/(customer)/(tabs)" as any);
       } finally {
         setLoading(false);
       }
@@ -32,11 +53,11 @@ export default function Index() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator />
       </View>
     );
   }
 
-  return <View style={{ flex: 1 }} />;
+  return null;
 }

@@ -1,28 +1,23 @@
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import type { CompanyCategory } from "./companyRepo";
 
-export async function createCompanyForUser(params: {
-  uid: string;
-  name: string;
-  city: string;
-  categories: CompanyCategory[];
-  minPrice?: number;
-}) {
-  const ref = doc(db, "companies", params.uid);
+export async function createCompany(uid: string, input: any) {
+  // private doc
+  await setDoc(doc(db, "companies", uid), {
+    ownerId: uid,
+    kvk: input.kvk,
+    name: input.name,
+    city: input.city,
+    categories: input.categories,
+    createdAt: new Date(),
+  });
 
-  await setDoc(
-    ref,
-    {
-      ownerUid: params.uid,
-      name: params.name,
-      city: params.city,
-      categories: params.categories,
-      minPrice: params.minPrice ?? 0,
-      isActive: true,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  // public doc
+  await setDoc(doc(db, "companies_public", uid), {
+    name: input.name,
+    city: input.city,
+    categories: input.categories,
+    minPrice: input.minPrice ?? 0,
+    isActive: true,
+  });
 }

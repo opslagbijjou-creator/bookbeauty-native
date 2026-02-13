@@ -44,47 +44,43 @@ function norm(s?: string) {
 export async function fetchCompanies(
   params: CompanySearchParams = {}
 ): Promise<Company[]> {
-  const take = params.take ?? 50;
-  const constraints: QueryConstraint[] = [];
+  const take = params.take ?? 200;
 
-  // ✅ Alleen actieve salons
-  constraints.push(where("isActive", "==", true));
+  // ✅ Alleen "veilige" Firestore query (geen index-gedoe)
+  const constraints: QueryConstraint[] = [
+    where("isActive", "==", true),
+    orderBy("name", "asc"),
+    limit(take),
+  ];
 
-  if (params.city) {
-    constraints.push(where("city", "==", params.city));
-  }
-
-  if (params.category) {
-    constraints.push(where("categories", "array-contains", params.category));
-  }
-
-  if (typeof params.maxPrice === "number") {
-    constraints.push(where("minPrice", "<=", params.maxPrice));
-  }
-
-  constraints.push(orderBy("name", "asc"));
-  constraints.push(limit(take));
-
-  const q = fsQuery(collection(db, "companies"), ...constraints);
+  const q = fsQuery(collection(db, "companies_public"), ...constraints);
   const snap = await getDocs(q);
 
   let items: Company[] = snap.docs.map((doc) => {
     const data = doc.data() as any;
-
     return {
       id: doc.id,
       name: String(data.name ?? data.naam ?? "Salon"),
       city: String(data.city ?? ""),
-      categories: Array.isArray(data.categories)
-        ? data.categories
-        : ["Overig"],
-      minPrice:
-        typeof data.minPrice === "number" ? data.minPrice : undefined,
+      categories: Array.isArray(data.categories) ? data.categories : ["Overig"],
+      minPrice: typeof data.minPrice === "number" ? data.minPrice : undefined,
       isActive: data.isActive ?? true,
     };
   });
 
-  // ✅ Search filter client-side
+  // ✅ Filters client-side (werkt altijd, geen indexes nodig)
+  if (params.city) {
+    items = items.filter((c) => c.city === params.city);
+  }
+
+  if (params.category) {
+    items = items.filter((c) => (c.categories ?? []).includes(params.category!));
+  }
+
+  if (typeof params.maxPrice === "number") {
+    items = items.filter((c) => (c.minPrice ?? 999999) <= params.maxPrice!);
+  }
+
   if (params.query) {
     const qText = norm(params.query);
     items = items.filter((c) => norm(c.name).includes(qText));

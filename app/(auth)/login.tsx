@@ -63,17 +63,14 @@ async function onLogin() {
 
     // 3. Redirect op basis van role
     if (role === "company") {
-      router.replace("/(company)/(tabs)");
+      router.replace("/(company)/(tabs)" as any);
       return;
     }
 
-    if (role === "admin") {
-      router.replace("/(admin)/(tabs)");
-      return;
-    }
+
 
     // Default = customer
-    router.replace("/(customer)/(tabs)");
+    router.replace("/(customer)/(tabs)" as any);
   } catch (e: any) {
     Alert.alert("Login fout", e?.message ?? "Er ging iets mis.");
   } finally {
