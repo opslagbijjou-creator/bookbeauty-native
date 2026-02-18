@@ -1,63 +1,48 @@
-// FILE: app/index.tsx
+import React, { useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { router } from "expo-router";
+import { getUserRole, subscribeAuth } from "../lib/authRepo";
+import { COLORS } from "../lib/ui";
 
-import { useEffect, useState } from "react";
-import { View, ActivityIndicator } from "react-native";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { useRouter } from "expo-router";
-import { auth, db } from "../lib/firebase";
-
-export default function Index() {
-  const router = useRouter();
+export default function IndexScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      try {
-        if (!user) {
-          router.replace("/(auth)/login" as any);
-          return;
-        }
-
-        const uid = user.uid;
-        const snap = await getDoc(doc(db, "users", uid));
-
-        if (!snap.exists()) {
-          router.replace("/(auth)/login" as any);
-          return;
-        }
-
-        const role = snap.data()?.role;
-
-        // ✅ Company → company tabs
-        if (role === "company") {
-          router.replace("/(company)/(tabs)" as any);
-          return;
-        }
-
-        // ❌ Admin later pas toevoegen
-        // if (role === "admin") {
-        //   router.replace("/(admin)/(tabs)" as any);
-        //   return;
-        // }
-
-        // ✅ Default = customer
-        router.replace("/(customer)/(tabs)" as any);
-      } finally {
+    const unsub = subscribeAuth(async (user) => {
+      if (!user) {
+        router.replace("/(auth)/login" as never);
         setLoading(false);
+        return;
       }
+
+      const role = await getUserRole(user.uid);
+
+      if (role === "company") {
+        router.replace("/(company)/(tabs)/home" as never);
+      } else if (role === "admin") {
+        router.replace("/(admin)/(tabs)" as never);
+      } else {
+        router.replace("/(customer)/(tabs)" as never);
+      }
+
+      setLoading(false);
     });
 
-    return () => unsub();
-  }, [router]);
+    return unsub;
+  }, []);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-
-  return null;
+  return (
+    <View style={styles.screen}>
+      {loading ? <ActivityIndicator size="large" color={COLORS.primary} /> : <Text>Redirecting...</Text>}
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

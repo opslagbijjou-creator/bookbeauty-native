@@ -18,6 +18,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+      "softwareKeyboardLayoutMode": "resize",
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
@@ -27,6 +28,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BookBeauty heeft toegang nodig tot je foto's om logo's en video's te uploaden.",
+          "cameraPermission": "BookBeauty heeft toegang nodig tot je camera om media te maken.",
+          "microphonePermission": "BookBeauty heeft toegang nodig tot je microfoon bij video-opnames."
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -43,6 +52,10 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "djrw0k1fy",
+      "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "bookbeauty_unsigned"
     }
   }
 }

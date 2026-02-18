@@ -1,71 +1,173 @@
-// FILE: components/CompanyCard.tsx
 import React from "react";
 import { Pressable, Text, View, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Company } from "../lib/companyRepo";
+import { Image } from "expo-image";
+import { CompanyPublic } from "../lib/companyRepo";
+import { COLORS } from "../lib/ui";
 
-const CARD = "#FFFFFF";
-const BORDER = "#E9D3DF";
-const PINK = "#E45AA6";
-const TEXT = "#1E1E1E";
-const MUTED = "#6B6B6B";
+type CompanyCardProps = {
+  company: CompanyPublic;
+  onPress?: () => void;
+};
 
-export function CompanyCard({ c, onPress }: { c: Company; onPress?: () => void }) {
-  const cats = (c.categories ?? []).slice(0, 3).join(" • ");
-  const price = c.minPrice != null ? `vanaf €${c.minPrice}` : "";
-
+export default function CompanyCard({ company, onPress }: CompanyCardProps) {
   return (
-    <Pressable style={styles.companyCard} onPress={onPress}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.companyName} numberOfLines={1}>
-          {c.name || "Salon"}
-        </Text>
-
-        <Text style={styles.companyMeta} numberOfLines={1}>
-          {c.city}
-          {price ? ` • ${price}` : ""}
-        </Text>
-
-        {cats ? (
-          <Text style={styles.companyCats} numberOfLines={1}>
-            {cats}
+    <Pressable onPress={onPress} style={styles.card}>
+      <View style={styles.topRow}>
+        <View style={styles.titleWrap}>
+          <View style={styles.logoWrap}>
+            {company.logoUrl ? (
+              <Image source={{ uri: company.logoUrl }} style={styles.logoImg} contentFit="cover" />
+            ) : (
+              <Ionicons name="business" size={14} color={COLORS.primary} />
+            )}
+          </View>
+          <Text style={styles.name} numberOfLines={1}>
+            {company.name}
           </Text>
-        ) : null}
+          {company.badge ? (
+            <View style={styles.badgeMini}>
+              <Ionicons name="shield-checkmark" size={11} color="#fff" />
+              <Text style={styles.badgeMiniText}>{company.badge}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.badge}>
+          <Ionicons name="location-outline" size={12} color={COLORS.muted} />
+          <Text style={styles.city} numberOfLines={1}>
+            {company.city}
+          </Text>
+        </View>
       </View>
 
-      <View style={styles.right}>
-        <View style={styles.cta}>
-          <Text style={styles.ctaText}>Bekijk</Text>
+      <Text style={styles.bio} numberOfLines={2}>
+        {company.bio || "Geen bio toegevoegd."}
+      </Text>
+
+      <View style={styles.metaRow}>
+        <View style={styles.metaChip}>
+          <Ionicons name="cash-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.meta}>Vanaf EUR {company.minPrice || 0}</Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color={MUTED} />
+        <View style={styles.metaChip}>
+          <Ionicons name="pricetags-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.meta} numberOfLines={1}>
+            {company.categories.join(" • ") || "Overig"}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.button}>
+        <Text style={styles.buttonText}>Bekijk</Text>
+        <Ionicons name="chevron-forward" size={14} color="#fff" />
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  companyCard: {
-    backgroundColor: CARD,
-    borderRadius: 18,
-    padding: 14,
+  card: {
+    backgroundColor: COLORS.card,
     borderWidth: 1,
-    borderColor: BORDER,
-    marginBottom: 10,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    padding: 12,
+    gap: 7,
+  },
+  topRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  titleWrap: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 6,
   },
-  companyName: { fontSize: 16, fontWeight: "900", color: TEXT },
-  companyMeta: { marginTop: 2, fontWeight: "800", color: MUTED },
-  companyCats: { marginTop: 6, fontWeight: "800", color: "#7B1247" },
-
-  right: { flexDirection: "row", alignItems: "center", gap: 10 },
-
-  cta: {
-    backgroundColor: PINK,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 14,
+  logoWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
-  ctaText: { color: "white", fontWeight: "900" },
+  logoImg: {
+    width: "100%",
+    height: "100%",
+  },
+  name: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.text,
+  },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    maxWidth: 120,
+    gap: 4,
+  },
+  badgeMini: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: COLORS.primary,
+    borderRadius: 999,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeMiniText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  city: {
+    color: COLORS.muted,
+    fontWeight: "700",
+    fontSize: 11,
+  },
+  bio: {
+    color: COLORS.muted,
+    lineHeight: 18,
+    fontSize: 13,
+  },
+  metaRow: {
+    gap: 6,
+  },
+  metaChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  meta: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  button: {
+    marginTop: 2,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  buttonText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 12,
+  },
 });

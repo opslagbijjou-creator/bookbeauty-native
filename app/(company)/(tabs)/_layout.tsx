@@ -1,39 +1,36 @@
-// FILE: app/(company)/(tabs)/_layout.tsx
 import React from "react";
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import FloatingCenterTabBar, { TabVisualConfig } from "../../../components/FloatingCenterTabBar";
 
-const PINK = "#E45AA6";
+const companyTabConfig: TabVisualConfig = {
+  home: { label: "Profiel", activeIcon: "business", inactiveIcon: "business-outline" },
+  services: { label: "Diensten", activeIcon: "cut", inactiveIcon: "cut-outline" },
+  feed: { label: "Feed", activeIcon: "play", inactiveIcon: "play-outline" },
+  studio: { label: "Upload", activeIcon: "add-circle", inactiveIcon: "add-circle-outline" },
+  bookings: { label: "Agenda", activeIcon: "calendar", inactiveIcon: "calendar-outline" },
+};
 
 export default function CompanyTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: PINK,
       }}
+      tabBar={(props) => (
+        <FloatingCenterTabBar
+          {...props}
+          centerRouteName="feed"
+          leftRouteNames={["home", "services"]}
+          rightRouteNames={["studio", "bookings"]}
+          config={companyTabConfig}
+        />
+      )}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Home",
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="services"
-        options={{
-          title: "Diensten",
-          tabBarIcon: ({ color, size }) => <Ionicons name="pricetags" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profiel",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" color={color} size={size} />,
-        }}
-      />
+      <Tabs.Screen name="home" options={{ title: "Profiel" }} />
+      <Tabs.Screen name="services" options={{ title: "Diensten" }} />
+      <Tabs.Screen name="feed" options={{ title: "Feed" }} />
+      <Tabs.Screen name="studio" options={{ title: "Upload" }} />
+      <Tabs.Screen name="bookings" options={{ title: "Agenda" }} />
     </Tabs>
   );
 }

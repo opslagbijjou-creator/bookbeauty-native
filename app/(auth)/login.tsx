@@ -1,265 +1,211 @@
-// FILE: app/(auth)/login.tsx
-
 import React, { useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  Image,
-} from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../../lib/firebase";
-import SignupModal from "../../components/SignupModal";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../lib/firebase"; 
+import { SafeAreaView } from "react-native-safe-area-context";
+import { getUserRole, login } from "../../lib/authRepo";
+import { COLORS } from "../../lib/ui";
 
 export default function LoginScreen() {
   const router = useRouter();
-
-  
-
   const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [signupOpen, setSignupOpen] = useState(false);
 
-  const canLogin = useMemo(
-    () => email.trim().length > 3 && pass.length >= 6,
-    [email, pass]
-  );
+  const canSubmit = useMemo(() => email.trim().length > 3 && password.length >= 6, [email, password]);
 
-async function onLogin() {
-  if (!canLogin) return;
+  async function onLogin() {
+    if (!canSubmit || loading) return;
+    setLoading(true);
+    try {
+      const user = await login(email, password);
+      const role = await getUserRole(user.uid);
 
-  setLoading(true);
-
-  try {
-    // 1. Login
-    const cred = await signInWithEmailAndPassword(
-      auth,
-      email.trim(),
-      pass
-    );
-
-    const uid = cred.user.uid;
-
-    // 2. User document ophalen
-    const snap = await getDoc(doc(db, "users", uid));
-
-    if (!snap.exists()) {
-      Alert.alert("Fout", "Geen gebruikersprofiel gevonden.");
-      return;
+      if (role === "company") {
+        router.replace("/(company)/(tabs)/home" as never);
+      } else if (role === "admin") {
+        router.replace("/(admin)/(tabs)" as never);
+      } else {
+        router.replace("/(customer)/(tabs)" as never);
+      }
+    } catch (error: any) {
+      Alert.alert("Login mislukt", error?.message ?? "Controleer je gegevens.");
+    } finally {
+      setLoading(false);
     }
-
-    const data = snap.data();
-    const role = data.role;
-
-    // 3. Redirect op basis van role
-    if (role === "company") {
-      router.replace("/(company)/(tabs)" as any);
-      return;
-    }
-
-
-
-    // Default = customer
-    router.replace("/(customer)/(tabs)" as any);
-  } catch (e: any) {
-    Alert.alert("Login fout", e?.message ?? "Er ging iets mis.");
-  } finally {
-    setLoading(false);
-  }
-}
-
-  function onPickRole(role: "customer" | "company") {
-    setSignupOpen(false);
-    router.push(
-      {
-        pathname: "/(auth)/signup",
-        params: { role, email: email.trim() },
-      } as any
-    );
   }
 
-  function onGoogle() {
-    Alert.alert("Google login", "UI staat. Google sign-in voegen we zo toe.");
-  }
-
-  function onApple() {
-    Alert.alert("Apple login", "UI staat. Apple sign-in voegen we zo toe.");
+  function onSocialLogin(provider: "apple" | "google") {
+    const label = provider === "apple" ? "Apple" : "Google";
+    Alert.alert("Binnenkort", `Inloggen met ${label} komt in de volgende update.`);
   }
 
   return (
-    <LinearGradient colors={["#FBE7F0", "#F7D6E6", "#F2C7DB"]} style={{ flex: 1 }}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <View style={styles.wrap}>
+    <SafeAreaView style={styles.screen} edges={["top"]}>
+      <View style={styles.card}>
+        <View style={styles.logoWrap}>
+          <Image source={require("../../assets/logo/logo.png")} style={styles.logo} contentFit="contain" />
+        </View>
+        <Text style={styles.title}>BookBeauty</Text>
+        <Text style={styles.subtitle}>Log in op je account</Text>
 
-          {/* ✅ Logo boven (png) */}
-          <Image
-            source={require("../../assets/logo/logo.png")}
-            style={styles.logoImg}
-            resizeMode="contain"
-          />
+        <TextInput
+          value={email}
+          onChangeText={setEmail}
+          placeholder="E-mail"
+          placeholderTextColor={COLORS.placeholder}
+          autoCapitalize="none"
+          keyboardType="email-address"
+          style={styles.input}
+        />
+        <TextInput
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Wachtwoord"
+          placeholderTextColor={COLORS.placeholder}
+          secureTextEntry
+          style={styles.input}
+        />
 
-          <Text style={styles.tag}>Log in en ga verder met je routine ✨</Text>
+        <Pressable onPress={onLogin} style={[styles.btn, (!canSubmit || loading) && styles.disabled]}>
+          <Text style={styles.btnText}>{loading ? "Bezig..." : "Inloggen"}</Text>
+        </Pressable>
 
-          {/* ✅ panel iets hoger */}
-          <View style={styles.card}>
-            <View style={styles.fieldRow}>
-              <Text style={styles.icon}>✉️</Text>
-              <TextInput
-                placeholder="E-mail"
-                placeholderTextColor="#000"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
-                style={styles.input}
-              />
-            </View>
+        <Pressable onPress={() => router.push("/(auth)/register" as never)}>
+          <Text style={styles.link}>Nog geen account? Registreren</Text>
+        </Pressable>
 
-            <View style={styles.sep} />
-
-            <View style={styles.fieldRow}>
-              <Text style={styles.icon}>🔒</Text>
-              <TextInput
-                placeholder="Wachtwoord"
-                placeholderTextColor="#000"
-                secureTextEntry
-                value={pass}
-                onChangeText={setPass}
-                style={styles.input}
-              />
-            </View>
-
-            <TouchableOpacity
-              onPress={() => Alert.alert("Wachtwoord", "Later: reset flow")}
-              style={{ alignSelf: "flex-end", marginTop: 10 }}
-            >
-              <Text style={styles.link}>Wachtwoord vergeten?</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={onLogin}
-              disabled={!canLogin || loading}
-              style={[styles.primaryBtn, (!canLogin || loading) && { opacity: 0.5 }]}
-            >
-              <Text style={styles.primaryBtnText}>{loading ? "Bezig..." : "Inloggen"}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setSignupOpen(true)} style={styles.secondaryBtn}>
-              <Text style={styles.secondaryBtnText}>Account aanmaken</Text>
-            </TouchableOpacity>
-
-            <View style={styles.orRow}>
-              <View style={styles.orLine} />
-              <Text style={styles.orText}>of</Text>
-              <View style={styles.orLine} />
-            </View>
-
-            <TouchableOpacity onPress={onApple} style={styles.socialBtn}>
-              <Text style={styles.socialIcon}></Text>
-              <Text style={styles.socialText}>Doorgaan met Apple</Text>
-              <Text style={styles.chev}>›</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={onGoogle} style={styles.socialBtn}>
-              <Text style={styles.socialIcon}>G</Text>
-              <Text style={styles.socialText}>Doorgaan met Google</Text>
-              <Text style={styles.chev}>›</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.dividerRow}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>of ga verder met</Text>
+          <View style={styles.dividerLine} />
         </View>
 
-        <SignupModal
-          visible={signupOpen}
-          onClose={() => setSignupOpen(false)}
-          onPickRole={onPickRole}
-          presetEmail={email}
-        />
-      </KeyboardAvoidingView>
-    </LinearGradient>
+        <View style={styles.socialRow}>
+          <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("apple")}>
+            <Ionicons name="logo-apple" size={16} color={COLORS.text} />
+            <Text style={styles.socialBtnText}>Apple</Text>
+          </Pressable>
+          <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("google")}>
+            <Ionicons name="logo-google" size={16} color={COLORS.text} />
+            <Text style={styles.socialBtnText}>Google</Text>
+          </Pressable>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
+  screen: {
     flex: 1,
+    backgroundColor: COLORS.bg,
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
-    paddingTop: 40,
   },
-
-  logoImg: {
-    width: 260,
-    height: 165,
-    marginBottom: 10,
-    alignSelf: "center",
-  },
-
-  tag: { marginTop: 6, marginBottom: 14, color: "#444", fontWeight: "700" },
-
   card: {
     width: "100%",
     maxWidth: 420,
-    backgroundColor: "rgba(255,255,255,0.72)",
-    borderRadius: 26,
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     padding: 18,
+    gap: 10,
+  },
+  logoWrap: {
+    alignSelf: "center",
+    width: 88,
+    height: 88,
+    borderRadius: 22,
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: "#F0D6E2",
-  },
-
-  fieldRow: { flexDirection: "row", alignItems: "center" },
-  icon: { width: 28, textAlign: "center", fontSize: 14, opacity: 0.7 },
-  input: { flex: 1, height: 44, color: "#111", fontWeight: "800" },
-  sep: { height: 1, backgroundColor: "rgba(0,0,0,0.08)" },
-
-  link: { color: "#6C2A4A", fontWeight: "900" },
-
-  primaryBtn: {
-    marginTop: 14,
-    paddingVertical: 14,
-    borderRadius: 16,
-    backgroundColor: "#E97AAE",
+    borderColor: COLORS.border,
     alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+    overflow: "hidden",
   },
-  primaryBtnText: { color: "white", fontWeight: "900", fontSize: 16 },
-
-  secondaryBtn: {
-    marginTop: 10,
+  logo: {
+    width: 72,
+    height: 72,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: COLORS.text,
+    textAlign: "center",
+  },
+  subtitle: {
+    color: COLORS.muted,
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  input: {
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: COLORS.text,
+    fontWeight: "600",
+  },
+  btn: {
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
-    borderRadius: 16,
-    backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.18)",
+    borderRadius: 12,
     alignItems: "center",
   },
-  secondaryBtnText: { color: "#2B2B2B", fontWeight: "900" },
-
-  orRow: { flexDirection: "row", alignItems: "center", gap: 10, marginVertical: 14 },
-  orLine: { flex: 1, height: 1, backgroundColor: "rgba(0,0,0,0.10)" },
-  orText: { color: "#555", fontWeight: "900" },
-
-  socialBtn: {
+  btnText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  link: {
+    marginTop: 8,
+    textAlign: "center",
+    color: COLORS.primary,
+    fontWeight: "600",
+  },
+  dividerRow: {
+    marginTop: 2,
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    backgroundColor: "rgba(255,255,255,0.85)",
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    marginBottom: 10,
+    gap: 8,
   },
-  socialIcon: { width: 28, fontWeight: "900", fontSize: 16, textAlign: "center" },
-  socialText: { flex: 1, fontWeight: "900", color: "#222" },
-  chev: { fontSize: 22, fontWeight: "900", opacity: 0.4 },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  dividerText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  socialRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  socialBtn: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  socialBtnText: {
+    color: COLORS.text,
+    fontWeight: "700",
+  },
 });

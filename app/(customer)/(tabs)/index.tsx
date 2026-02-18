@@ -1,104 +1,63 @@
-// FILE: app/(customer)/(tabs)/index.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Modal,
-  SafeAreaView,
-  Animated,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-} from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import BottomSheet from "../../../components/BottomSheet";
+import CategoryChips from "../../../components/CategoryChips";
+import CompanyCard from "../../../components/CompanyCard";
+import SearchBar from "../../../components/SearchBar";
+import { CompanyPublic, fetchCompanies } from "../../../lib/companyRepo";
+import { Category, CITY_OPTIONS, COLORS, DISCOVER_CATEGORY_FILTERS } from "../../../lib/ui";
 
-import { Company, CompanyCategory, fetchCompanies } from "../../../lib/companyRepo";
-import { CompanyCard } from "../../../components/CompanyCard";
+const discoverIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Alles: "apps-outline",
+  Kapper: "cut-outline",
+  Nagels: "flower-outline",
+  Wimpers: "eye-outline",
+  Wenkbrauwen: "sparkles-outline",
+  "Make-up": "color-palette-outline",
+  Massage: "body-outline",
+  Spa: "water-outline",
+  Barber: "man-outline",
+  Overig: "grid-outline",
+};
 
-const BG = "#F7E6EE";
-const CARD = "#FFFFFF";
-const BORDER = "#E9D3DF";
-const PINK = "#E45AA6";
-const TEXT = "#1E1E1E";
-const MUTED = "#6B6B6B";
+const cityIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Alle: "earth-outline",
+  Amsterdam: "business-outline",
+  Rotterdam: "business-outline",
+  "Den Haag": "business-outline",
+  Utrecht: "business-outline",
+};
 
-const CATEGORIES: Array<{
-  label: string;
-  value?: CompanyCategory;
-  icon: keyof typeof Ionicons.glyphMap;
-}> = [
-  { label: "Alles", value: undefined, icon: "sparkles" },
-  { label: "Kapper", value: "Kapper", icon: "cut" },
-  { label: "Nagels", value: "Nagels", icon: "hand-left" },
-  { label: "Wimpers", value: "Wimpers", icon: "eye" },
-  { label: "Wenkbrauwen", value: "Wenkbrauwen", icon: "color-filter" },
-  { label: "Make-up", value: "Make-up", icon: "brush" },
-  { label: "Massage", value: "Massage", icon: "body" },
-  { label: "Spa", value: "Spa", icon: "water" },
-  { label: "Barber", value: "Barber", icon: "man" },
-];
-
-const CITIES = ["Alle", "Amsterdam", "Rotterdam", "Den Haag", "Utrecht"];
-const PRICES: Array<{ label: string; value: number | null }> = [
-  { label: "Geen", value: null },
-  { label: "€25", value: 25 },
-  { label: "€50", value: 50 },
-  { label: "€75", value: 75 },
-  { label: "€100", value: 100 },
-];
-
-function norm(s?: string) {
-  return (s ?? "").trim().toLowerCase();
-}
-
-export default function CustomerHome() {
-  const router = useRouter(); // ✅ HOOK BINNEN COMPONENT
-
+export default function CustomerDiscoverScreen() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState<CompanyCategory | undefined>(undefined);
+  const [category, setCategory] = useState<string>("Alles");
   const [city, setCity] = useState<string>("Alle");
-  const [maxPrice, setMaxPrice] = useState<number | null>(null);
-  const [filterOpen, setFilterOpen] = useState(false);
-
   const [loading, setLoading] = useState(true);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const [headerH, setHeaderH] = useState(0);
-  const headerY = useRef(new Animated.Value(0)).current;
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const lastY = useRef(0);
-  const lastAction = useRef<"show" | "hide">("show");
+  const [companies, setCompanies] = useState<CompanyPublic[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const params = useMemo(
     () => ({
       query,
-      city: city === "Alle" ? undefined : city,
-      category: activeCategory,
-      maxPrice,
-      take: 200,
+      city,
+      category: category === "Alles" ? undefined : (category as Category),
+      take: 60,
     }),
-    [query, city, activeCategory, maxPrice]
+    [query, city, category]
   );
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    setError(null);
 
     fetchCompanies(params)
-      .then((data) => {
+      .then((res) => {
         if (!mounted) return;
-        setCompanies(data);
-      })
-      .catch((e: any) => {
-        if (!mounted) return;
-        setError(e?.message ?? "Er ging iets mis met laden.");
+        setCompanies(res);
       })
       .finally(() => {
         if (!mounted) return;
@@ -110,257 +69,144 @@ export default function CustomerHome() {
     };
   }, [params]);
 
-  const animateHeader = (mode: "show" | "hide") => {
-    if (!headerH) return;
-    if (lastAction.current === mode) return;
-    lastAction.current = mode;
-
-    Animated.timing(headerY, {
-      toValue: mode === "hide" ? -headerH : 0,
-      duration: 180,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const onScroll = Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-    useNativeDriver: true,
-    listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const y = e.nativeEvent.contentOffset.y;
-
-      if (y <= 0) {
-        animateHeader("show");
-        lastY.current = y;
-        return;
-      }
-
-      const diff = y - lastY.current;
-      if (diff > 8) animateHeader("hide");
-      if (diff < -8) animateHeader("show");
-      lastY.current = y;
-    },
-  });
-
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.screen}>
-        <Animated.View
-          onLayout={(e) => setHeaderH(Math.ceil(e.nativeEvent.layout.height))}
-          style={[styles.header, { transform: [{ translateY: headerY }] }]}
-        >
-          <View style={styles.topRow}>
-            <View style={styles.searchWrap}>
-              <Ionicons name="search" size={18} color={MUTED} />
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Zoek (kapper, nagels, salon...)"
-                placeholderTextColor="#8A8A8A"
-                style={styles.search}
-              />
-            </View>
-
-            <Pressable onPress={() => setFilterOpen(true)} style={styles.filterBtnTop}>
-              <Text style={styles.filterBtnTopText}>Filter</Text>
-            </Pressable>
-          </View>
-
-          <Text style={styles.h1}>Ontdek salons bij jou in de buurt</Text>
-
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={CATEGORIES}
-            keyExtractor={(item) => item.label}
-            contentContainerStyle={styles.catRow}
-            renderItem={({ item }) => {
-              const active =
-                item.value === activeCategory ||
-                (item.label === "Alles" && activeCategory === undefined);
-
-              return (
-                <Pressable
-                  onPress={() => setActiveCategory(item.value)}
-                  style={[styles.catChipSq, active && styles.catChipSqActive]}
-                >
-                  <Ionicons name={item.icon} size={18} color={active ? "white" : PINK} />
-                  <Text style={[styles.catLabel, active && styles.catLabelActive]} numberOfLines={1}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              );
-            }}
-          />
-
-          <View style={styles.filterOnlyRow}>
-            <Pressable onPress={() => setFilterOpen(true)} style={styles.filterMainBtn}>
-              <Ionicons name="options" size={18} color="white" />
-              <Text style={styles.filterMainText}>Filter</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => {
-                setCity("Alle");
-                setMaxPrice(null);
-                setActiveCategory(undefined);
-                setQuery("");
-                animateHeader("show");
-              }}
-              style={styles.resetBtn}
-            >
-              <Ionicons name="refresh" size={16} color={PINK} />
-              <Text style={styles.resetText}>Reset</Text>
-            </Pressable>
-          </View>
-
-          {error ? (
-            <View style={styles.stateBox}>
-              <Text style={styles.errorTitle}>Oeps</Text>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-
-          {loading ? (
-            <View style={styles.stateBox}>
-              <ActivityIndicator />
-              <Text style={styles.muted}>Salons laden…</Text>
-            </View>
-          ) : null}
-        </Animated.View>
-
-        <Animated.FlatList
-          style={styles.list}
-          data={loading ? [] : companies}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <CompanyCard
-              c={item}
-              onPress={() => router.push(`/(customer)/company/${item.id}` as any)}
-            />
-          )}
-          contentContainerStyle={[styles.listContent, { paddingTop: (headerH || 0) + 12 }]}
-          ListEmptyComponent={
-            !loading && !error ? (
-              <View style={styles.emptyWrap}>
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>Geen salons gevonden.</Text>
-                </View>
-              </View>
-            ) : null
-          }
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-          bounces
-          alwaysBounceVertical
-        />
-
-        <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
-          <Pressable style={styles.overlay} onPress={() => setFilterOpen(false)} />
-          <View style={styles.sheet}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>Filters</Text>
-              <Pressable onPress={() => setFilterOpen(false)} style={styles.closeBtn}>
-                <Text style={styles.closeText}>Sluiten</Text>
-              </Pressable>
-            </View>
-
-            <Text style={styles.sheetLabel}>Stad</Text>
-            <View style={styles.sheetRow}>
-              {CITIES.map((c) => {
-                const active = c === city;
-                return (
-                  <Pressable
-                    key={c}
-                    onPress={() => setCity(c)}
-                    style={[styles.sheetChip, active && styles.sheetChipActive]}
-                  >
-                    <Text style={[styles.sheetChipText, active && styles.sheetChipTextActive]}>{c}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={[styles.sheetLabel, { marginTop: 14 }]}>Max prijs</Text>
-            <View style={styles.sheetRow}>
-              {PRICES.map((p) => {
-                const active = p.value === maxPrice;
-                return (
-                  <Pressable
-                    key={p.label}
-                    onPress={() => setMaxPrice(p.value)}
-                    style={[styles.sheetChip, active && styles.sheetChipActive]}
-                  >
-                    <Text style={[styles.sheetChipText, active && styles.sheetChipTextActive]}>{p.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <View style={styles.sheetFooter}>
-              <Pressable
-                onPress={() => {
-                  setCity("Alle");
-                  setMaxPrice(null);
-                }}
-                style={styles.sheetGhost}
-              >
-                <Text style={styles.sheetGhostText}>Reset</Text>
-              </Pressable>
-
-              <Pressable onPress={() => setFilterOpen(false)} style={styles.sheetApply}>
-                <Text style={styles.sheetApplyText}>Toepassen</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
+    <SafeAreaView style={styles.screen} edges={["top"]}>
+      <View style={styles.titleRow}>
+        <Ionicons name="compass-outline" size={20} color={COLORS.primary} />
+        <Text style={styles.title}>Ontdek salons</Text>
       </View>
+
+      <SearchBar value={query} onChangeText={setQuery} placeholder="Zoek op naam, stad of categorie" />
+
+      <CategoryChips
+        items={[...DISCOVER_CATEGORY_FILTERS]}
+        active={category}
+        onChange={setCategory}
+        iconMap={discoverIcons}
+      />
+
+      <View style={styles.row}>
+        <View style={styles.cityWrap}>
+          <Ionicons name="location-outline" size={14} color={COLORS.muted} />
+          <Text style={styles.cityText}>{city}</Text>
+        </View>
+        <Pressable onPress={() => setFilterOpen(true)} style={styles.filterBtn}>
+          <Ionicons name="options-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.filterText}>Filters</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.listWrap}>
+        {loading ? (
+          <View style={styles.stateWrap}>
+            <ActivityIndicator color={COLORS.primary} />
+          </View>
+        ) : (
+          <FlatList
+            data={companies}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.list}
+            renderItem={({ item }) => (
+              <CompanyCard
+                company={item}
+                onPress={() => router.push(`/(customer)/company/${item.id}` as never)}
+              />
+            )}
+            ListEmptyComponent={
+              <View style={styles.stateWrap}>
+                <Text style={styles.empty}>Geen salons gevonden.</Text>
+              </View>
+            }
+          />
+        )}
+      </View>
+
+      <BottomSheet visible={filterOpen} onClose={() => setFilterOpen(false)}>
+        <View style={styles.sheetTitleRow}>
+          <Ionicons name="location-outline" size={16} color={COLORS.primary} />
+          <Text style={styles.sheetTitle}>Kies stad</Text>
+        </View>
+        <CategoryChips items={[...CITY_OPTIONS]} active={city} onChange={setCity} iconMap={cityIcons} />
+      </BottomSheet>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-  screen: { flex: 1, backgroundColor: BG },
-  header: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 10, backgroundColor: BG, zIndex: 10 },
-  list: { flex: 1 },
-  listContent: { paddingHorizontal: 16, paddingBottom: 24, flexGrow: 1 },
-  topRow: { flexDirection: "row", gap: 10, alignItems: "center" },
-  searchWrap: { flex: 1, backgroundColor: CARD, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: BORDER, flexDirection: "row", alignItems: "center", gap: 8 },
-  search: { flex: 1, fontSize: 16, color: TEXT, fontWeight: "800" },
-  filterBtnTop: { backgroundColor: PINK, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12 },
-  filterBtnTopText: { color: "white", fontWeight: "900" },
-  h1: { marginTop: 12, fontSize: 18, fontWeight: "900", color: TEXT },
-  catRow: { paddingVertical: 12, gap: 10 },
-  catChipSq: { width: 88, height: 56, borderRadius: 14, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, alignItems: "center", justifyContent: "center", gap: 4, marginRight: 10 },
-  catChipSqActive: { backgroundColor: PINK, borderColor: PINK },
-  catLabel: { fontWeight: "900", color: TEXT, fontSize: 12 },
-  catLabelActive: { color: "white" },
-  filterOnlyRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
-  filterMainBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: PINK, borderRadius: 14, paddingHorizontal: 12, height: 42 },
-  filterMainText: { color: "white", fontWeight: "900" },
-  resetBtn: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: PINK, borderRadius: 14, paddingHorizontal: 10, height: 42, backgroundColor: "transparent" },
-  resetText: { fontWeight: "900", color: PINK, fontSize: 12 },
-  stateBox: { backgroundColor: CARD, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: BORDER, marginTop: 6, alignItems: "center", gap: 6 },
-  muted: { color: MUTED, fontWeight: "800" },
-  errorTitle: { fontWeight: "900", color: "#8B0F3D", fontSize: 16 },
-  errorText: { color: "#8B0F3D", fontWeight: "800", textAlign: "center" },
-  emptyWrap: { minHeight: 900, paddingTop: 20 },
-  emptyBox: { backgroundColor: CARD, borderRadius: 16, padding: 14, borderWidth: 1, borderColor: BORDER, alignItems: "center", gap: 6 },
-  emptyText: { color: MUTED, fontWeight: "900" },
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)" },
-  sheet: { backgroundColor: BG, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 16, borderWidth: 1, borderColor: BORDER },
-  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sheetTitle: { fontSize: 18, fontWeight: "900", color: TEXT },
-  closeBtn: { paddingVertical: 8, paddingHorizontal: 10 },
-  closeText: { fontWeight: "900", color: PINK },
-  sheetLabel: { marginTop: 10, marginBottom: 8, fontWeight: "900", color: TEXT },
-  sheetRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  sheetChip: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 999, paddingVertical: 10, paddingHorizontal: 14 },
-  sheetChipActive: { backgroundColor: PINK, borderColor: PINK },
-  sheetChipText: { fontWeight: "900", color: TEXT },
-  sheetChipTextActive: { color: "white" },
-  sheetFooter: { flexDirection: "row", gap: 10, marginTop: 16 },
-  sheetGhost: { flex: 1, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 14, paddingVertical: 12, alignItems: "center" },
-  sheetGhostText: { fontWeight: "900", color: TEXT },
-  sheetApply: { flex: 1, backgroundColor: PINK, borderRadius: 14, paddingVertical: 12, alignItems: "center" },
-  sheetApplyText: { fontWeight: "900", color: "white" },
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    gap: 8,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: COLORS.text,
+    marginBottom: 2,
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  cityWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  cityText: {
+    color: COLORS.muted,
+    fontWeight: "700",
+  },
+  filterBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: COLORS.primarySoft,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  filterText: {
+    color: COLORS.primary,
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  list: {
+    gap: 10,
+    paddingBottom: 24,
+  },
+  listWrap: {
+    flex: 1,
+  },
+  stateWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingTop: 24,
+  },
+  empty: {
+    color: COLORS.muted,
+    fontWeight: "600",
+  },
+  sheetTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  sheetTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
 });

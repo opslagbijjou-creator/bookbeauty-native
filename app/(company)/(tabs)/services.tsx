@@ -1,320 +1,252 @@
-// FILE: app/(company)/(tabs)/services.tsx
-import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Pressable,
-  FlatList,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-} from "react-native";
-import { auth } from "../../../lib/firebase";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import AddServiceModal from "../../../components/AddServiceModal";
+import CategoryChips from "../../../components/CategoryChips";
+import ServicesList from "../../../components/ServicesList";
 import {
   CompanyService,
-  ServiceCategory,
-  addMyService,
   deleteMyService,
   fetchMyServices,
   updateMyService,
 } from "../../../lib/serviceRepo";
+import { auth } from "../../../lib/firebase";
+import { CATEGORIES, COLORS } from "../../../lib/ui";
 
-const BG = "#F7E6EE";
-const CARD = "#FFFFFF";
-const BORDER = "#E9D3DF";
-const PINK = "#E45AA6";
-const TEXT = "#1E1E1E";
-const MUTED = "#6B6B6B";
+const FILTER_CATEGORIES = ["Alles", ...CATEGORIES] as const;
 
-const CAT: ServiceCategory[] = [
-  "Kapper","Nagels","Wimpers","Wenkbrauwen","Make-up","Massage","Spa","Barber","Overig",
-];
+const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Alles: "apps-outline",
+  Kapper: "cut-outline",
+  Nagels: "flower-outline",
+  Wimpers: "eye-outline",
+  Wenkbrauwen: "sparkles-outline",
+  "Make-up": "color-palette-outline",
+  Massage: "body-outline",
+  Spa: "water-outline",
+  Barber: "man-outline",
+  Overig: "grid-outline",
+};
 
-export default function CompanyServices() {
-  const companyId = auth.currentUser?.uid;
+export default function CompanyServicesScreen() {
+  const uid = auth.currentUser?.uid ?? "";
 
-  const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<CompanyService[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<(typeof FILTER_CATEGORIES)[number]>("Alles");
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingService, setEditingService] = useState<CompanyService | null>(null);
+  const [busyActionId, setBusyActionId] = useState<string | null>(null);
 
-  const [category, setCategory] = useState<ServiceCategory>("Kapper");
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [price, setPrice] = useState("30");
-  const [durationMin, setDurationMin] = useState("30");
+  const filteredItems = useMemo(() => {
+    if (activeFilter === "Alles") return items;
+    return items.filter((item) => item.category === activeFilter);
+  }, [items, activeFilter]);
 
-  async function load() {
-    if (!companyId) return;
+  const activeCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
+
+  const load = useCallback(async () => {
+    if (!uid) return;
+
     setLoading(true);
     try {
-      const data = await fetchMyServices(companyId);
+      const data = await fetchMyServices(uid);
       setItems(data);
-    } catch (e: any) {
-      Alert.alert("Fout", e?.message ?? "Kon services niet laden");
     } finally {
       setLoading(false);
     }
-  }
+  }, [uid]);
 
   useEffect(() => {
-    load();
-  }, [companyId]);
+    load().catch(() => null);
+  }, [load]);
 
-  async function onAdd() {
-    if (!companyId) return;
+  function openCreateModal() {
+    setEditingService(null);
+    setModalVisible(true);
+  }
 
-    const n = name.trim();
-    if (!n) return Alert.alert("Naam ontbreekt", "Vul service naam in.");
+  function openEditModal(service: CompanyService) {
+    setEditingService(service);
+    setModalVisible(true);
+  }
 
-    const p = Number(price);
-    const d = Number(durationMin);
-    if (!Number.isFinite(p) || p <= 0) return Alert.alert("Prijs fout", "Prijs moet > 0 zijn.");
-    if (!Number.isFinite(d) || d <= 0) return Alert.alert("Duur fout", "Duur moet > 0 zijn.");
+  async function onToggleActive(service: CompanyService, next: boolean) {
+    if (!uid || busyActionId) return;
 
+    setBusyActionId(service.id);
     try {
-      await addMyService(companyId, {
-        category,
-        name: n,
-        description: description.trim() || undefined,
-        price: p,
-        durationMin: d,
-        isActive: true,
-      });
-
-      setName("");
-      setDescription("");
-      setPrice("30");
-      setDurationMin("30");
-
+      await updateMyService(uid, service.id, { isActive: next });
       await load();
-    } catch (e: any) {
-      Alert.alert("Fout", e?.message ?? "Kon service niet toevoegen");
+    } catch (error: any) {
+      Alert.alert("Fout", error?.message ?? "Kon dienststatus niet aanpassen.");
+    } finally {
+      setBusyActionId(null);
     }
   }
 
-  async function toggleActive(s: CompanyService) {
-    if (!companyId) return;
-    try {
-      await updateMyService(companyId, s.id, { isActive: !s.isActive });
-      await load();
-    } catch (e: any) {
-      Alert.alert("Fout", e?.message ?? "Kon niet updaten");
-    }
-  }
+  function onDelete(service: CompanyService) {
+    if (!uid || busyActionId) return;
 
-  async function onDelete(serviceId: string) {
-    if (!companyId) return;
-    Alert.alert("Verwijderen?", "Weet je het zeker?", [
-      { text: "Nee" },
+    Alert.alert("Dienst verwijderen", "Weet je zeker dat je deze dienst wilt verwijderen?", [
+      { text: "Annuleren", style: "cancel" },
       {
-        text: "Ja",
+        text: "Verwijderen",
         style: "destructive",
         onPress: async () => {
+          setBusyActionId(service.id);
           try {
-            await deleteMyService(companyId, serviceId);
+            await deleteMyService(uid, service.id);
+            if (editingService?.id === service.id) {
+              setEditingService(null);
+              setModalVisible(false);
+            }
             await load();
-          } catch (e: any) {
-            Alert.alert("Fout", e?.message ?? "Kon niet verwijderen");
+          } catch (error: any) {
+            Alert.alert("Fout", error?.message ?? "Kon dienst niet verwijderen.");
+          } finally {
+            setBusyActionId(null);
           }
         },
       },
     ]);
   }
 
-  if (!companyId) {
-    return (
-      <View style={styles.center}>
-        <Text>Niet ingelogd als company.</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.screen}>
-      <Text style={styles.h1}>Diensten</Text>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Categorie</Text>
-        <View style={styles.chips}>
-          {CAT.map((c) => {
-            const active = c === category;
-            return (
-              <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                style={[styles.chip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{c}</Text>
-              </Pressable>
-            );
-          })}
+    <SafeAreaView style={styles.screen} edges={["top"]}>
+      <View style={styles.headerRow}>
+        <View style={styles.titleRow}>
+          <Ionicons name="cut-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.title}>Diensten beheren</Text>
         </View>
+        <Text style={styles.subtitle}>
+          {items.length} diensten totaal • {activeCount} live
+        </Text>
+      </View>
 
-        <Text style={styles.label}>Naam</Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Bijv. Knippen + wassen"
-          placeholderTextColor="#9A9A9A"
-          style={styles.input}
+      <View style={styles.filterCard}>
+        <Text style={styles.filterTitle}>Categorieën</Text>
+        <CategoryChips
+          items={[...FILTER_CATEGORIES]}
+          active={activeFilter}
+          onChange={(value) => setActiveFilter(value as (typeof FILTER_CATEGORIES)[number])}
+          iconMap={categoryIcons}
         />
+      </View>
 
-        <Text style={styles.label}>Beschrijving</Text>
-        <TextInput
-          value={description}
-          onChangeText={setDescription}
-          placeholder="Bijv. inclusief stylen, kort haar…"
-          placeholderTextColor="#9A9A9A"
-          style={[styles.input, { height: 90 }]}
-          multiline
-        />
-
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Prijs (€)</Text>
-            <TextInput
-              value={price}
-              onChangeText={setPrice}
-              keyboardType="numeric"
-              style={styles.input}
-            />
+      <View style={styles.listWrap}>
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={COLORS.primary} />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Duur (min)</Text>
-            <TextInput
-              value={durationMin}
-              onChangeText={setDurationMin}
-              keyboardType="numeric"
-              style={styles.input}
-            />
-          </View>
-        </View>
+        ) : (
+          <ServicesList
+            items={filteredItems}
+            onEdit={openEditModal}
+            onDelete={onDelete}
+            onToggleActive={onToggleActive}
+            loading={loading || Boolean(busyActionId)}
+            emptyText={
+              activeFilter === "Alles"
+                ? "Nog geen diensten toegevoegd."
+                : `Nog geen diensten in ${activeFilter}.`
+            }
+          />
+        )}
+      </View>
 
-        <Pressable style={styles.btn} onPress={onAdd}>
-          <Text style={styles.btnText}>+ Dienst toevoegen</Text>
+      <View style={styles.fabWrap}>
+        <Pressable style={styles.fabBtn} onPress={openCreateModal}>
+          <Ionicons name="add-circle-outline" size={18} color="#fff" />
+          <Text style={styles.fabText}>Nieuwe dienst toevoegen</Text>
         </Pressable>
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator />
-        </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(x) => x.id}
-          contentContainerStyle={{ paddingBottom: 30 }}
-          renderItem={({ item }) => (
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle}>{item.name}</Text>
-                <Text style={styles.rowMeta}>
-                  {item.category ?? "Overig"} • €{item.price} • {item.durationMin} min •{" "}
-                  {item.isActive ? "Actief" : "Uit"}
-                </Text>
-                {item.description ? (
-                  <Text style={styles.rowDesc} numberOfLines={2}>
-                    {item.description}
-                  </Text>
-                ) : null}
-              </View>
-
-              <Pressable style={styles.smallBtn} onPress={() => toggleActive(item)}>
-                <Text style={styles.smallBtnText}>{item.isActive ? "Zet uit" : "Zet aan"}</Text>
-              </Pressable>
-
-              <Pressable
-                style={[styles.smallBtn, { backgroundColor: "#FFE8EE", borderColor: "#FFC3D2" }]}
-                onPress={() => onDelete(item.id)}
-              >
-                <Text style={[styles.smallBtnText, { color: "#B71C1C" }]}>Delete</Text>
-              </Pressable>
-            </View>
-          )}
-          ListEmptyComponent={
-            <View style={styles.center}>
-              <Text style={{ color: MUTED, fontWeight: "800" }}>Nog geen diensten.</Text>
-            </View>
-          }
-        />
-      )}
-    </View>
+      <AddServiceModal
+        visible={modalVisible}
+        companyId={uid}
+        initialService={editingService}
+        defaultCategory={activeFilter === "Alles" ? CATEGORIES[0] : activeFilter}
+        onClose={() => setModalVisible(false)}
+        onSaved={load}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 16, backgroundColor: BG },
-  h1: { fontSize: 22, fontWeight: "900", color: TEXT, marginBottom: 12 },
-
-  card: {
-    backgroundColor: CARD,
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: BORDER,
-    marginBottom: 12,
-  },
-
-  label: { fontWeight: "900", color: TEXT, marginBottom: 6, marginTop: 6 },
-
-  input: {
-    backgroundColor: "#F6F6F6",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.06)",
-    fontWeight: "800",
-    color: TEXT,
-    marginBottom: 8,
-  },
-
-  btn: {
-    backgroundColor: PINK,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center",
-    marginTop: 6,
-  },
-  btnText: { color: "white", fontWeight: "900" },
-
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 6 },
-  chip: {
-    backgroundColor: "white",
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 999,
-    paddingVertical: 10,
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
     paddingHorizontal: 14,
-  },
-  chipActive: { backgroundColor: PINK, borderColor: PINK },
-  chipText: { fontWeight: "900", color: TEXT },
-  chipTextActive: { color: "white" },
-
-  row: {
-    backgroundColor: CARD,
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: BORDER,
-    marginBottom: 10,
-    flexDirection: "row",
+    paddingTop: 6,
     gap: 10,
+  },
+  headerRow: {
+    gap: 2,
+  },
+  titleRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
-  rowTitle: { fontWeight: "900", fontSize: 16, color: TEXT },
-  rowMeta: { marginTop: 4, fontWeight: "800", color: MUTED },
-  rowDesc: { marginTop: 6, color: "#7B1247", fontWeight: "800" },
-
-  smallBtn: {
+  title: {
+    fontSize: 25,
+    fontWeight: "900",
+    color: COLORS.text,
+  },
+  subtitle: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  filterCard: {
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    backgroundColor: "#F2F2F2",
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    padding: 12,
+    gap: 8,
   },
-  smallBtnText: { fontWeight: "900", color: TEXT },
-
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  filterTitle: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  listWrap: {
+    flex: 1,
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fabWrap: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 14,
+  },
+  fabBtn: {
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
+  },
+  fabText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
 });

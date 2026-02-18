@@ -1,124 +1,140 @@
-// FILE: lib/companyRepo.ts
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
-  query as fsQuery,
-  where,
-  orderBy,
   limit,
-  QueryConstraint,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { hasActiveService } from "./serviceRepo";
+import type { Category } from "./ui";
 
-
-
-export type CompanyCategory =
-  | "Kapper"
-  | "Nagels"
-  | "Wimpers"
-  | "Wenkbrauwen"
-  | "Make-up"
-  | "Massage"
-  | "Spa"
-  | "Barber"
-  | "Overig";
-
-  import { doc, getDoc } from "firebase/firestore";
-
-export async function fetchCompanyById(companyId: string): Promise<Company> {
-  const snap = await getDoc(doc(db, "companies", companyId));
-  if (!snap.exists()) throw new Error("Company bestaat niet.");
-  
-  const data = snap.data() as any;
-  return {
-    id: snap.id,
-    name: String(data.name ?? data.naam ?? "Salon"),
-    city: String(data.city ?? ""),
-    categories: Array.isArray(data.categories) ? data.categories : ["Overig"],
-    minPrice: typeof data.minPrice === "number" ? data.minPrice : undefined,
-    isActive: data.isActive ?? true,
-  };
-}
-
-export type Company = {
+export type CompanyPublic = {
   id: string;
   name: string;
   city: string;
-  categories: CompanyCategory[];
-  minPrice?: number;
-  isActive?: boolean;
-  // optioneel voor later
-  coverImageUrl?: string;
-  logoUrl?: string;
+  categories: string[];
+  minPrice: number;
+  isActive: boolean;
   bio?: string;
+  logoUrl?: string;
+  coverImageUrl?: string;
   ratingAvg?: number;
   ratingCount?: number;
+  badge?: string;
 };
 
-export type CompanySearchParams = {
+export type FetchCompaniesParams = {
   query?: string;
-  city?: string; // undefined = alle
-  category?: CompanyCategory; // undefined = alles
-  maxPrice?: number | null;
+  category?: Category;
+  city?: string;
   take?: number;
 };
 
-function norm(s?: string) {
-  return (s ?? "").trim().toLowerCase();
+function toCompanyPublic(id: string, data: Record<string, unknown>): CompanyPublic {
+  return {
+    id,
+    name: String(data.name ?? "Onbekende salon"),
+    city: String(data.city ?? ""),
+    categories: Array.isArray(data.categories) ? (data.categories as string[]) : [],
+    minPrice: Number(data.minPrice ?? 0),
+    isActive: Boolean(data.isActive),
+    bio: typeof data.bio === "string" ? data.bio : undefined,
+    logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : undefined,
+    coverImageUrl: typeof data.coverImageUrl === "string" ? data.coverImageUrl : undefined,
+    ratingAvg: typeof data.ratingAvg === "number" ? data.ratingAvg : undefined,
+    ratingCount: typeof data.ratingCount === "number" ? data.ratingCount : undefined,
+    badge: typeof data.badge === "string" ? data.badge : undefined,
+  };
 }
 
-export async function fetchCompanies(params: CompanySearchParams = {}): Promise<Company[]> {
-  const take = params.take ?? 50;
-  const constraints: QueryConstraint[] = [];
+export async function fetchCompanies(params: FetchCompaniesParams = {}): Promise<CompanyPublic[]> {
+  const { query: text, category, city, take = 30 } = params;
 
-  // ✅ Alleen actieve salons
-  constraints.push(where("isActive", "==", true));
+  const constraints = [where("isActive", "==", true)] as const;
+  const base = category
+    ? query(
+        collection(db, "companies_public"),
+        ...constraints,
+        where("categories", "array-contains", category),
+        orderBy("name", "asc"),
+        limit(take)
+      )
+    : query(collection(db, "companies_public"), ...constraints, orderBy("name", "asc"), limit(take));
 
-  if (params.city && params.city.trim()) {
-    constraints.push(where("city", "==", params.city));
-  }
+  const snap = await getDocs(base);
+  const rows = snap.docs.map((d) => toCompanyPublic(d.id, d.data()));
 
-  if (params.category) {
-    constraints.push(where("categories", "array-contains", params.category));
-  }
+  const q = (text ?? "").trim().toLowerCase();
+  const cityFilter = (city ?? "").trim().toLowerCase();
 
-  // Let op: als je minPrice filtert met <=, moet je OOK orderBy(minPrice) eerst doen
-  if (typeof params.maxPrice === "number") {
-    constraints.push(where("minPrice", "<=", params.maxPrice));
-    constraints.push(orderBy("minPrice", "asc"));
-  }
+  const filteredBySearch = rows.filter((r) => {
+    const matchesText =
+      q.length === 0 ||
+      r.name.toLowerCase().includes(q) ||
+      r.city.toLowerCase().includes(q) ||
+      r.categories.some((c) => c.toLowerCase().includes(q));
 
-  constraints.push(orderBy("name", "asc"));
-  constraints.push(limit(take));
+    const matchesCity = cityFilter.length === 0 || cityFilter === "alle" || r.city.toLowerCase() === cityFilter;
 
-  // ✅ Gebruik jouw echte collectie: "companies"
-  const q = fsQuery(collection(db, "companies_public"), ...constraints);
-  const snap = await getDocs(q);
-
-  let items: Company[] = snap.docs.map((d) => {
-    const data = d.data() as any;
-    const rawCats = data.categories ?? [];
-
-    return {
-      id: d.id,
-      name: String(data.name ?? data.naam ?? "Salon"),
-      city: String(data.city ?? ""),
-      categories: Array.isArray(rawCats) ? (rawCats as CompanyCategory[]) : ["Overig"],
-      minPrice: typeof data.minPrice === "number" ? data.minPrice : undefined,
-      isActive: typeof data.isActive === "boolean" ? data.isActive : true,
-      coverImageUrl: data.coverImageUrl ? String(data.coverImageUrl) : undefined,
-      logoUrl: data.logoUrl ? String(data.logoUrl) : undefined,
-      bio: data.bio ? String(data.bio) : undefined,
-      ratingAvg: typeof data.ratingAvg === "number" ? data.ratingAvg : undefined,
-      ratingCount: typeof data.ratingCount === "number" ? data.ratingCount : undefined,
-    };
+    return matchesText && matchesCity;
   });
 
-  // ✅ Search filter client-side (alleen op naam)
-  if (params.query && params.query.trim()) {
-    const qText = norm(params.query);
-    items = items.filter((c) => norm(c.name).includes(qText));
+  if (!filteredBySearch.length) return [];
+
+  const hasServices = await Promise.all(
+    filteredBySearch.map(async (company) => {
+      try {
+        return await hasActiveService(company.id);
+      } catch {
+        return false;
+      }
+    })
+  );
+
+  return filteredBySearch.filter((_, index) => hasServices[index]);
+}
+
+export async function fetchCompanyById(companyId: string): Promise<CompanyPublic | null> {
+  const snap = await getDoc(doc(db, "companies_public", companyId));
+  if (!snap.exists()) return null;
+  return toCompanyPublic(snap.id, snap.data());
+}
+
+export async function getMyCompanyPublic(companyId: string): Promise<CompanyPublic | null> {
+  return fetchCompanyById(companyId);
+}
+
+export async function upsertMyCompanyPublic(
+  companyId: string,
+  patch: Partial<Omit<CompanyPublic, "id">>
+): Promise<void> {
+  const ref = doc(db, "companies_public", companyId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      name: patch.name ?? "Nieuwe salon",
+      city: patch.city ?? "",
+      categories: patch.categories ?? [],
+      minPrice: patch.minPrice ?? 0,
+      isActive: patch.isActive ?? true,
+      bio: patch.bio ?? "",
+      logoUrl: patch.logoUrl ?? "",
+      coverImageUrl: patch.coverImageUrl ?? "",
+      updatedAt: serverTimestamp(),
+    });
+    return;
   }
 
-  return items;
+  await updateDoc(ref, {
+    ...patch,
+    updatedAt: serverTimestamp(),
+  });
 }

@@ -1,65 +1,34 @@
-// FILE: app/(customer)/(tabs)/_layout.tsx
 import React from "react";
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import FloatingCenterTabBar, { TabVisualConfig } from "../../../components/FloatingCenterTabBar";
+
+const customerTabConfig: TabVisualConfig = {
+  index: { label: "Discover", activeIcon: "search", inactiveIcon: "search-outline" },
+  feed: { label: "Feed", activeIcon: "play", inactiveIcon: "play-outline" },
+  bookings: { label: "Bookings", activeIcon: "calendar", inactiveIcon: "calendar-outline" },
+  profile: { label: "Profiel", activeIcon: "person", inactiveIcon: "person-outline" },
+};
 
 export default function CustomerTabsLayout() {
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          height: 86,
-          paddingTop: 10,
-          paddingBottom: 18,
-          borderTopWidth: 0,
-          backgroundColor: "#F4D7E3", // soft roze
-        },
-        tabBarActiveTintColor: "#1A1A1A",
-        tabBarInactiveTintColor: "rgba(0,0,0,0.45)",
-        tabBarLabelStyle: { fontWeight: "900", fontSize: 12 },
       }}
+      tabBar={(props) => (
+        <FloatingCenterTabBar
+          {...props}
+          centerRouteName="feed"
+          leftRouteNames={["index"]}
+          rightRouteNames={["bookings", "profile"]}
+          config={customerTabConfig}
+        />
+      )}
     >
-      {/* Profiel */}
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: "Profiel",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person" size={size ?? 24} color={color} />
-          ),
-        }}
-      />
-
-      {/* Boeken (Home) */}
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Boeken",
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? "calendar" : "calendar-outline"}
-              size={size ?? 24}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      {/* Discover */}
-      <Tabs.Screen
-        name="discover"
-        options={{
-          title: "Discover",
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons
-              name={focused ? "compass" : "compass-outline"}
-              size={size ?? 24}
-              color={color}
-            />
-          ),
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: "Discover" }} />
+      <Tabs.Screen name="feed" options={{ title: "Feed" }} />
+      <Tabs.Screen name="bookings" options={{ title: "Bookings" }} />
+      <Tabs.Screen name="profile" options={{ title: "Profiel" }} />
     </Tabs>
   );
 }
