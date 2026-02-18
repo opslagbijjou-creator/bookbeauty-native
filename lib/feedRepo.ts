@@ -33,7 +33,9 @@ export type FeedPost = {
   caption?: string;
   hashtags?: string[];
   visibility?: "public" | "clients_only";
+  mediaType: "video" | "image";
   videoUrl: string;
+  imageUrl: string;
   thumbnailUrl?: string;
   isActive: boolean;
   likeCount?: number;
@@ -60,7 +62,9 @@ export type AddFeedPostPayload = {
   caption?: string;
   hashtags?: string[];
   visibility?: "public" | "clients_only";
-  videoUrl: string;
+  mediaType?: "video" | "image";
+  videoUrl?: string;
+  imageUrl?: string;
   thumbnailUrl?: string;
   serviceId?: string;
   serviceName?: string;
@@ -76,8 +80,27 @@ function normalizeHashtags(value: unknown): string[] {
   return Array.from(new Set(cleaned)).slice(0, 12);
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : undefined;
+}
+
+function normalizeLinkedServiceId(value: unknown): string | undefined {
+  const raw = normalizeOptionalString(value);
+  if (!raw) return undefined;
+  if (raw === "undefined" || raw === "null") return undefined;
+  return raw;
+}
+
 function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
   const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
+  const rawVideoUrl = String(data.videoUrl ?? "").trim();
+  const rawImageUrl = String(data.imageUrl ?? "").trim();
+  const rawMediaType = data.mediaType === "image" || data.mediaType === "video" ? data.mediaType : undefined;
+  const mediaType: "video" | "image" = rawMediaType ?? (rawImageUrl ? "image" : "video");
+  const linkedServiceId = normalizeLinkedServiceId(data.serviceId);
+  const linkedServiceName = linkedServiceId ? normalizeOptionalString(data.serviceName) : undefined;
 
   return {
     id,
@@ -88,14 +111,16 @@ function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
     companyCategories: Array.isArray(data.companyCategories)
       ? (data.companyCategories as string[])
       : undefined,
-    serviceId: typeof data.serviceId === "string" ? data.serviceId : undefined,
-    serviceName: typeof data.serviceName === "string" ? data.serviceName : undefined,
+    serviceId: linkedServiceId,
+    serviceName: linkedServiceName,
     category: String(data.category ?? "Overig"),
     title: typeof data.title === "string" ? data.title : undefined,
     caption: typeof data.caption === "string" ? data.caption : undefined,
     hashtags: normalizeHashtags(data.hashtags),
     visibility: data.visibility === "clients_only" ? "clients_only" : "public",
-    videoUrl: String(data.videoUrl ?? ""),
+    mediaType,
+    videoUrl: rawVideoUrl,
+    imageUrl: rawImageUrl,
     thumbnailUrl: typeof data.thumbnailUrl === "string" ? data.thumbnailUrl : undefined,
     isActive: Boolean(data.isActive),
     viewCount: Number(data.viewCount ?? 0) || 0,
@@ -220,7 +245,18 @@ export async function addMyFeedPost(companyId: string, payload: AddFeedPostPaylo
     )
   );
   if (activeServiceSnap.empty) {
-    throw new Error("Plaats minimaal 1 actieve dienst voordat je een video plaatst.");
+    throw new Error("Plaats minimaal 1 actieve dienst voordat je een feed post plaatst.");
+  }
+
+  const mediaType: "video" | "image" = payload.mediaType === "image" ? "image" : "video";
+  const videoUrl = String(payload.videoUrl ?? "").trim();
+  const imageUrl = String(payload.imageUrl ?? "").trim();
+
+  if (mediaType === "video" && !videoUrl) {
+    throw new Error("Video ontbreekt.");
+  }
+  if (mediaType === "image" && !imageUrl) {
+    throw new Error("Foto ontbreekt.");
   }
 
   const company = companySnap.data();
@@ -238,8 +274,10 @@ export async function addMyFeedPost(companyId: string, payload: AddFeedPostPaylo
     caption: payload.caption ?? "",
     hashtags: normalizeHashtags(payload.hashtags),
     visibility: payload.visibility ?? "public",
-    videoUrl: payload.videoUrl,
-    thumbnailUrl: payload.thumbnailUrl ?? "",
+    mediaType,
+    videoUrl: mediaType === "video" ? videoUrl : "",
+    imageUrl: mediaType === "image" ? imageUrl : "",
+    thumbnailUrl: payload.thumbnailUrl ?? (mediaType === "image" ? imageUrl : ""),
     isActive: payload.isActive ?? true,
     viewCount: Number(payload.viewCount ?? 0) || 0,
     createdAt: serverTimestamp(),
@@ -255,7 +293,9 @@ export async function updateMyFeedPost(postId: string, patch: Partial<AddFeedPos
   if (typeof patch.caption === "string") nextPatch.caption = patch.caption;
   if (Array.isArray(patch.hashtags)) nextPatch.hashtags = normalizeHashtags(patch.hashtags);
   if (patch.visibility === "public" || patch.visibility === "clients_only") nextPatch.visibility = patch.visibility;
+  if (patch.mediaType === "video" || patch.mediaType === "image") nextPatch.mediaType = patch.mediaType;
   if (typeof patch.videoUrl === "string") nextPatch.videoUrl = patch.videoUrl;
+  if (typeof patch.imageUrl === "string") nextPatch.imageUrl = patch.imageUrl;
   if (typeof patch.thumbnailUrl === "string") nextPatch.thumbnailUrl = patch.thumbnailUrl;
   if (typeof patch.serviceId === "string") nextPatch.serviceId = patch.serviceId;
   if (typeof patch.serviceName === "string") nextPatch.serviceName = patch.serviceName;

@@ -15,13 +15,20 @@ export default function IndexScreen() {
         return;
       }
 
-      const role = await getUserRole(user.uid);
+      try {
+        const role = await getUserRole(user.uid);
 
-      if (role === "company") {
-        router.replace("/(company)/(tabs)/home" as never);
-      } else if (role === "admin") {
-        router.replace("/(admin)/(tabs)" as never);
-      } else {
+        if (role === "company") {
+          router.replace("/(company)/(tabs)/home" as never);
+        } else if (role === "employee") {
+          router.replace("/(company)/(tabs)/bookings" as never);
+        } else if (role === "admin") {
+          router.replace("/(admin)/(tabs)" as never);
+        } else {
+          router.replace("/(customer)/(tabs)" as never);
+        }
+      } catch (error) {
+        console.warn("[index] role redirect failed, fallback customer", error);
         router.replace("/(customer)/(tabs)" as never);
       }
 

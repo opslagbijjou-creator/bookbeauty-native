@@ -62,6 +62,12 @@ function videoPreviewText(item: FeedPost): string {
   return item.category;
 }
 
+function feedPreviewImage(item: FeedPost): string {
+  if (item.thumbnailUrl?.trim()) return item.thumbnailUrl.trim();
+  if (item.imageUrl?.trim()) return item.imageUrl.trim();
+  return cloudinaryVideoThumbnailFromUrl(item.videoUrl);
+}
+
 export default function CompanyProfileScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -138,9 +144,13 @@ export default function CompanyProfileScreen() {
 
   useEffect(() => {
     if (!uid) return;
-    getUserRole(uid).then((r) => {
-      if (r) setRole(r);
-    });
+    getUserRole(uid)
+      .then((r) => {
+        if (r) setRole(r);
+      })
+      .catch((error) => {
+        console.warn("[customer/company-profile] getUserRole failed", error);
+      });
   }, [uid]);
 
   useEffect(() => {
@@ -156,6 +166,13 @@ export default function CompanyProfileScreen() {
         setVideos(videoData);
         loadSocial(id).catch(() => null);
         loadServiceRatings(id, serviceData).catch(() => null);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        console.warn("[customer/company-profile] load failed", error);
+        setCompany(null);
+        setServices([]);
+        setVideos([]);
       })
       .finally(() => {
         if (!mounted) return;
@@ -393,8 +410,8 @@ export default function CompanyProfileScreen() {
           ) : (
             <>
               <View style={styles.panelHeader}>
-                <Ionicons name="videocam-outline" size={15} color={COLORS.primary} />
-                <Text style={styles.section}>Recente video&apos;s</Text>
+                <Ionicons name="albums-outline" size={15} color={COLORS.primary} />
+                <Text style={styles.section}>Recente posts</Text>
               </View>
 
               {videos.length ? (
@@ -406,7 +423,7 @@ export default function CompanyProfileScreen() {
                       onPress={() => router.push(`/(customer)/(tabs)/feed?companyId=${item.companyId}&origin=company-profile` as never)}
                     >
                       <Image
-                        source={{ uri: item.thumbnailUrl || cloudinaryVideoThumbnailFromUrl(item.videoUrl) }}
+                        source={{ uri: feedPreviewImage(item) }}
                         style={styles.videoThumb}
                         contentFit="cover"
                       />
@@ -419,9 +436,11 @@ export default function CompanyProfileScreen() {
                             <Ionicons name="business-outline" size={12} color="#fff" />
                           )}
                         </View>
-                        <View style={styles.playCircle}>
-                          <Ionicons name="play" size={14} color="#fff" />
-                        </View>
+                        {item.mediaType !== "image" ? (
+                          <View style={styles.playCircle}>
+                            <Ionicons name="play" size={14} color="#fff" />
+                          </View>
+                        ) : null}
                       </View>
                       <Text style={styles.videoTitle} numberOfLines={2}>
                         {videoPreviewText(item)}
@@ -430,7 +449,7 @@ export default function CompanyProfileScreen() {
                   ))}
                 </ScrollView>
               ) : (
-                <Text style={styles.empty}>Nog geen video&apos;s.</Text>
+                <Text style={styles.empty}>Nog geen posts.</Text>
               )}
             </>
           )}

@@ -1,6 +1,9 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Tabs } from "expo-router";
 import FloatingCenterTabBar, { TabVisualConfig } from "../../../components/FloatingCenterTabBar";
+import { getUserRole } from "../../../lib/authRepo";
+import { auth } from "../../../lib/firebase";
+import type { AppRole } from "../../../lib/roles";
 
 const companyTabConfig: TabVisualConfig = {
   home: { label: "Profiel", activeIcon: "business", inactiveIcon: "business-outline" },
@@ -10,7 +13,30 @@ const companyTabConfig: TabVisualConfig = {
   bookings: { label: "Agenda", activeIcon: "calendar", inactiveIcon: "calendar-outline" },
 };
 
+const employeeTabConfig: TabVisualConfig = {
+  home: { label: "Account", activeIcon: "person", inactiveIcon: "person-outline" },
+  bookings: { label: "Agenda", activeIcon: "calendar", inactiveIcon: "calendar-outline" },
+};
+
 export default function CompanyTabsLayout() {
+  const [role, setRole] = useState<AppRole>("company");
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    getUserRole(uid)
+      .then((nextRole) => {
+        if (nextRole) setRole(nextRole);
+      })
+      .catch(() => null);
+  }, []);
+
+  const isEmployee = role === "employee";
+  const tabConfig = useMemo(() => (isEmployee ? employeeTabConfig : companyTabConfig), [isEmployee]);
+  const centerRouteName = isEmployee ? "bookings" : "feed";
+  const leftRouteNames = isEmployee ? ["home"] : ["home", "services"];
+  const rightRouteNames = isEmployee ? [] : ["studio", "bookings"];
+
   return (
     <Tabs
       screenOptions={{
@@ -19,17 +45,17 @@ export default function CompanyTabsLayout() {
       tabBar={(props) => (
         <FloatingCenterTabBar
           {...props}
-          centerRouteName="feed"
-          leftRouteNames={["home", "services"]}
-          rightRouteNames={["studio", "bookings"]}
-          config={companyTabConfig}
+          centerRouteName={centerRouteName}
+          leftRouteNames={leftRouteNames}
+          rightRouteNames={rightRouteNames}
+          config={tabConfig}
         />
       )}
     >
-      <Tabs.Screen name="home" options={{ title: "Profiel" }} />
-      <Tabs.Screen name="services" options={{ title: "Diensten" }} />
-      <Tabs.Screen name="feed" options={{ title: "Feed" }} />
-      <Tabs.Screen name="studio" options={{ title: "Upload" }} />
+      <Tabs.Screen name="home" options={{ title: isEmployee ? "Account" : "Profiel" }} />
+      <Tabs.Screen name="services" options={isEmployee ? { href: null } : { title: "Diensten" }} />
+      <Tabs.Screen name="feed" options={isEmployee ? { href: null } : { title: "Feed" }} />
+      <Tabs.Screen name="studio" options={isEmployee ? { href: null } : { title: "Upload" }} />
       <Tabs.Screen name="bookings" options={{ title: "Agenda" }} />
     </Tabs>
   );

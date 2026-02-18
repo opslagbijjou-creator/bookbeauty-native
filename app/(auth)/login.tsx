@@ -24,6 +24,8 @@ export default function LoginScreen() {
 
       if (role === "company") {
         router.replace("/(company)/(tabs)/home" as never);
+      } else if (role === "employee") {
+        router.replace("/(company)/(tabs)/bookings" as never);
       } else if (role === "admin") {
         router.replace("/(admin)/(tabs)" as never);
       } else {

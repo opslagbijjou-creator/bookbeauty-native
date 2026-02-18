@@ -59,6 +59,11 @@ export default function CustomerDiscoverScreen() {
         if (!mounted) return;
         setCompanies(res);
       })
+      .catch((error) => {
+        if (!mounted) return;
+        console.warn("[customer/discover] fetchCompanies failed", error);
+        setCompanies([]);
+      })
       .finally(() => {
         if (!mounted) return;
         setLoading(false);

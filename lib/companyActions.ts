@@ -38,6 +38,21 @@ export async function createCompany(companyId: string, input: CompanyCreateInput
   );
 
   await setDoc(
+    doc(db, "companies", companyId, "staff", companyId),
+    {
+      userId: companyId,
+      companyId,
+      displayName: input.name || "Eigenaar",
+      email: input.email ?? "",
+      isActive: true,
+      isOwner: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  await setDoc(
     doc(db, "companies_public", companyId),
     {
       name: input.name,
@@ -51,6 +66,18 @@ export async function createCompany(companyId: string, input: CompanyCreateInput
       bookingEnabled: true,
       bookingIntervalMin: 30,
       bookingWeekSchedule: DEFAULT_BOOKING_WEEK_SCHEDULE,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  await setDoc(
+    doc(db, "companies_public", companyId, "staff_public", companyId),
+    {
+      displayName: input.name || "Eigenaar",
+      isActive: true,
+      isOwner: true,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
     { merge: true }
@@ -76,8 +103,34 @@ export async function ensureCompanyDoc(companyId: string): Promise<void> {
       bookingWeekSchedule: DEFAULT_BOOKING_WEEK_SCHEDULE,
       updatedAt: serverTimestamp(),
     });
-    return;
+  } else {
+    await updateDoc(ref, { updatedAt: serverTimestamp() });
   }
 
-  await updateDoc(ref, { updatedAt: serverTimestamp() });
+  const current = await getDoc(ref);
+  const ownerName = current.exists() ? String(current.data().name ?? "Eigenaar") : "Eigenaar";
+
+  await setDoc(
+    doc(db, "companies_public", companyId, "staff_public", companyId),
+    {
+      displayName: ownerName,
+      isActive: true,
+      isOwner: true,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  await setDoc(
+    doc(db, "companies", companyId, "staff", companyId),
+    {
+      userId: companyId,
+      companyId,
+      displayName: ownerName,
+      isActive: true,
+      isOwner: true,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }

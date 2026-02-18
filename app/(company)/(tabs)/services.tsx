@@ -123,6 +123,7 @@ export default function CompanyServicesScreen() {
         <Text style={styles.subtitle}>
           {items.length} diensten totaal • {activeCount} live
         </Text>
+        <Text style={styles.helperText}>Tik op een dienst om details en foto&apos;s te bewerken.</Text>
       </View>
 
       <View style={styles.filterCard}>
@@ -156,7 +157,7 @@ export default function CompanyServicesScreen() {
         )}
       </View>
 
-      <View style={styles.fabWrap}>
+      <View style={styles.footerWrap}>
         <Pressable style={styles.fabBtn} onPress={openCreateModal}>
           <Ionicons name="add-circle-outline" size={18} color="#fff" />
           <Text style={styles.fabText}>Nieuwe dienst toevoegen</Text>
@@ -180,11 +181,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bg,
     paddingHorizontal: 14,
-    paddingTop: 6,
-    gap: 10,
+    paddingTop: 8,
+    gap: 12,
   },
   headerRow: {
-    gap: 2,
+    gap: 3,
   },
   titleRow: {
     flexDirection: "row",
@@ -199,6 +200,11 @@ const styles = StyleSheet.create({
   subtitle: {
     color: COLORS.muted,
     fontSize: 12,
+    fontWeight: "700",
+  },
+  helperText: {
+    color: COLORS.muted,
+    fontSize: 11,
     fontWeight: "700",
   },
   filterCard: {
@@ -222,11 +228,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  fabWrap: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 14,
+  footerWrap: {
+    paddingBottom: 8,
   },
   fabBtn: {
     minHeight: 52,

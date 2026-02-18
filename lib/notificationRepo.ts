@@ -48,6 +48,7 @@ export type CompanyNotification = {
 
 function roleLabel(role: AppRole): string {
   if (role === "company") return "Een bedrijf";
+  if (role === "employee") return "Een medewerker";
   if (role === "admin") return "Admin";
   return "Een klant";
 }
@@ -56,7 +57,8 @@ function toNotification(id: string, data: Record<string, unknown>): CompanyNotif
   const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
   const updatedAt = data.updatedAt as { toMillis?: () => number } | undefined;
   const roleRaw = String(data.actorRole ?? "customer");
-  const actorRole: AppRole = roleRaw === "company" || roleRaw === "admin" ? roleRaw : "customer";
+  const actorRole: AppRole =
+    roleRaw === "company" || roleRaw === "employee" || roleRaw === "admin" ? roleRaw : "customer";
   const typeRaw = String(data.type ?? "post_like");
   const type: CompanyNotificationType =
     typeRaw === "comment_like" ||

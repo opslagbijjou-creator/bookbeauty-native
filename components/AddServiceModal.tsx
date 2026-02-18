@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -71,9 +74,67 @@ export default function AddServiceModal({
   const [capacity, setCapacity] = useState(1);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  const scrollRef = useRef<ScrollView | null>(null);
+  const fieldYMap = useRef<Record<string, number>>({});
 
   const parsedPrice = useMemo(() => Number(String(price).replace(",", ".")), [price]);
   const parsedDuration = useMemo(() => Number(durationMin), [durationMin]);
+
+  useEffect(() => {
+    const onShow = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const onHide = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(onShow, (event) => {
+      setKeyboardOpen(true);
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(onHide, () => {
+      setKeyboardOpen(false);
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  function registerFieldY(key: string, y: number) {
+    fieldYMap.current[key] = y;
+  }
+
+  function scrollToField(key: string) {
+    const y = fieldYMap.current[key];
+    if (typeof y !== "number") return;
+    const targetY = Math.max(0, y - 26);
+    const runScroll = () => {
+      scrollRef.current?.scrollTo({ y: targetY, animated: true });
+    };
+
+    requestAnimationFrame(() => {
+      runScroll();
+    });
+    setTimeout(runScroll, 130);
+  }
+
+  function onInputFocus(fieldKey: string) {
+    return (event: any) => {
+      scrollToField(fieldKey);
+
+      const targetHandle = event?.target;
+      if (!targetHandle) return;
+      const extraOffset = Platform.OS === "ios" ? 110 : 150;
+
+      setTimeout(() => {
+        (scrollRef.current as any)?.scrollResponderScrollNativeHandleToKeyboard?.(
+          targetHandle,
+          extraOffset,
+          true
+        );
+      }, 60);
+    };
+  }
 
   useEffect(() => {
     if (!visible) return;
@@ -128,6 +189,10 @@ export default function AddServiceModal({
     }
 
     if (currentStep === 3) {
+      if (photoUrls.length < 1) {
+        Alert.alert("Foto vereist", "Voeg minimaal 1 foto toe aan je dienst.");
+        return false;
+      }
       if (photoUrls.length > 3) {
         Alert.alert("Controle", "Maximaal 3 foto&apos;s per dienst.");
         return false;
@@ -221,22 +286,24 @@ export default function AddServiceModal({
           <Text style={styles.stepTitle}>Basis info</Text>
           <Text style={styles.stepDescription}>Vertel duidelijk wat deze dienst inhoudt.</Text>
 
-          <View style={styles.fieldWrap}>
+          <View style={styles.fieldWrap} onLayout={(event) => registerFieldY("name", event.nativeEvent.layout.y)}>
             <Text style={styles.fieldLabel}>Dienst naam</Text>
             <TextInput
               value={name}
               onChangeText={setName}
+              onFocus={onInputFocus("name")}
               placeholder="Bijv. Knippen + föhnen"
               placeholderTextColor={COLORS.placeholder}
               style={styles.input}
             />
           </View>
 
-          <View style={styles.fieldWrap}>
+          <View style={styles.fieldWrap} onLayout={(event) => registerFieldY("description", event.nativeEvent.layout.y)}>
             <Text style={styles.fieldLabel}>Korte beschrijving</Text>
             <TextInput
               value={description}
               onChangeText={setDescription}
+              onFocus={onInputFocus("description")}
               placeholder="Wat krijgt de klant precies?"
               placeholderTextColor={COLORS.placeholder}
               style={[styles.input, styles.textarea]}
@@ -258,11 +325,12 @@ export default function AddServiceModal({
           <Text style={styles.stepTitle}>Tijd & prijs</Text>
           <Text style={styles.stepDescription}>Vul duidelijke waarden in. Geen losse nummer-vakjes zonder context.</Text>
 
-          <View style={styles.fieldWrap}>
+          <View style={styles.fieldWrap} onLayout={(event) => registerFieldY("durationMin", event.nativeEvent.layout.y)}>
             <Text style={styles.fieldLabel}>Duur (minuten)</Text>
             <TextInput
               value={durationMin}
               onChangeText={setDurationMin}
+              onFocus={onInputFocus("durationMin")}
               keyboardType="numeric"
               placeholder="Bijv. 45"
               placeholderTextColor={COLORS.placeholder}
@@ -270,11 +338,12 @@ export default function AddServiceModal({
             />
           </View>
 
-          <View style={styles.fieldWrap}>
+          <View style={styles.fieldWrap} onLayout={(event) => registerFieldY("price", event.nativeEvent.layout.y)}>
             <Text style={styles.fieldLabel}>Prijs (EUR)</Text>
             <TextInput
               value={price}
               onChangeText={setPrice}
+              onFocus={onInputFocus("price")}
               keyboardType="decimal-pad"
               placeholder="Bijv. 39.95"
               placeholderTextColor={COLORS.placeholder}
@@ -289,12 +358,12 @@ export default function AddServiceModal({
       return (
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Extra opties</Text>
-          <Text style={styles.stepDescription}>Optioneel: foto&apos;s toevoegen en zichtbaarheid instellen.</Text>
+          <Text style={styles.stepDescription}>Voeg 1 tot 3 foto&apos;s toe en kies zichtbaarheid.</Text>
 
           <View style={styles.photoCard}>
             <View style={styles.photoTitleRow}>
               <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.photoTitle}>Foto&apos;s ({photoUrls.length}/3)</Text>
+              <Text style={styles.photoTitle}>Foto&apos;s ({photoUrls.length}/3) • minimaal 1</Text>
             </View>
 
             <View style={styles.photoActions}>
@@ -322,7 +391,7 @@ export default function AddServiceModal({
                 ))}
               </View>
             ) : (
-              <Text style={styles.photoHint}>Voeg maximaal 3 foto&apos;s toe voor &quot;Meer info&quot;.</Text>
+              <Text style={styles.photoHint}>Voeg minimaal 1 en maximaal 3 foto&apos;s toe voor klanten.</Text>
             )}
           </View>
 
@@ -357,48 +426,76 @@ export default function AddServiceModal({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={styles.modalCard}>
-          <View style={styles.topRow}>
-            <View style={styles.topTitleWrap}>
-              <Text style={styles.title}>{isEditing ? "Dienst bewerken" : "Nieuwe dienst toevoegen"}</Text>
-              <Text style={styles.progressText}>Stap {step} van {TOTAL_STEPS}</Text>
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={0}
+        >
+          <View
+            style={[
+              styles.modalCard,
+              keyboardOpen && styles.modalCardKeyboard,
+              Platform.OS === "android" && keyboardOpen
+                ? {
+                    marginBottom: Math.max(8, keyboardHeight - 30),
+                  }
+                : null,
+            ]}
+          >
+            <View style={styles.topRow}>
+              <View style={styles.topTitleWrap}>
+                <Text style={styles.title}>{isEditing ? "Dienst bewerken" : "Nieuwe dienst toevoegen"}</Text>
+                <Text style={styles.progressText}>Stap {step} van {TOTAL_STEPS}</Text>
+              </View>
+              <Pressable style={styles.closeBtn} onPress={onClose}>
+                <Ionicons name="close" size={16} color={COLORS.muted} />
+              </Pressable>
             </View>
-            <Pressable style={styles.closeBtn} onPress={onClose}>
-              <Ionicons name="close" size={16} color={COLORS.muted} />
-            </Pressable>
+
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${(step / TOTAL_STEPS) * 100}%` }]} />
+            </View>
+
+            <ScrollView
+              ref={scrollRef}
+              contentContainerStyle={[
+                styles.content,
+                keyboardOpen && {
+                  paddingBottom: Math.max(90, keyboardHeight + 100),
+                },
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+              automaticallyAdjustKeyboardInsets
+            >
+              {renderStepContent()}
+            </ScrollView>
+
+            <View style={styles.footerRow}>
+              {step > 1 ? (
+                <Pressable style={styles.backBtn} onPress={onPrevStep}>
+                  <Ionicons name="chevron-back-outline" size={14} color={COLORS.primary} />
+                  <Text style={styles.backText}>Vorige</Text>
+                </Pressable>
+              ) : (
+                <View style={{ flex: 1 }} />
+              )}
+
+              {step < TOTAL_STEPS ? (
+                <Pressable style={styles.nextBtn} onPress={onNextStep}>
+                  <Text style={styles.nextText}>Volgende</Text>
+                  <Ionicons name="chevron-forward-outline" size={14} color="#fff" />
+                </Pressable>
+              ) : (
+                <Pressable style={[styles.saveBtn, saving && styles.disabled]} onPress={onSave} disabled={saving}>
+                  {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save-outline" size={14} color="#fff" />}
+                  <Text style={styles.saveText}>Dienst opslaan</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
-
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${(step / TOTAL_STEPS) * 100}%` }]} />
-          </View>
-
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {renderStepContent()}
-          </ScrollView>
-
-          <View style={styles.footerRow}>
-            {step > 1 ? (
-              <Pressable style={styles.backBtn} onPress={onPrevStep}>
-                <Ionicons name="chevron-back-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.backText}>Vorige</Text>
-              </Pressable>
-            ) : (
-              <View style={{ flex: 1 }} />
-            )}
-
-            {step < TOTAL_STEPS ? (
-              <Pressable style={styles.nextBtn} onPress={onNextStep}>
-                <Text style={styles.nextText}>Volgende</Text>
-                <Ionicons name="chevron-forward-outline" size={14} color="#fff" />
-              </Pressable>
-            ) : (
-              <Pressable style={[styles.saveBtn, saving && styles.disabled]} onPress={onSave} disabled={saving}>
-                {saving ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="save-outline" size={14} color="#fff" />}
-                <Text style={styles.saveText}>Dienst opslaan</Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -419,6 +516,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(17,17,17,0.35)",
     justifyContent: "flex-end",
   },
+  keyboardAvoid: {
+    flex: 1,
+    width: "100%",
+    justifyContent: "flex-end",
+  },
   modalCard: {
     maxHeight: "92%",
     backgroundColor: COLORS.bg,
@@ -430,6 +532,10 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     gap: 10,
+  },
+  modalCardKeyboard: {
+    maxHeight: "96%",
+    paddingBottom: 10,
   },
   topRow: {
     flexDirection: "row",
@@ -474,6 +580,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingBottom: 8,
+    gap: 2,
   },
   stepCard: {
     borderRadius: 16,

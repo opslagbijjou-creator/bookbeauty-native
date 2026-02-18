@@ -107,7 +107,8 @@ export type FeedComment = {
 function toFeedComment(id: string, data: Record<string, unknown>): FeedComment {
   const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
   const roleRaw = String(data.role ?? "customer");
-  const role: AppRole = roleRaw === "company" || roleRaw === "admin" ? roleRaw : "customer";
+  const role: AppRole =
+    roleRaw === "company" || roleRaw === "employee" || roleRaw === "admin" ? roleRaw : "customer";
 
   return {
     id,

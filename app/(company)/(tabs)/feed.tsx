@@ -280,22 +280,33 @@ export default function CompanyFeedScreen() {
             showsVerticalScrollIndicator={false}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
-            renderItem={({ item }) => (
-              <VideoPostCard
-                post={item}
-                isActive={allowPlayback && item.id === activeId}
-                height={cardHeight}
-                liked={likedMap[item.id]}
-                likeCount={likeCountMap[item.id]}
-                commentCount={commentCountMap[item.id]}
-                following={followingMap[item.companyId]}
-                followerCount={followersCountMap[item.companyId]}
-                onToggleLike={() => onToggleLike(item.id)}
-                onOpenComments={() => setCommentsPostId(item.id)}
-                onToggleFollow={() => onToggleFollow(item.companyId)}
-                onOpenCompany={() => router.push(`/(customer)/company/${item.companyId}` as never)}
-              />
-            )}
+            renderItem={({ item }) => {
+              const rawServiceId = typeof item.serviceId === "string" ? item.serviceId.trim() : "";
+              const linkedServiceId =
+                rawServiceId && rawServiceId !== "undefined" && rawServiceId !== "null" ? rawServiceId : "";
+
+              return (
+                <VideoPostCard
+                  post={item}
+                  isActive={allowPlayback && item.id === activeId}
+                  height={cardHeight}
+                  liked={likedMap[item.id]}
+                  likeCount={likeCountMap[item.id]}
+                  commentCount={commentCountMap[item.id]}
+                  following={followingMap[item.companyId]}
+                  followerCount={followersCountMap[item.companyId]}
+                  onToggleLike={() => onToggleLike(item.id)}
+                  onOpenComments={() => setCommentsPostId(item.id)}
+                  onToggleFollow={() => onToggleFollow(item.companyId)}
+                  onOpenCompany={() => router.push(`/(customer)/company/${item.companyId}` as never)}
+                  onOpenLinkedService={
+                    linkedServiceId
+                      ? () => router.push(`/(customer)/service/${item.companyId}/${linkedServiceId}` as never)
+                      : undefined
+                  }
+                />
+              );
+            }}
             ListFooterComponent={
               loadingMore ? (
                 <View style={styles.footer}>

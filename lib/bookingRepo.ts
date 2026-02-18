@@ -23,7 +23,15 @@ import { fetchCompanyById } from "./companyRepo";
 import { notifyCompanyOnBookingRequest } from "./notificationRepo";
 
 export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-export type BookingStatus = "pending" | "confirmed" | "declined" | "cancelled_by_customer";
+export type BookingStatus =
+  | "pending"
+  | "proposed_by_company"
+  | "pending_reschedule_approval"
+  | "confirmed"
+  | "declined"
+  | "cancelled_by_customer"
+  | "cancelled_with_fee";
+export type BookingProposalBy = "company" | "customer";
 
 export type TimeRange = {
   start: string;
@@ -56,6 +64,15 @@ export type BookingBlock = {
   updatedAtMs: number;
 };
 
+type SlotLock = {
+  id: string;
+  companyId: string;
+  staffId: string;
+  bookingDate: string;
+  slotKey: string;
+  seat: number;
+};
+
 export type BookingSlot = {
   key: string;
   bookingDate: string;
@@ -71,6 +88,8 @@ export type Booking = {
   companyId: string;
   companyName: string;
   companyLogoUrl?: string;
+  staffId: string;
+  staffName: string;
   serviceId: string;
   serviceName: string;
   serviceCategory: string;
@@ -85,11 +104,24 @@ export type Booking = {
   occupiedStartAtMs: number;
   occupiedEndAtMs: number;
   status: BookingStatus;
+  proposalBy?: BookingProposalBy;
+  proposedBookingDate?: string;
+  proposedStartAtMs?: number;
+  proposedEndAtMs?: number;
+  proposedOccupiedStartAtMs?: number;
+  proposedOccupiedEndAtMs?: number;
+  proposedAtMs?: number;
+  customerRescheduleCount: number;
+  customerConfirmedAtMs?: number;
+  companyConfirmedAtMs?: number;
+  confirmedAtMs?: number;
   customerId: string;
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
   note?: string;
+  cancellationFeePercent: number;
+  cancellationFeeAmount: number;
   lockIds: string[];
   lockSeat?: number;
   createdAtMs: number;
@@ -99,6 +131,8 @@ export type Booking = {
 export type CreateBookingPayload = {
   companyId: string;
   serviceId: string;
+  staffId?: string;
+  staffName?: string;
   customerId: string;
   customerName: string;
   customerPhone: string;
@@ -119,12 +153,15 @@ export type BookingQueryFilter = {
   dateFrom?: string;
   dateTo?: string;
   serviceId?: string;
+  staffId?: string;
 };
 
 const DEFAULT_RANGE = { start: "09:00", end: "18:00" } as const;
 const VALID_INTERVALS = [10, 15, 20, 30, 45, 60];
-const ACTIVE_STATUSES: BookingStatus[] = ["pending", "confirmed"];
 const SLOT_LOCK_STEP_MIN = 5;
+const FREE_CANCELLATION_HOURS = 24;
+const LATE_CANCEL_FEE_PERCENT = 15;
+const SAME_DAY_RESCHEDULE_LIMIT = 1;
 
 function toMillis(value: unknown): number {
   const v = value as Timestamp | Date | { toMillis?: () => number } | undefined;
@@ -228,9 +265,18 @@ function normalizeInterval(value: unknown): number {
 
 function normalizeStatus(raw: unknown): BookingStatus {
   const value = String(raw ?? "pending");
-  return value === "confirmed" || value === "declined" || value === "cancelled_by_customer"
-    ? value
-    : "pending";
+  if (
+    value === "pending" ||
+    value === "proposed_by_company" ||
+    value === "pending_reschedule_approval" ||
+    value === "confirmed" ||
+    value === "declined" ||
+    value === "cancelled_by_customer" ||
+    value === "cancelled_with_fee"
+  ) {
+    return value;
+  }
+  return "pending";
 }
 
 function buildSlotLockKeys(bookingDate: string, occupiedStartMs: number, occupiedEndMs: number): string[] {
@@ -246,7 +292,11 @@ function buildSlotLockKeys(bookingDate: string, occupiedStartMs: number, occupie
   return keys;
 }
 
-function buildSlotLockDocId(companyId: string, bookingDate: string, seat: number, slotKey: string): string {
+function buildSlotLockDocId(companyId: string, staffId: string, bookingDate: string, seat: number, slotKey: string): string {
+  return `${companyId}_${staffId}_${bookingDate}_${seat}_${slotKey}`;
+}
+
+function buildLegacySlotLockDocId(companyId: string, bookingDate: string, seat: number, slotKey: string): string {
   return `${companyId}_${bookingDate}_${seat}_${slotKey}`;
 }
 
@@ -294,12 +344,25 @@ function sortBookingsByCreatedDesc(items: Booking[]): Booking[] {
 function toBooking(id: string, data: Record<string, unknown>): Booking {
   const startAtMs = toMillis(data.startAt);
   const durationMin = normalizeNonNegativeInt(data.serviceDurationMin, 0);
+  const proposedStartAtMs = toMillis(data.proposedStartAt);
+  const proposedEndAtMs = toMillis(data.proposedEndAt);
+  const proposedOccupiedStartAtMs = toMillis(data.proposedOccupiedStartAt);
+  const proposedOccupiedEndAtMs = toMillis(data.proposedOccupiedEndAt);
+  const proposedAtMs = toMillis(data.proposedAt);
+  const customerConfirmedAtMs = toMillis(data.customerConfirmedAt);
+  const companyConfirmedAtMs = toMillis(data.companyConfirmedAt);
+  const confirmedAtMs = toMillis(data.confirmedAt);
+  const proposalByRaw = String(data.proposalBy ?? "");
+  const proposalBy: BookingProposalBy | undefined =
+    proposalByRaw === "company" || proposalByRaw === "customer" ? proposalByRaw : undefined;
 
   return {
     id,
     companyId: String(data.companyId ?? ""),
     companyName: String(data.companyName ?? "Onbekende salon"),
     companyLogoUrl: typeof data.companyLogoUrl === "string" ? data.companyLogoUrl : undefined,
+    staffId: String(data.staffId ?? data.companyId ?? ""),
+    staffName: String(data.staffName ?? data.companyName ?? "Salon team"),
     serviceId: String(data.serviceId ?? ""),
     serviceName: String(data.serviceName ?? "Dienst"),
     serviceCategory: String(data.serviceCategory ?? "Overig"),
@@ -314,11 +377,24 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
     occupiedStartAtMs: toMillis(data.occupiedStartAt),
     occupiedEndAtMs: toMillis(data.occupiedEndAt),
     status: normalizeStatus(data.status),
+    proposalBy,
+    proposedBookingDate: typeof data.proposedBookingDate === "string" ? data.proposedBookingDate : undefined,
+    proposedStartAtMs: proposedStartAtMs || undefined,
+    proposedEndAtMs: proposedEndAtMs || undefined,
+    proposedOccupiedStartAtMs: proposedOccupiedStartAtMs || undefined,
+    proposedOccupiedEndAtMs: proposedOccupiedEndAtMs || undefined,
+    proposedAtMs: proposedAtMs || undefined,
+    customerRescheduleCount: normalizeNonNegativeInt(data.customerRescheduleCount, 0),
+    customerConfirmedAtMs: customerConfirmedAtMs || undefined,
+    companyConfirmedAtMs: companyConfirmedAtMs || undefined,
+    confirmedAtMs: confirmedAtMs || undefined,
     customerId: String(data.customerId ?? ""),
     customerName: String(data.customerName ?? ""),
     customerPhone: String(data.customerPhone ?? ""),
     customerEmail: typeof data.customerEmail === "string" ? data.customerEmail : undefined,
     note: typeof data.note === "string" ? data.note : undefined,
+    cancellationFeePercent: normalizeNonNegativeInt(data.cancellationFeePercent, 0),
+    cancellationFeeAmount: Number(data.cancellationFeeAmount ?? 0),
     lockIds: toStringArray(data.lockIds),
     lockSeat: typeof data.lockSeat === "number" ? data.lockSeat : undefined,
     createdAtMs: toMillis(data.createdAt),
@@ -336,6 +412,17 @@ function toBookingBlock(id: string, companyId: string, data: Record<string, unkn
     reason: typeof data.reason === "string" ? data.reason : undefined,
     createdAtMs: toMillis(data.createdAt),
     updatedAtMs: toMillis(data.updatedAt),
+  };
+}
+
+function toSlotLock(id: string, data: Record<string, unknown>): SlotLock {
+  return {
+    id,
+    companyId: String(data.companyId ?? ""),
+    staffId: String(data.staffId ?? data.companyId ?? ""),
+    bookingDate: String(data.bookingDate ?? ""),
+    slotKey: String(data.slotKey ?? ""),
+    seat: normalizeNonNegativeInt(data.seat, 0),
   };
 }
 
@@ -364,6 +451,144 @@ function normalizeBookingRows(rows: Booking[]): Booking[] {
   });
 }
 
+function clearProposalPatch(): Record<string, unknown> {
+  return {
+    proposalBy: "",
+    proposedBookingDate: "",
+    proposedStartAt: null,
+    proposedEndAt: null,
+    proposedOccupiedStartAt: null,
+    proposedOccupiedEndAt: null,
+    proposedAt: null,
+  };
+}
+
+function isSameCalendarDay(dateKey: string, ms: number): boolean {
+  return formatDateKey(new Date(ms)) === dateKey;
+}
+
+function isFinalConfirmed(status: BookingStatus): boolean {
+  return status === "confirmed";
+}
+
+function isOpenRequest(status: BookingStatus): boolean {
+  return status === "pending" || status === "proposed_by_company" || status === "pending_reschedule_approval";
+}
+
+function computeCancellationFee(startAtMs: number, servicePrice: number, nowMs: number): { percent: number; amount: number } {
+  const diffMs = startAtMs - nowMs;
+  const freeMs = FREE_CANCELLATION_HOURS * 60 * 60 * 1000;
+  if (diffMs >= freeMs) {
+    return { percent: 0, amount: 0 };
+  }
+  const amount = Math.max(0, Number((Number(servicePrice || 0) * (LATE_CANCEL_FEE_PERCENT / 100)).toFixed(2)));
+  return { percent: LATE_CANCEL_FEE_PERCENT, amount };
+}
+
+function buildWindowFromStart(
+  startAtMs: number,
+  serviceDurationMin: number,
+  bufferBeforeMin: number,
+  bufferAfterMin: number
+): {
+  bookingDate: string;
+  startAtMs: number;
+  endAtMs: number;
+  occupiedStartAtMs: number;
+  occupiedEndAtMs: number;
+} {
+  const bookingDate = formatDateKey(new Date(startAtMs));
+  const endAtMs = startAtMs + serviceDurationMin * 60_000;
+  const occupiedStartAtMs = startAtMs - bufferBeforeMin * 60_000;
+  const occupiedEndAtMs = endAtMs + bufferAfterMin * 60_000;
+
+  return {
+    bookingDate,
+    startAtMs,
+    endAtMs,
+    occupiedStartAtMs,
+    occupiedEndAtMs,
+  };
+}
+
+async function hasOpenSeatForWindow(params: {
+  companyId: string;
+  staffId: string;
+  bookingDate: string;
+  occupiedStartAtMs: number;
+  occupiedEndAtMs: number;
+  capacity: number;
+  ignoreLockIds?: string[];
+}): Promise<boolean> {
+  const { companyId, staffId, bookingDate, occupiedStartAtMs, occupiedEndAtMs, capacity, ignoreLockIds = [] } = params;
+  const ignore = new Set(ignoreLockIds);
+  const locks = await fetchDayLocksRaw(companyId, bookingDate, staffId);
+  const requiredSlotKeys = buildSlotLockKeys(bookingDate, occupiedStartAtMs, occupiedEndAtMs);
+  const seats = Math.max(1, normalizeCapacity(capacity, 1));
+
+  for (let seat = 0; seat < seats; seat += 1) {
+    const isBlocked = requiredSlotKeys.some((slotKey) =>
+      locks.some((row) => !ignore.has(row.id) && row.seat === seat && row.slotKey === slotKey)
+    );
+    if (!isBlocked) return true;
+  }
+
+  return false;
+}
+
+async function ensureWindowIsBookable(params: {
+  companyId: string;
+  staffId: string;
+  bookingDate: string;
+  occupiedStartAtMs: number;
+  occupiedEndAtMs: number;
+  capacity: number;
+  ignoreLockIds?: string[];
+}): Promise<void> {
+  const { companyId, staffId, bookingDate, occupiedStartAtMs, occupiedEndAtMs, capacity, ignoreLockIds } = params;
+  const { settings, blocks } = await fetchDayState(companyId, bookingDate, staffId);
+  if (!settings.enabled) throw new Error("Online boeken staat uit voor dit bedrijf.");
+
+  const day = settings.weekSchedule[dayKeyFromDateKey(bookingDate)];
+  if (!day?.open) throw new Error("Deze dag is niet beschikbaar.");
+
+  if (!candidateFitsInAnyRange(day.ranges, bookingDate, occupiedStartAtMs, occupiedEndAtMs)) {
+    throw new Error("Tijdslot valt buiten de ingestelde beschikbaarheid.");
+  }
+
+  if (overlapsAnyBlock(blocks, occupiedStartAtMs, occupiedEndAtMs)) {
+    throw new Error("Dit tijdslot is geblokkeerd.");
+  }
+
+  const hasSeat = await hasOpenSeatForWindow({
+    companyId,
+    staffId,
+    bookingDate,
+    occupiedStartAtMs,
+    occupiedEndAtMs,
+    capacity,
+    ignoreLockIds,
+  });
+  if (!hasSeat) {
+    throw new Error("Dit tijdslot is niet meer beschikbaar.");
+  }
+}
+
+async function suggestNextSlotForBooking(row: Booking): Promise<BookingSlot | null> {
+  const slots = await listAvailableBookingSlots({
+    companyId: row.companyId,
+    staffId: row.staffId,
+    bookingDate: row.bookingDate,
+    serviceDurationMin: row.serviceDurationMin,
+    bufferBeforeMin: row.serviceBufferBeforeMin,
+    bufferAfterMin: row.serviceBufferAfterMin,
+    capacity: row.serviceCapacity,
+  });
+
+  const next = slots.find((slot) => slot.startAtMs > row.startAtMs);
+  return next ?? null;
+}
+
 function candidateFitsInAnyRange(dayRanges: TimeRange[], bookingDate: string, occupiedStartMs: number, occupiedEndMs: number): boolean {
   return dayRanges.some((range) => {
     const startMin = toMinutes(range.start);
@@ -378,12 +603,10 @@ function overlapsAnyBlock(blocks: BookingBlock[], occupiedStartMs: number, occup
   return blocks.some((block) => overlaps(occupiedStartMs, occupiedEndMs, block.startAtMs, block.endAtMs));
 }
 
-function overlapCount(rows: Booking[], occupiedStartMs: number, occupiedEndMs: number): number {
-  return rows.filter((row) => {
-    if (!ACTIVE_STATUSES.includes(row.status)) return false;
-    const window = getBookingOccupiedWindow(row);
-    return overlaps(occupiedStartMs, occupiedEndMs, window.occupiedStartAtMs, window.occupiedEndAtMs);
-  }).length;
+function isPermissionDeniedError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "");
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return code.includes("permission-denied") || message.includes("missing or insufficient permissions");
 }
 
 async function fetchCompanyBookingsRaw(companyId: string): Promise<Booking[]> {
@@ -393,9 +616,39 @@ async function fetchCompanyBookingsRaw(companyId: string): Promise<Booking[]> {
 }
 
 async function fetchCompanyBlocksRaw(companyId: string): Promise<BookingBlock[]> {
-  const snap = await getDocs(collection(db, "companies", companyId, "booking_blocks"));
-  const rows = snap.docs.map((row) => toBookingBlock(row.id, companyId, row.data()));
-  return rows.sort((a, b) => a.startAtMs - b.startAtMs);
+  try {
+    const snap = await getDocs(collection(db, "companies", companyId, "booking_blocks"));
+    const rows = snap.docs.map((row) => toBookingBlock(row.id, companyId, row.data()));
+    return rows.sort((a, b) => a.startAtMs - b.startAtMs);
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      console.warn("[bookingRepo/fetchCompanyBlocksRaw] permission denied, fallback without blocks", error);
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function fetchDayLocksRaw(companyId: string, bookingDate: string, staffId?: string): Promise<SlotLock[]> {
+  try {
+    const locksQuery = query(collection(db, "booking_slot_locks"), where("companyId", "==", companyId));
+    const snap = await getDocs(locksQuery);
+    return snap.docs
+      .map((row) => toSlotLock(row.id, row.data()))
+      .filter(
+        (row) =>
+          row.bookingDate === bookingDate &&
+          row.slotKey.length > 0 &&
+          row.seat >= 0 &&
+          (!staffId || row.staffId === staffId)
+      );
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      console.warn("[bookingRepo/fetchDayLocksRaw] permission denied, fallback without locks", error);
+      return [];
+    }
+    throw error;
+  }
 }
 
 export function getDefaultWeekSchedule(): BookingWeekSchedule {
@@ -526,6 +779,7 @@ function filterBookings(rows: Booking[], filter?: BookingQueryFilter): Booking[]
   return rows.filter((row) => {
     if (filter.statuses?.length && !filter.statuses.includes(row.status)) return false;
     if (filter.serviceId && row.serviceId !== filter.serviceId) return false;
+    if (filter.staffId && row.staffId !== filter.staffId) return false;
     if (filter.dateFrom && !isSameOrAfterDate(row.bookingDate, filter.dateFrom)) return false;
     if (filter.dateTo && !isSameOrBeforeDate(row.bookingDate, filter.dateTo)) return false;
     return true;
@@ -542,6 +796,13 @@ export async function fetchCustomerBookings(customerId: string): Promise<Booking
   const snap = await getDocs(q);
   const rows = snap.docs.map((row) => toBooking(row.id, row.data()));
   return sortBookingsByCreatedDesc(normalizeBookingRows(rows));
+}
+
+export async function fetchEmployeeBookings(employeeId: string, filter?: BookingQueryFilter): Promise<Booking[]> {
+  const q = query(collection(db, "bookings"), where("staffId", "==", employeeId));
+  const snap = await getDocs(q);
+  const rows = snap.docs.map((row) => toBooking(row.id, row.data()));
+  return sortBookingsByStartAsc(normalizeBookingRows(filterBookings(rows, filter)));
 }
 
 export function subscribeCompanyBookings(
@@ -576,30 +837,39 @@ export function subscribeCustomerBookings(
   );
 }
 
-async function fetchDayState(companyId: string, bookingDate: string): Promise<{
+export function subscribeEmployeeBookings(
+  employeeId: string,
+  onData: (items: Booking[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, "bookings"), where("staffId", "==", employeeId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const rows = snap.docs.map((row: QueryDocumentSnapshot<DocumentData>) => toBooking(row.id, row.data()));
+      onData(sortBookingsByStartAsc(normalizeBookingRows(rows)));
+    },
+    (error) => onError?.(error)
+  );
+}
+
+async function fetchDayState(companyId: string, bookingDate: string, staffId?: string): Promise<{
   settings: BookingSettings;
-  bookings: Booking[];
+  locks: SlotLock[];
   blocks: BookingBlock[];
 }> {
-  const dayBookingsQuery = query(
-    collection(db, "bookings"),
-    where("companyId", "==", companyId),
-    where("bookingDate", "==", bookingDate)
-  );
-
-  const [settings, dayBookingsSnap, allBlocks] = await Promise.all([
+  const [settings, dayLocks, allBlocks] = await Promise.all([
     getCompanyBookingSettings(companyId),
-    getDocs(dayBookingsQuery),
+    fetchDayLocksRaw(companyId, bookingDate, staffId),
     fetchCompanyBlocksRaw(companyId),
   ]);
 
-  const dayBookings = normalizeBookingRows(dayBookingsSnap.docs.map((row) => toBooking(row.id, row.data())));
   const { dayStartMs, dayEndMs } = buildDayRangeMs(bookingDate);
   const dayBlocks = allBlocks.filter((block) => overlaps(block.startAtMs, block.endAtMs, dayStartMs, dayEndMs));
 
   return {
     settings,
-    bookings: dayBookings,
+    locks: dayLocks,
     blocks: dayBlocks,
   };
 }
@@ -611,6 +881,7 @@ function roundToNextInterval(totalMinutes: number, intervalMin: number): number 
 
 export async function listAvailableBookingSlots(params: {
   companyId: string;
+  staffId?: string;
   bookingDate: string;
   serviceDurationMin: number;
   bufferBeforeMin?: number;
@@ -619,6 +890,7 @@ export async function listAvailableBookingSlots(params: {
 }): Promise<BookingSlot[]> {
   const {
     companyId,
+    staffId,
     bookingDate,
     serviceDurationMin,
     bufferBeforeMin = 0,
@@ -626,7 +898,8 @@ export async function listAvailableBookingSlots(params: {
     capacity = 1,
   } = params;
 
-  const { settings, bookings, blocks } = await fetchDayState(companyId, bookingDate);
+  const selectedStaffId = staffId?.trim() || companyId;
+  const { settings, locks, blocks } = await fetchDayState(companyId, bookingDate, selectedStaffId);
   if (!settings.enabled) return [];
 
   const day = settings.weekSchedule[dayKeyFromDateKey(bookingDate)];
@@ -660,8 +933,15 @@ export async function listAvailableBookingSlots(params: {
       if (!fitsRange) continue;
       if (overlapsAnyBlock(blocks, occupiedStartAtMs, occupiedEndAtMs)) continue;
 
-      const reserved = overlapCount(bookings, occupiedStartAtMs, occupiedEndAtMs);
-      const remainingCapacity = slotCapacity - reserved;
+      const requiredSlotKeys = buildSlotLockKeys(bookingDate, occupiedStartAtMs, occupiedEndAtMs);
+      let reservedSeats = 0;
+      for (let seat = 0; seat < slotCapacity; seat += 1) {
+        const occupiedSeat = requiredSlotKeys.some((slotKey) =>
+          locks.some((row) => row.seat === seat && row.slotKey === slotKey)
+        );
+        if (occupiedSeat) reservedSeats += 1;
+      }
+      const remainingCapacity = slotCapacity - reservedSeats;
       if (remainingCapacity <= 0) continue;
 
       slots.push({
@@ -686,8 +966,8 @@ function assertStatusTransition(current: BookingStatus, next: BookingStatus, act
     return;
   }
 
-  if (next !== "cancelled_by_customer") throw new Error("Ongeldige status.");
-  if (current !== "pending" && current !== "confirmed") {
+  if (next !== "cancelled_by_customer" && next !== "cancelled_with_fee") throw new Error("Ongeldige status.");
+  if (!isOpenRequest(current) && current !== "confirmed") {
     throw new Error("Deze boeking kan niet meer geannuleerd worden.");
   }
 }
@@ -709,6 +989,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
   }
 
   const bookingRef = doc(collection(db, "bookings"));
+  const selectedStaffId = payload.staffId?.trim() || payload.companyId;
 
   const result = await runTransaction(db, async (transaction) => {
     const companyRef = doc(db, "companies_public", payload.companyId);
@@ -720,9 +1001,26 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
 
     const companyData = companySnap.data() as Record<string, unknown>;
     const serviceData = serviceSnap.data() as Record<string, unknown>;
+    let selectedStaffName = payload.staffName?.trim() || String(companyData.name ?? "Salon team");
 
     if (!Boolean(companyData.isActive)) throw new Error("Dit bedrijf is momenteel niet beschikbaar.");
     if (!Boolean(serviceData.isActive)) throw new Error("Deze dienst is niet beschikbaar.");
+
+    if (selectedStaffId !== payload.companyId) {
+      const staffSnap = await transaction.get(
+        doc(db, "companies_public", payload.companyId, "staff_public", selectedStaffId)
+      );
+      if (!staffSnap.exists()) {
+        throw new Error("Geselecteerde medewerker is niet gevonden.");
+      }
+
+      const staffData = staffSnap.data() as Record<string, unknown>;
+      if (typeof staffData.isActive === "boolean" && !staffData.isActive) {
+        throw new Error("Geselecteerde medewerker is niet beschikbaar.");
+      }
+
+      selectedStaffName = String(staffData.displayName ?? selectedStaffName);
+    }
 
     const settings = normalizeBookingSettings(companyData);
     if (!settings.enabled) throw new Error("Online boeken staat uit voor dit bedrijf.");
@@ -745,24 +1043,19 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       throw new Error("Tijdslot valt buiten de ingestelde beschikbaarheid.");
     }
 
-    const blocksSnap = await getDocs(collection(db, "companies", payload.companyId, "booking_blocks"));
-    const blocks = blocksSnap.docs.map((row) => toBookingBlock(row.id, payload.companyId, row.data()));
+    let blocks: BookingBlock[] = [];
+    try {
+      const blocksSnap = await getDocs(collection(db, "companies", payload.companyId, "booking_blocks"));
+      blocks = blocksSnap.docs.map((row) => toBookingBlock(row.id, payload.companyId, row.data()));
+    } catch (error) {
+      if (!isPermissionDeniedError(error)) {
+        throw error;
+      }
+      console.warn("[bookingRepo/createBooking] permission denied on booking_blocks, fallback without blocks", error);
+    }
 
     if (overlapsAnyBlock(blocks, occupiedStartAtMs, occupiedEndAtMs)) {
       throw new Error("Dit tijdslot is geblokkeerd.");
-    }
-
-    const dayBookingsSnap = await getDocs(
-      query(
-        collection(db, "bookings"),
-        where("companyId", "==", payload.companyId),
-        where("bookingDate", "==", bookingDate)
-      )
-    );
-    const dayBookings = normalizeBookingRows(dayBookingsSnap.docs.map((row) => toBooking(row.id, row.data())));
-    const reservedByExistingBookings = overlapCount(dayBookings, occupiedStartAtMs, occupiedEndAtMs);
-    if (reservedByExistingBookings >= serviceCapacity) {
-      throw new Error("Dit tijdslot is net bezet. Kies een ander moment.");
     }
 
     const lockSlotKeys = buildSlotLockKeys(bookingDate, occupiedStartAtMs, occupiedEndAtMs);
@@ -771,12 +1064,17 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
 
     for (let seat = 0; seat < serviceCapacity; seat += 1) {
       const candidateLockIds = lockSlotKeys.map((slotKey) =>
-        buildSlotLockDocId(payload.companyId, bookingDate, seat, slotKey)
+        buildSlotLockDocId(payload.companyId, selectedStaffId, bookingDate, seat, slotKey)
       );
+      const legacyLockIds =
+        selectedStaffId === payload.companyId
+          ? lockSlotKeys.map((slotKey) => buildLegacySlotLockDocId(payload.companyId, bookingDate, seat, slotKey))
+          : [];
 
-      const lockSnaps = await Promise.all(
-        candidateLockIds.map((lockId) => transaction.get(doc(db, "booking_slot_locks", lockId)))
-      );
+      const lockSnaps = await Promise.all([
+        ...candidateLockIds.map((lockId) => transaction.get(doc(db, "booking_slot_locks", lockId))),
+        ...legacyLockIds.map((lockId) => transaction.get(doc(db, "booking_slot_locks", lockId))),
+      ]);
 
       if (lockSnaps.every((snap) => !snap.exists())) {
         chosenSeat = seat;
@@ -789,11 +1087,13 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       throw new Error("Dit tijdslot is net bezet. Kies een ander moment.");
     }
 
-    const status: BookingStatus = settings.autoConfirm ? "confirmed" : "pending";
+    const status: BookingStatus = "pending";
+    const nowDate = new Date();
 
     lockIds.forEach((lockId, index) => {
       transaction.set(doc(db, "booking_slot_locks", lockId), {
         companyId: payload.companyId,
+        staffId: selectedStaffId,
         bookingDate,
         slotKey: lockSlotKeys[index],
         seat: chosenSeat,
@@ -808,6 +1108,8 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       companyId: payload.companyId,
       companyName: String(companyData.name ?? "Onbekende salon"),
       companyLogoUrl: typeof companyData.logoUrl === "string" ? companyData.logoUrl : "",
+      staffId: selectedStaffId,
+      staffName: selectedStaffName,
       serviceId: payload.serviceId,
       serviceName: String(serviceData.name ?? "Dienst"),
       serviceCategory: String(serviceData.category ?? "Overig"),
@@ -822,11 +1124,24 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       occupiedStartAt: new Date(occupiedStartAtMs),
       occupiedEndAt: new Date(occupiedEndAtMs),
       status,
+      proposalBy: "",
+      proposedBookingDate: "",
+      proposedStartAt: null,
+      proposedEndAt: null,
+      proposedOccupiedStartAt: null,
+      proposedOccupiedEndAt: null,
+      proposedAt: null,
+      customerRescheduleCount: 0,
+      customerConfirmedAt: nowDate,
+      companyConfirmedAt: null,
+      confirmedAt: null,
       customerId: payload.customerId,
       customerName: payload.customerName.trim(),
       customerPhone: payload.customerPhone.trim(),
       customerEmail: payload.customerEmail?.trim() ?? "",
       note: payload.note?.trim() ?? "",
+      cancellationFeePercent: 0,
+      cancellationFeeAmount: 0,
       lockIds,
       lockSeat: chosenSeat,
       createdAt: serverTimestamp(),
@@ -846,7 +1161,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
     customerName: payload.customerName,
     serviceId: payload.serviceId,
     bookingId: bookingRef.id,
-    isAutoConfirmed: result.status === "confirmed",
+    isAutoConfirmed: false,
   }).catch(() => null);
 
   return {
@@ -876,12 +1191,366 @@ export async function setBookingStatusByCompany(
 
     transaction.update(ref, {
       status,
+      ...(status === "confirmed"
+        ? {
+            companyConfirmedAt: serverTimestamp(),
+            confirmedAt: serverTimestamp(),
+          }
+        : null),
+      ...clearProposalPatch(),
       updatedAt: serverTimestamp(),
     });
   });
 }
 
-export async function cancelBookingByCustomer(bookingId: string, customerId: string): Promise<void> {
+async function reserveLocksInTransaction(
+  transaction: Transaction,
+  params: {
+    bookingId: string;
+    companyId: string;
+    staffId: string;
+    customerId: string;
+    bookingDate: string;
+    occupiedStartAtMs: number;
+    occupiedEndAtMs: number;
+    capacity: number;
+    ignoreLockIds?: string[];
+  }
+): Promise<{ lockIds: string[]; seat: number; slotKeys: string[] }> {
+  const {
+    bookingId,
+    companyId,
+    staffId,
+    customerId,
+    bookingDate,
+    occupiedStartAtMs,
+    occupiedEndAtMs,
+    capacity,
+    ignoreLockIds = [],
+  } = params;
+
+  const ignoreSet = new Set(ignoreLockIds);
+  const slotKeys = buildSlotLockKeys(bookingDate, occupiedStartAtMs, occupiedEndAtMs);
+  const seats = Math.max(1, normalizeCapacity(capacity, 1));
+
+  for (let seat = 0; seat < seats; seat += 1) {
+    const candidateLockIds = slotKeys.map((slotKey) =>
+      buildSlotLockDocId(companyId, staffId, bookingDate, seat, slotKey)
+    );
+    const legacyLockIds =
+      staffId === companyId
+        ? slotKeys.map((slotKey) => buildLegacySlotLockDocId(companyId, bookingDate, seat, slotKey))
+        : [];
+    const lockCheckIds = [...candidateLockIds, ...legacyLockIds];
+    const lockSnaps = await Promise.all(
+      lockCheckIds.map((lockId) => transaction.get(doc(db, "booking_slot_locks", lockId)))
+    );
+
+    const isBlocked = lockSnaps.some((snap, index) => snap.exists() && !ignoreSet.has(lockCheckIds[index]));
+    if (isBlocked) continue;
+
+    candidateLockIds.forEach((lockId, index) => {
+      transaction.set(doc(db, "booking_slot_locks", lockId), {
+        companyId,
+        staffId,
+        bookingDate,
+        slotKey: slotKeys[index],
+        seat,
+        bookingId,
+        userId: customerId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    return {
+      lockIds: candidateLockIds,
+      seat,
+      slotKeys,
+    };
+  }
+
+  throw new Error("Dit voorgestelde tijdslot is niet meer beschikbaar.");
+}
+
+export async function proposeBookingTimeByCompany(params: {
+  bookingId: string;
+  companyId: string;
+  proposedStartAtMs: number;
+}): Promise<void> {
+  const { bookingId, companyId, proposedStartAtMs } = params;
+  const snap = await getDoc(doc(db, "bookings", bookingId));
+  if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+
+  const row = toBooking(snap.id, snap.data());
+  if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+  if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
+  if (!Number.isFinite(proposedStartAtMs) || proposedStartAtMs <= Date.now() - 60_000) {
+    throw new Error("Kies een geldig toekomstig tijdstip.");
+  }
+  if (Math.abs(proposedStartAtMs - row.startAtMs) < 60_000) {
+    throw new Error("Kies een ander tijdstip dan de huidige aanvraag.");
+  }
+
+  const window = buildWindowFromStart(
+    proposedStartAtMs,
+    row.serviceDurationMin,
+    row.serviceBufferBeforeMin,
+    row.serviceBufferAfterMin
+  );
+
+  await ensureWindowIsBookable({
+    companyId,
+    staffId: row.staffId,
+    bookingDate: window.bookingDate,
+    occupiedStartAtMs: window.occupiedStartAtMs,
+    occupiedEndAtMs: window.occupiedEndAtMs,
+    capacity: row.serviceCapacity,
+    ignoreLockIds: row.lockIds,
+  });
+
+  await updateDoc(doc(db, "bookings", bookingId), {
+    status: "proposed_by_company",
+    proposalBy: "company",
+    proposedBookingDate: window.bookingDate,
+    proposedStartAt: new Date(window.startAtMs),
+    proposedEndAt: new Date(window.endAtMs),
+    proposedOccupiedStartAt: new Date(window.occupiedStartAtMs),
+    proposedOccupiedEndAt: new Date(window.occupiedEndAtMs),
+    proposedAt: serverTimestamp(),
+    companyConfirmedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function proposeNextBookingTimeByCompany(
+  bookingId: string,
+  companyId: string
+): Promise<{ proposedStartAtMs: number }> {
+  const snap = await getDoc(doc(db, "bookings", bookingId));
+  if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+  const row = toBooking(snap.id, snap.data());
+  if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+  if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
+
+  const nextSlot = await suggestNextSlotForBooking(row);
+  if (!nextSlot) throw new Error("Geen alternatief tijdslot beschikbaar op deze dag.");
+
+  await proposeBookingTimeByCompany({
+    bookingId,
+    companyId,
+    proposedStartAtMs: nextSlot.startAtMs,
+  });
+
+  return {
+    proposedStartAtMs: nextSlot.startAtMs,
+  };
+}
+
+export async function acceptCompanyProposalByCustomer(bookingId: string, customerId: string): Promise<void> {
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+
+    const row = toBooking(snap.id, snap.data());
+    if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
+      throw new Error("Er is geen voorstel van het bedrijf om te bevestigen.");
+    }
+
+    const proposedStartAtMs = row.proposedStartAtMs || 0;
+    const proposedEndAtMs = row.proposedEndAtMs || 0;
+    const proposedOccupiedStartAtMs = row.proposedOccupiedStartAtMs || 0;
+    const proposedOccupiedEndAtMs = row.proposedOccupiedEndAtMs || 0;
+    const proposedBookingDate = row.proposedBookingDate || formatDateKey(new Date(proposedStartAtMs));
+
+    if (!proposedStartAtMs || !proposedEndAtMs || !proposedOccupiedStartAtMs || !proposedOccupiedEndAtMs) {
+      throw new Error("Voorstelgegevens ontbreken.");
+    }
+
+    const reservation = await reserveLocksInTransaction(transaction, {
+      bookingId: row.id,
+      companyId: row.companyId,
+      staffId: row.staffId,
+      customerId: row.customerId,
+      bookingDate: proposedBookingDate,
+      occupiedStartAtMs: proposedOccupiedStartAtMs,
+      occupiedEndAtMs: proposedOccupiedEndAtMs,
+      capacity: row.serviceCapacity,
+      ignoreLockIds: row.lockIds,
+    });
+
+    releaseSlotLocks(transaction, getBookingLockIds(row));
+
+    transaction.update(ref, {
+      bookingDate: proposedBookingDate,
+      startAt: new Date(proposedStartAtMs),
+      endAt: new Date(proposedEndAtMs),
+      occupiedStartAt: new Date(proposedOccupiedStartAtMs),
+      occupiedEndAt: new Date(proposedOccupiedEndAtMs),
+      lockIds: reservation.lockIds,
+      lockSeat: reservation.seat,
+      status: "confirmed",
+      customerConfirmedAt: serverTimestamp(),
+      confirmedAt: serverTimestamp(),
+      ...clearProposalPatch(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function declineCompanyProposalByCustomer(bookingId: string, customerId: string): Promise<void> {
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+
+    const row = toBooking(snap.id, snap.data());
+    if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
+      throw new Error("Er is geen voorstel om te weigeren.");
+    }
+
+    releaseSlotLocks(transaction, getBookingLockIds(row));
+    transaction.update(ref, {
+      status: "declined",
+      ...clearProposalPatch(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function requestSameDayRescheduleByCustomer(
+  bookingId: string,
+  customerId: string
+): Promise<{ proposedStartAtMs: number }> {
+  const snap = await getDoc(doc(db, "bookings", bookingId));
+  if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+  const row = toBooking(snap.id, snap.data());
+  if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
+  if (row.status !== "confirmed") throw new Error("Alleen bevestigde afspraken kunnen verplaatst worden.");
+  if (!isSameCalendarDay(row.bookingDate, Date.now())) {
+    throw new Error("Verplaatsen kan alleen op de dag van de afspraak.");
+  }
+  if ((row.customerRescheduleCount || 0) >= SAME_DAY_RESCHEDULE_LIMIT) {
+    throw new Error("Je kunt deze afspraak vandaag niet nog een keer verplaatsen.");
+  }
+
+  const nextSlot = await suggestNextSlotForBooking(row);
+  if (!nextSlot) throw new Error("Geen alternatief tijdslot beschikbaar vandaag.");
+  if (formatDateKey(new Date(nextSlot.startAtMs)) !== row.bookingDate) {
+    throw new Error("Verplaatsen kan alleen naar een tijdslot op dezelfde dag.");
+  }
+
+  const window = buildWindowFromStart(
+    nextSlot.startAtMs,
+    row.serviceDurationMin,
+    row.serviceBufferBeforeMin,
+    row.serviceBufferAfterMin
+  );
+
+  await ensureWindowIsBookable({
+    companyId: row.companyId,
+    staffId: row.staffId,
+    bookingDate: window.bookingDate,
+    occupiedStartAtMs: window.occupiedStartAtMs,
+    occupiedEndAtMs: window.occupiedEndAtMs,
+    capacity: row.serviceCapacity,
+    ignoreLockIds: row.lockIds,
+  });
+
+  await updateDoc(doc(db, "bookings", bookingId), {
+    status: "pending_reschedule_approval",
+    proposalBy: "customer",
+    proposedBookingDate: window.bookingDate,
+    proposedStartAt: new Date(window.startAtMs),
+    proposedEndAt: new Date(window.endAtMs),
+    proposedOccupiedStartAt: new Date(window.occupiedStartAtMs),
+    proposedOccupiedEndAt: new Date(window.occupiedEndAtMs),
+    proposedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    proposedStartAtMs: window.startAtMs,
+  };
+}
+
+export async function respondToCustomerRescheduleByCompany(
+  bookingId: string,
+  companyId: string,
+  decision: "approved" | "declined"
+): Promise<void> {
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+
+    const row = toBooking(snap.id, snap.data());
+    if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (row.status !== "pending_reschedule_approval" || row.proposalBy !== "customer") {
+      throw new Error("Er staat geen verplaatsingsaanvraag open.");
+    }
+
+    if (decision === "declined") {
+      transaction.update(ref, {
+        status: "confirmed",
+        ...clearProposalPatch(),
+        updatedAt: serverTimestamp(),
+      });
+      return;
+    }
+
+    const proposedStartAtMs = row.proposedStartAtMs || 0;
+    const proposedEndAtMs = row.proposedEndAtMs || 0;
+    const proposedOccupiedStartAtMs = row.proposedOccupiedStartAtMs || 0;
+    const proposedOccupiedEndAtMs = row.proposedOccupiedEndAtMs || 0;
+    const proposedBookingDate = row.proposedBookingDate || formatDateKey(new Date(proposedStartAtMs));
+
+    if (!proposedStartAtMs || !proposedEndAtMs || !proposedOccupiedStartAtMs || !proposedOccupiedEndAtMs) {
+      throw new Error("Voorstelgegevens ontbreken.");
+    }
+
+    const reservation = await reserveLocksInTransaction(transaction, {
+      bookingId: row.id,
+      companyId: row.companyId,
+      staffId: row.staffId,
+      customerId: row.customerId,
+      bookingDate: proposedBookingDate,
+      occupiedStartAtMs: proposedOccupiedStartAtMs,
+      occupiedEndAtMs: proposedOccupiedEndAtMs,
+      capacity: row.serviceCapacity,
+      ignoreLockIds: row.lockIds,
+    });
+
+    releaseSlotLocks(transaction, getBookingLockIds(row));
+
+    transaction.update(ref, {
+      bookingDate: proposedBookingDate,
+      startAt: new Date(proposedStartAtMs),
+      endAt: new Date(proposedEndAtMs),
+      occupiedStartAt: new Date(proposedOccupiedStartAtMs),
+      occupiedEndAt: new Date(proposedOccupiedEndAtMs),
+      lockIds: reservation.lockIds,
+      lockSeat: reservation.seat,
+      customerRescheduleCount: (row.customerRescheduleCount || 0) + 1,
+      status: "confirmed",
+      companyConfirmedAt: serverTimestamp(),
+      confirmedAt: serverTimestamp(),
+      ...clearProposalPatch(),
+      updatedAt: serverTimestamp(),
+    });
+  });
+}
+
+export async function cancelBookingByCustomer(
+  bookingId: string,
+  customerId: string
+): Promise<{ feePercent: number; feeAmount: number }> {
+  const nowMs = Date.now();
+  let feeResult = { feePercent: 0, feeAmount: 0 };
+
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
@@ -890,19 +1559,32 @@ export async function cancelBookingByCustomer(bookingId: string, customerId: str
     const row = toBooking(snap.id, snap.data());
     if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
 
-    assertStatusTransition(row.status, "cancelled_by_customer", "customer");
+    const computed = computeCancellationFee(row.startAtMs, row.servicePrice, nowMs);
+    const nextStatus: BookingStatus = computed.percent > 0 ? "cancelled_with_fee" : "cancelled_by_customer";
+
+    assertStatusTransition(row.status, nextStatus, "customer");
 
     releaseSlotLocks(transaction, getBookingLockIds(row));
+    feeResult = {
+      feePercent: computed.percent,
+      feeAmount: computed.amount,
+    };
 
     transaction.update(ref, {
-      status: "cancelled_by_customer",
+      status: nextStatus,
+      cancellationFeePercent: computed.percent,
+      cancellationFeeAmount: computed.amount,
+      ...clearProposalPatch(),
       updatedAt: serverTimestamp(),
     });
   });
+
+  return feeResult;
 }
 
 export async function fetchCompanyBookingSlotsForDate(params: {
   companyId: string;
+  staffId?: string;
   bookingDate: string;
   serviceDurationMin: number;
   bufferBeforeMin?: number;

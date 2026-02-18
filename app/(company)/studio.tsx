@@ -27,6 +27,8 @@ import {
 } from "../../lib/feedRepo";
 import { auth } from "../../lib/firebase";
 import {
+  captureImageWithCamera,
+  pickImageFromLibrary,
   pickVideoFromLibrary,
   recordVideoWithCamera,
   type PickedMedia,
@@ -54,6 +56,7 @@ const MAX_VIDEO_SECONDS = 15;
 type StudioTab = "upload" | "videos";
 type UploadVisibility = "public" | "clients";
 type UploadStep = "select" | "details";
+type UploadMediaType = "video" | "image";
 
 function parseHashtagsInput(value: string): string[] {
   const normalized = value
@@ -87,8 +90,10 @@ function cloudinaryVideoThumbnailFromUrl(videoUrl: string): string {
   return rawQuery ? `${path}?${rawQuery}` : path;
 }
 
-function getPostThumbnail(post: Pick<FeedPost, "thumbnailUrl" | "videoUrl">): string {
+function getPostThumbnail(post: Pick<FeedPost, "thumbnailUrl" | "videoUrl" | "imageUrl" | "mediaType">): string {
   if (post.thumbnailUrl?.trim()) return post.thumbnailUrl.trim();
+  if (post.mediaType === "image" && post.imageUrl?.trim()) return post.imageUrl.trim();
+  if (post.imageUrl?.trim() && !post.videoUrl?.trim()) return post.imageUrl.trim();
   return cloudinaryVideoThumbnailFromUrl(post.videoUrl);
 }
 
@@ -133,7 +138,9 @@ export default function CompanyStudioScreen() {
   const [hashtagsInput, setHashtagsInput] = useState("");
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [visibility, setVisibility] = useState<UploadVisibility>("public");
+  const [uploadMediaType, setUploadMediaType] = useState<UploadMediaType>("video");
   const [video, setVideo] = useState<PickedMedia | null>(null);
+  const [imageMedia, setImageMedia] = useState<PickedMedia | null>(null);
   const [uploadStep, setUploadStep] = useState<UploadStep>("select");
   const [videoLengthWarning, setVideoLengthWarning] = useState<string | null>(null);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
@@ -161,19 +168,30 @@ export default function CompanyStudioScreen() {
   );
 
   const previewThumbnail = useMemo(() => {
-    if (video) return "";
+    if (video || imageMedia) return "";
     if (!editingItem) return "";
     return getPostThumbnail(editingItem);
-  }, [editingItem, video]);
+  }, [editingItem, video, imageMedia]);
 
   const submitLabel = editingPostId ? "Wijzigingen opslaan" : "Upload plaatsen";
   const canSubmit = useMemo(() => {
     if (uploading) return false;
     if (title.trim().length < 2) return false;
-    if (!editingPostId && !video) return false;
-    if (!hasActiveServices && (!editingPostId || Boolean(video))) return false;
+    if (!editingPostId && !video && !imageMedia) return false;
+    if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) return false;
     return true;
-  }, [uploading, title, editingPostId, video, hasActiveServices]);
+  }, [uploading, title, editingPostId, video, imageMedia, hasActiveServices]);
+
+  function switchUploadMediaType(nextType: UploadMediaType) {
+    setUploadMediaType(nextType);
+    if (nextType === "video") {
+      setImageMedia(null);
+      return;
+    }
+
+    setVideo(null);
+    setVideoLengthWarning(null);
+  }
 
   const load = useCallback(async () => {
     if (!uid) return;
@@ -224,7 +242,9 @@ export default function CompanyStudioScreen() {
     setHashtagsInput("");
     setSelectedServiceId("");
     setVisibility("public");
+    setUploadMediaType("video");
     setVideo(null);
+    setImageMedia(null);
     setUploadStep("select");
     setVideoLengthWarning(null);
     setEditingPostId(null);
@@ -238,7 +258,9 @@ export default function CompanyStudioScreen() {
     setHashtagsInput(formatHashtags(post.hashtags));
     setSelectedServiceId(post.serviceId ?? "");
     setVisibility(post.visibility === "clients_only" || !post.isActive ? "clients" : "public");
+    setUploadMediaType(post.mediaType === "image" ? "image" : "video");
     setVideo(null);
+    setImageMedia(null);
     setUploadStep("details");
     setVideoLengthWarning(null);
     setStudioTab("upload");
@@ -267,9 +289,10 @@ export default function CompanyStudioScreen() {
         return;
       }
 
+      setUploadMediaType("video");
+      setImageMedia(null);
       setVideo(picked);
       setVideoLengthWarning(null);
-      setUploadStep("details");
     } catch (error: any) {
       const message = error?.message ?? "Probeer opnieuw.";
 
@@ -301,11 +324,30 @@ export default function CompanyStudioScreen() {
     }
   }
 
+  async function selectImage(source: "gallery" | "camera") {
+    if (!hasActiveServices && !editingPostId) {
+      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een feed post maakt.");
+      return;
+    }
+
+    try {
+      const picked = source === "gallery" ? await pickImageFromLibrary() : await captureImageWithCamera();
+      if (!picked) return;
+
+      setUploadMediaType("image");
+      setVideo(null);
+      setVideoLengthWarning(null);
+      setImageMedia(picked);
+    } catch (error: any) {
+      Alert.alert("Kon foto niet kiezen", error?.message ?? "Probeer opnieuw.");
+    }
+  }
+
   async function onSubmit() {
     if (!uid) return;
 
-    if (!hasActiveServices && (!editingPostId || Boolean(video))) {
-      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een video plaatst.");
+    if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) {
+      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een feed post plaatst.");
       return;
     }
 
@@ -314,8 +356,8 @@ export default function CompanyStudioScreen() {
       return;
     }
 
-    if (!editingPostId && !video) {
-      Alert.alert("Video ontbreekt", "Kies eerst een video om te uploaden.");
+    if (!editingPostId && !video && !imageMedia) {
+      Alert.alert("Media ontbreekt", "Kies eerst een video of foto om te uploaden.");
       return;
     }
 
@@ -325,9 +367,11 @@ export default function CompanyStudioScreen() {
       const nextVisibility = visibility === "public" ? "public" : "clients_only";
       const nextIsActive = visibility === "public";
       const serviceName = selectedService?.name ?? "";
+      const selectedMediaType: UploadMediaType = imageMedia ? "image" : "video";
 
       if (editingPostId) {
         let nextVideoUrl: string | undefined;
+        let nextImageUrl: string | undefined;
         let nextThumbUrl: string | undefined;
 
         if (video) {
@@ -337,6 +381,14 @@ export default function CompanyStudioScreen() {
             video.mimeType
           );
           nextThumbUrl = cloudinaryVideoThumbnailFromUrl(nextVideoUrl);
+        }
+        if (imageMedia) {
+          nextImageUrl = await uploadUriToStorage(
+            `companies/${uid}/feed/${Date.now()}-${imageMedia.fileName}`,
+            imageMedia.uri,
+            imageMedia.mimeType
+          );
+          nextThumbUrl = nextImageUrl;
         }
 
         await updateMyFeedPost(editingPostId, {
@@ -350,23 +402,47 @@ export default function CompanyStudioScreen() {
           isActive: nextIsActive,
           ...(nextVideoUrl
             ? {
+                mediaType: "video",
                 videoUrl: nextVideoUrl,
+                imageUrl: "",
+                thumbnailUrl: nextThumbUrl || undefined,
+              }
+            : {}),
+          ...(nextImageUrl
+            ? {
+                mediaType: "image",
+                imageUrl: nextImageUrl,
+                videoUrl: "",
                 thumbnailUrl: nextThumbUrl || undefined,
               }
             : {}),
         });
 
-        Alert.alert("Opgeslagen", "Je video is bijgewerkt.");
+        Alert.alert("Opgeslagen", "Je feed post is bijgewerkt.");
       } else {
-        const pickedVideo = video;
-        if (!pickedVideo) return;
+        let uploadedVideoUrl = "";
+        let uploadedImageUrl = "";
+        let uploadedThumb = "";
 
-        const uploadedUrl = await uploadUriToStorage(
-          `companies/${uid}/feed/${Date.now()}-${pickedVideo.fileName}`,
-          pickedVideo.uri,
-          pickedVideo.mimeType
-        );
-        const uploadedThumb = cloudinaryVideoThumbnailFromUrl(uploadedUrl);
+        if (selectedMediaType === "video") {
+          const pickedVideo = video;
+          if (!pickedVideo) return;
+          uploadedVideoUrl = await uploadUriToStorage(
+            `companies/${uid}/feed/${Date.now()}-${pickedVideo.fileName}`,
+            pickedVideo.uri,
+            pickedVideo.mimeType
+          );
+          uploadedThumb = cloudinaryVideoThumbnailFromUrl(uploadedVideoUrl);
+        } else {
+          const pickedImage = imageMedia;
+          if (!pickedImage) return;
+          uploadedImageUrl = await uploadUriToStorage(
+            `companies/${uid}/feed/${Date.now()}-${pickedImage.fileName}`,
+            pickedImage.uri,
+            pickedImage.mimeType
+          );
+          uploadedThumb = uploadedImageUrl;
+        }
 
         await addMyFeedPost(uid, {
           category,
@@ -377,19 +453,21 @@ export default function CompanyStudioScreen() {
           serviceName,
           visibility: nextVisibility,
           isActive: nextIsActive,
-          videoUrl: uploadedUrl,
+          mediaType: selectedMediaType,
+          videoUrl: uploadedVideoUrl,
+          imageUrl: uploadedImageUrl,
           thumbnailUrl: uploadedThumb || undefined,
           viewCount: 0,
         });
 
-        Alert.alert("Geplaatst", "Je video staat in je content library.");
+        Alert.alert("Geplaatst", "Je feed post staat in je content library.");
       }
 
       resetForm();
       setStudioTab("videos");
       await load();
     } catch (error: any) {
-      Alert.alert("Upload mislukt", error?.message ?? "Kon video niet opslaan.");
+      Alert.alert("Upload mislukt", error?.message ?? "Kon post niet opslaan.");
     } finally {
       setUploading(false);
     }
@@ -437,6 +515,8 @@ export default function CompanyStudioScreen() {
   }
 
   function renderUploadTab() {
+    const hasSelectedMedia = Boolean(video?.uri || imageMedia?.uri || previewThumbnail);
+
     return (
       <ScrollView contentContainerStyle={styles.uploadContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.heroCard}>
@@ -444,12 +524,16 @@ export default function CompanyStudioScreen() {
             <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
             <Text style={styles.heroTitle}>Creator Upload Studio</Text>
           </View>
-          <Text style={styles.heroText}>Upload een video om je werk te laten zien en nieuwe klanten te bereiken.</Text>
+          <Text style={styles.heroText}>
+            {uploadStep === "select"
+              ? "Stap 1: kies je media en controleer de lengte (bij video)."
+              : "Stap 2: voeg titel, caption, tags en zichtbaarheid toe."}
+          </Text>
 
           <View style={styles.heroStatsRow}>
             <View style={styles.heroStatCard}>
               <Text style={styles.heroStatValue}>{items.length}</Text>
-              <Text style={styles.heroStatLabel}>Video&apos;s</Text>
+              <Text style={styles.heroStatLabel}>Posts</Text>
             </View>
             <View style={styles.heroStatCard}>
               <Text style={styles.heroStatValue}>{liveCount}</Text>
@@ -468,7 +552,7 @@ export default function CompanyStudioScreen() {
               <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
               <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
             </View>
-            <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om video&apos;s te publiceren.</Text>
+            <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
             <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
               <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
               <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
@@ -476,163 +560,312 @@ export default function CompanyStudioScreen() {
           </View>
         ) : null}
 
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="cloud-upload-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.sectionTitle}>Video upload</Text>
-          </View>
-
-          <View style={styles.dropZone}>
-            {video?.uri ? (
-              <Video source={{ uri: video.uri }} style={styles.dropPreview} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted />
-            ) : previewThumbnail ? (
-              <Image source={{ uri: previewThumbnail }} style={styles.dropPreview} contentFit="cover" />
-            ) : (
-              <View style={styles.dropPlaceholder}>
-                <Ionicons name="cloud-upload-outline" size={28} color={COLORS.primary} />
-                <Text style={styles.dropTitle}>Sleep hier je video-idee</Text>
-                <Text style={styles.dropText}>Kies een video van je galerij of neem direct op met je camera.</Text>
-              </View>
-            )}
-
-            <View style={styles.dropOverlayRow}>
-              <Pressable style={styles.dropActionBtn} onPress={() => selectVideo("gallery")}>
-                <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.dropActionText}>Video kiezen</Text>
-              </Pressable>
-              <Pressable style={styles.dropActionBtn} onPress={() => selectVideo("camera")}>
-                <Ionicons name="videocam-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.dropActionText}>Opnemen</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.uploadHintRow}>
-            <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
-            <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
-          </View>
-
-          {video ? (
-            <View style={styles.fileCard}>
-              <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
-              <Text style={styles.fileText} numberOfLines={1}>
-                {video.fileName} {formatDuration(video.durationMs ? video.durationMs / 1000 : undefined)}
-              </Text>
-              <Pressable onPress={() => setVideo(null)}>
-                <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="create-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.sectionTitle}>Video details</Text>
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Video titel</Text>
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder="Bijv. Fresh balayage transformation"
-              placeholderTextColor={COLORS.placeholder}
-              style={styles.input}
-            />
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Beschrijving</Text>
-            <TextInput
-              value={description}
-              onChangeText={setDescription}
-              placeholder="Vertel kort wat je hebt gedaan"
-              placeholderTextColor={COLORS.placeholder}
-              style={[styles.input, styles.textarea]}
-              multiline
-            />
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Categorie</Text>
-            <CategoryChips items={[...CATEGORIES]} active={category} onChange={setCategory} iconMap={categoryIcons} />
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Tags</Text>
-            <TextInput
-              value={hashtagsInput}
-              onChangeText={setHashtagsInput}
-              placeholder="#balayage #nails #lashlift"
-              placeholderTextColor={COLORS.placeholder}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={styles.input}
-            />
-            <Text style={styles.fieldHint}>
-              {hashtags.length}/{MAX_HASHTAGS} tags
+        <View style={styles.stepperRow}>
+          <Pressable
+            style={[styles.stepperChip, uploadStep === "select" && styles.stepperChipActive]}
+            onPress={() => setUploadStep("select")}
+          >
+            <Text style={[styles.stepperChipText, uploadStep === "select" && styles.stepperChipTextActive]}>
+              1. Media kiezen
             </Text>
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Service koppelen (optioneel)</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
-              <Pressable
-                style={[styles.serviceChip, !selectedServiceId && styles.serviceChipActive]}
-                onPress={() => setSelectedServiceId("")}
-              >
-                <Text style={[styles.serviceChipText, !selectedServiceId && styles.serviceChipTextActive]}>Geen koppeling</Text>
-              </Pressable>
-              {activeServices.map((service) => {
-                const active = selectedServiceId === service.id;
-                return (
-                  <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
-                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Zichtbaarheid</Text>
-            <View style={styles.visibilityRow}>
-              <Pressable
-                style={[styles.visibilityBtn, visibility === "public" && styles.visibilityBtnActive]}
-                onPress={() => setVisibility("public")}
-              >
-                <Ionicons name="globe-outline" size={14} color={visibility === "public" ? "#fff" : COLORS.primary} />
-                <Text style={[styles.visibilityText, visibility === "public" && styles.visibilityTextActive]}>Publiek</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.visibilityBtn, visibility === "clients" && styles.visibilityBtnActive]}
-                onPress={() => setVisibility("clients")}
-              >
-                <Ionicons name="people-outline" size={14} color={visibility === "clients" ? "#fff" : COLORS.primary} />
-                <Text style={[styles.visibilityText, visibility === "clients" && styles.visibilityTextActive]}>Alleen klanten</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <Pressable style={[styles.submitBtn, !canSubmit && styles.disabled]} onPress={onSubmit} disabled={!canSubmit}>
-            {uploading ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="rocket-outline" size={16} color="#fff" />}
-            <Text style={styles.submitText}>{uploading ? "Bezig met uploaden..." : submitLabel}</Text>
           </Pressable>
+          <Pressable
+            style={[
+              styles.stepperChip,
+              uploadStep === "details" && styles.stepperChipActive,
+              !hasSelectedMedia && styles.disabled,
+            ]}
+            onPress={() => {
+              if (!hasSelectedMedia) return;
+              setUploadStep("details");
+            }}
+            disabled={!hasSelectedMedia}
+          >
+            <Text style={[styles.stepperChipText, uploadStep === "details" && styles.stepperChipTextActive]}>
+              2. Details
+            </Text>
+          </Pressable>
+        </View>
 
-          {editingPostId ? (
-            <View style={styles.editActionsRow}>
-              <Pressable style={styles.ghostBtn} onPress={resetForm}>
-                <Ionicons name="close-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.ghostBtnText}>Annuleer bewerken</Text>
+        {uploadStep === "select" ? (
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="cloud-upload-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.sectionTitle}>Stap 1 - media kiezen</Text>
+            </View>
+
+            <View style={styles.mediaTypeRow}>
+              <Pressable
+                style={[styles.mediaTypeBtn, uploadMediaType === "video" && styles.mediaTypeBtnActive]}
+                onPress={() => switchUploadMediaType("video")}
+              >
+                <Ionicons name="videocam-outline" size={14} color={uploadMediaType === "video" ? "#fff" : COLORS.primary} />
+                <Text style={[styles.mediaTypeText, uploadMediaType === "video" && styles.mediaTypeTextActive]}>Video</Text>
               </Pressable>
-              <Pressable style={styles.deleteGhostBtn} onPress={() => onDelete(editingPostId)}>
-                <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
-                <Text style={styles.deleteGhostText}>Verwijder</Text>
+              <Pressable
+                style={[styles.mediaTypeBtn, uploadMediaType === "image" && styles.mediaTypeBtnActive]}
+                onPress={() => switchUploadMediaType("image")}
+              >
+                <Ionicons name="image-outline" size={14} color={uploadMediaType === "image" ? "#fff" : COLORS.primary} />
+                <Text style={[styles.mediaTypeText, uploadMediaType === "image" && styles.mediaTypeTextActive]}>Foto</Text>
               </Pressable>
             </View>
-          ) : null}
-        </View>
+
+            <View style={styles.dropZone}>
+              {video?.uri ? (
+                <Video source={{ uri: video.uri }} style={styles.dropPreview} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted />
+              ) : imageMedia?.uri ? (
+                <Image source={{ uri: imageMedia.uri }} style={styles.dropPreview} contentFit="cover" />
+              ) : previewThumbnail ? (
+                <Image source={{ uri: previewThumbnail }} style={styles.dropPreview} contentFit="cover" />
+              ) : (
+                <View style={styles.dropPlaceholder}>
+                  <Ionicons name={uploadMediaType === "video" ? "videocam-outline" : "image-outline"} size={28} color={COLORS.primary} />
+                  <Text style={styles.dropTitle}>
+                    {uploadMediaType === "video" ? "Kies eerst een video" : "Kies eerst een foto"}
+                  </Text>
+                  <Text style={styles.dropText}>Daarna ga je verder naar caption, tags en zichtbaarheid.</Text>
+                </View>
+              )}
+
+              <View style={styles.dropOverlayRow}>
+                <Pressable
+                  style={styles.dropActionBtn}
+                  onPress={() =>
+                    (uploadMediaType === "video" ? selectVideo("gallery") : selectImage("gallery")).catch(() => null)
+                  }
+                >
+                  <Ionicons name="images-outline" size={14} color={COLORS.primary} />
+                  <Text style={styles.dropActionText}>
+                    {uploadMediaType === "video" ? "Video kiezen" : "Foto kiezen"}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={styles.dropActionBtn}
+                  onPress={() =>
+                    (uploadMediaType === "video" ? selectVideo("camera") : selectImage("camera")).catch(() => null)
+                  }
+                >
+                  <Ionicons
+                    name={uploadMediaType === "video" ? "videocam-outline" : "camera-outline"}
+                    size={14}
+                    color={COLORS.primary}
+                  />
+                  <Text style={styles.dropActionText}>
+                    {uploadMediaType === "video" ? "Opnemen" : "Foto maken"}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {uploadMediaType === "video" ? (
+              <View style={styles.uploadHintRow}>
+                <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
+                <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
+              </View>
+            ) : null}
+
+            {uploadMediaType === "video" && videoLengthWarning ? (
+              <View style={styles.warningCard}>
+                <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
+                <Text style={styles.warningText}>{videoLengthWarning}</Text>
+              </View>
+            ) : null}
+
+            {video || imageMedia ? (
+              <View style={styles.fileCard}>
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+                <Text style={styles.fileText} numberOfLines={1}>
+                  {video?.fileName || imageMedia?.fileName}{" "}
+                  {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    setVideo(null);
+                    setImageMedia(null);
+                    setUploadStep("select");
+                  }}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
+                </Pressable>
+              </View>
+            ) : null}
+
+            <Pressable
+              style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
+              onPress={() => setUploadStep("details")}
+              disabled={!hasSelectedMedia}
+            >
+              <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
+              <Text style={styles.nextStepText}>Verder</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="film-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.sectionTitle}>Gekozen media</Text>
+              </View>
+
+              <View style={styles.selectedVideoCard}>
+                {video?.uri ? (
+                  <Video source={{ uri: video.uri }} style={styles.selectedVideoPreview} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted />
+                ) : imageMedia?.uri ? (
+                  <Image source={{ uri: imageMedia.uri }} style={styles.selectedVideoPreview} contentFit="cover" />
+                ) : previewThumbnail ? (
+                  <Image source={{ uri: previewThumbnail }} style={styles.selectedVideoPreview} contentFit="cover" />
+                ) : (
+                  <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
+                    <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
+                  </View>
+                )}
+                <View style={styles.selectedVideoActions}>
+                  <Pressable
+                    style={styles.dropActionBtn}
+                    onPress={() =>
+                      (uploadMediaType === "video" ? selectVideo("gallery") : selectImage("gallery")).catch(() => null)
+                    }
+                  >
+                    <Ionicons name="images-outline" size={14} color={COLORS.primary} />
+                    <Text style={styles.dropActionText}>
+                      {uploadMediaType === "video" ? "Andere video" : "Andere foto"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.dropActionBtn}
+                    onPress={() =>
+                      (uploadMediaType === "video" ? selectVideo("camera") : selectImage("camera")).catch(() => null)
+                    }
+                  >
+                    <Ionicons
+                      name={uploadMediaType === "video" ? "videocam-outline" : "camera-outline"}
+                      size={14}
+                      color={COLORS.primary}
+                    />
+                    <Text style={styles.dropActionText}>
+                      {uploadMediaType === "video" ? "Opnemen" : "Foto maken"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.sectionTitle}>Stap 2 - post details</Text>
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Post titel</Text>
+                <TextInput
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder="Bijv. Fresh balayage transformation"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={styles.input}
+                />
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Beschrijving</Text>
+                <TextInput
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Vertel kort wat je hebt gedaan"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={[styles.input, styles.textarea]}
+                  multiline
+                />
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Categorie</Text>
+                <CategoryChips items={[...CATEGORIES]} active={category} onChange={setCategory} iconMap={categoryIcons} />
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Tags</Text>
+                <TextInput
+                  value={hashtagsInput}
+                  onChangeText={setHashtagsInput}
+                  placeholder="#balayage #nails #lashlift"
+                  placeholderTextColor={COLORS.placeholder}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={styles.input}
+                />
+                <Text style={styles.fieldHint}>
+                  {hashtags.length}/{MAX_HASHTAGS} tags
+                </Text>
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Service koppelen (optioneel)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
+                  <Pressable
+                    style={[styles.serviceChip, !selectedServiceId && styles.serviceChipActive]}
+                    onPress={() => setSelectedServiceId("")}
+                  >
+                    <Text style={[styles.serviceChipText, !selectedServiceId && styles.serviceChipTextActive]}>Geen koppeling</Text>
+                  </Pressable>
+                  {activeServices.map((service) => {
+                    const active = selectedServiceId === service.id;
+                    return (
+                      <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
+                        <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              <View style={styles.fieldWrap}>
+                <Text style={styles.fieldLabel}>Zichtbaarheid</Text>
+                <View style={styles.visibilityRow}>
+                  <Pressable
+                    style={[styles.visibilityBtn, visibility === "public" && styles.visibilityBtnActive]}
+                    onPress={() => setVisibility("public")}
+                  >
+                    <Ionicons name="globe-outline" size={14} color={visibility === "public" ? "#fff" : COLORS.primary} />
+                    <Text style={[styles.visibilityText, visibility === "public" && styles.visibilityTextActive]}>Publiek</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.visibilityBtn, visibility === "clients" && styles.visibilityBtnActive]}
+                    onPress={() => setVisibility("clients")}
+                  >
+                    <Ionicons name="people-outline" size={14} color={visibility === "clients" ? "#fff" : COLORS.primary} />
+                    <Text style={[styles.visibilityText, visibility === "clients" && styles.visibilityTextActive]}>Alleen klanten</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <Pressable style={[styles.submitBtn, !canSubmit && styles.disabled]} onPress={onSubmit} disabled={!canSubmit}>
+                {uploading ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="rocket-outline" size={16} color="#fff" />}
+                <Text style={styles.submitText}>{uploading ? "Bezig met uploaden..." : submitLabel}</Text>
+              </Pressable>
+
+              <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
+                <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.backToStepText}>Terug naar media kiezen</Text>
+              </Pressable>
+
+              {editingPostId ? (
+                <View style={styles.editActionsRow}>
+                  <Pressable style={styles.ghostBtn} onPress={resetForm}>
+                    <Ionicons name="close-outline" size={14} color={COLORS.primary} />
+                    <Text style={styles.ghostBtnText}>Annuleer bewerken</Text>
+                  </Pressable>
+                  <Pressable style={styles.deleteGhostBtn} onPress={() => onDelete(editingPostId)}>
+                    <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                    <Text style={styles.deleteGhostText}>Verwijder</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          </>
+        )}
       </ScrollView>
     );
   }
@@ -689,7 +922,7 @@ export default function CompanyStudioScreen() {
             <Ionicons name="albums-outline" size={16} color={COLORS.primary} />
             <Text style={styles.sectionTitle}>Content library</Text>
           </View>
-          <Text style={styles.libraryHeaderText}>Beheer je video&apos;s, bekijk status en open details per post.</Text>
+          <Text style={styles.libraryHeaderText}>Beheer je foto&apos;s en video&apos;s, bekijk status en open details per post.</Text>
 
           <View style={styles.libraryStatsRow}>
             <View style={styles.libraryStatCard}>
@@ -720,7 +953,7 @@ export default function CompanyStudioScreen() {
             contentContainerStyle={styles.libraryGrid}
             columnWrapperStyle={styles.libraryRow}
             renderItem={({ item }) => renderVideoCard(item)}
-            ListEmptyComponent={<Text style={styles.emptyText}>Nog geen video&apos;s geplaatst.</Text>}
+            ListEmptyComponent={<Text style={styles.emptyText}>Nog geen posts geplaatst.</Text>}
           />
         )}
       </View>
@@ -750,8 +983,8 @@ export default function CompanyStudioScreen() {
           <Text style={[styles.topTabText, studioTab === "upload" && styles.topTabTextActive]}>Upload</Text>
         </Pressable>
         <Pressable style={[styles.topTabBtn, studioTab === "videos" && styles.topTabBtnActive]} onPress={() => setStudioTab("videos")}>
-          <Ionicons name={studioTab === "videos" ? "videocam" : "videocam-outline"} size={14} color={studioTab === "videos" ? "#fff" : COLORS.primary} />
-          <Text style={[styles.topTabText, studioTab === "videos" && styles.topTabTextActive]}>Video&apos;s</Text>
+          <Ionicons name={studioTab === "videos" ? "albums" : "albums-outline"} size={14} color={studioTab === "videos" ? "#fff" : COLORS.primary} />
+          <Text style={[styles.topTabText, studioTab === "videos" && styles.topTabTextActive]}>Posts</Text>
         </Pressable>
       </View>
 
@@ -778,7 +1011,7 @@ export default function CompanyStudioScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalTopRow}>
-              <Text style={styles.modalTitle}>Video details</Text>
+              <Text style={styles.modalTitle}>Post details</Text>
               <Pressable style={styles.modalCloseBtn} onPress={() => setDetailPostId(null)}>
                 <Ionicons name="close" size={16} color={COLORS.muted} />
               </Pressable>
@@ -797,9 +1030,11 @@ export default function CompanyStudioScreen() {
                           <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
                         </View>
                       )}
-                      <View style={styles.modalPlayCircle}>
-                        <Ionicons name="play" size={15} color="#fff" />
-                      </View>
+                      {detailItem.mediaType !== "image" ? (
+                        <View style={styles.modalPlayCircle}>
+                          <Ionicons name="play" size={15} color="#fff" />
+                        </View>
+                      ) : null}
                     </View>
                   );
                 })()}
@@ -940,6 +1175,61 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
+  },
+  stepperRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  stepperChip: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  stepperChipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
+  stepperChipText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  stepperChipTextActive: {
+    color: COLORS.primary,
+  },
+  mediaTypeRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  mediaTypeBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  mediaTypeBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  mediaTypeText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mediaTypeTextActive: {
+    color: "#fff",
   },
   uploadContent: {
     gap: 12,
@@ -1118,6 +1408,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
+  warningCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#f3c7d6",
+    backgroundColor: "#fff1f6",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  warningText: {
+    flex: 1,
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   fileCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -1134,6 +1441,38 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 12,
     fontWeight: "700",
+  },
+  nextStepBtn: {
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  nextStepText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  selectedVideoCard: {
+    gap: 8,
+  },
+  selectedVideoPreview: {
+    width: "100%",
+    height: 190,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: COLORS.surface,
+  },
+  selectedVideoFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  selectedVideoActions: {
+    flexDirection: "row",
+    gap: 8,
   },
   fieldWrap: {
     gap: 6,
@@ -1230,6 +1569,22 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "900",
+  },
+  backToStepBtn: {
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  backToStepText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "800",
   },
   editActionsRow: {
     flexDirection: "row",

@@ -9,6 +9,7 @@ type VideoPostCardProps = {
   post: FeedPost;
   isActive: boolean;
   onOpenCompany: () => void;
+  onOpenLinkedService?: () => void;
   height: number;
   liked?: boolean;
   likeCount?: number;
@@ -24,6 +25,7 @@ export default function VideoPostCard({
   post,
   isActive,
   onOpenCompany,
+  onOpenLinkedService,
   height,
   liked,
   likeCount,
@@ -35,17 +37,23 @@ export default function VideoPostCard({
   onOpenComments,
 }: VideoPostCardProps) {
   const ref = useRef<Video | null>(null);
+  const mediaType = post.mediaType === "image" ? "image" : "video";
+  const canPlayVideo = mediaType === "video" && Boolean(post.videoUrl);
+  const imageUri = post.imageUrl || post.thumbnailUrl || "";
+  const linkedServiceId = typeof post.serviceId === "string" ? post.serviceId.trim() : "";
+  const hasLinkedService = Boolean(linkedServiceId && onOpenLinkedService);
+  const linkedServiceName = typeof post.serviceName === "string" ? post.serviceName.trim() : "";
 
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
 
-    if (isActive && post.videoUrl) {
+    if (isActive && canPlayVideo) {
       video.playAsync().catch(() => null);
     } else {
       video.pauseAsync().catch(() => null);
     }
-  }, [isActive, post.videoUrl]);
+  }, [isActive, canPlayVideo]);
 
   useEffect(() => {
     const video = ref.current;
@@ -56,12 +64,12 @@ export default function VideoPostCard({
     };
   }, []);
 
-  if (!post.videoUrl) {
+  if (!canPlayVideo && !imageUri) {
     return (
       <View style={[styles.container, { height }]}>
         <View style={styles.fallback}>
-          <Text style={styles.fallbackTitle}>Video ontbreekt</Text>
-          <Text style={styles.fallbackText}>Deze post heeft nog geen geldige videoUrl.</Text>
+          <Text style={styles.fallbackTitle}>Media ontbreekt</Text>
+          <Text style={styles.fallbackText}>Deze post heeft nog geen geldige media.</Text>
         </View>
       </View>
     );
@@ -69,15 +77,19 @@ export default function VideoPostCard({
 
   return (
     <View style={[styles.container, { height }]}>
-      <Video
-        ref={ref}
-        source={{ uri: post.videoUrl }}
-        style={StyleSheet.absoluteFillObject}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={isActive}
-        isLooping
-        isMuted={false}
-      />
+      {canPlayVideo ? (
+        <Video
+          ref={ref}
+          source={{ uri: post.videoUrl }}
+          style={StyleSheet.absoluteFillObject}
+          resizeMode={ResizeMode.COVER}
+          shouldPlay={isActive}
+          isLooping
+          isMuted={false}
+        />
+      ) : (
+        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+      )}
 
       <View style={styles.overlay}>
         <View style={styles.meta}>
@@ -106,9 +118,27 @@ export default function VideoPostCard({
               {following ? "Volgend" : "Volgen"} · {followerCount ?? 0}
             </Text>
           </Pressable>
-          <Pressable style={styles.cta} onPress={onOpenCompany}>
-            <Text style={styles.ctaText}>Bekijk salon</Text>
-          </Pressable>
+
+          <View style={styles.ctaRow}>
+            {hasLinkedService ? (
+              <Pressable style={styles.bookServiceBtn} onPress={onOpenLinkedService}>
+                <Ionicons name="calendar-clear-outline" size={15} color="#fff" />
+                <View style={styles.bookServiceTextWrap}>
+                  <Text style={styles.bookServiceTitle}>Boek deze dienst</Text>
+                  {linkedServiceName ? (
+                    <Text style={styles.bookServiceMeta} numberOfLines={1}>
+                      {linkedServiceName}
+                    </Text>
+                  ) : null}
+                </View>
+                <Ionicons name="arrow-forward" size={14} color="#fff" />
+              </Pressable>
+            ) : null}
+
+            <Pressable style={styles.cta} onPress={onOpenCompany}>
+              <Text style={styles.ctaText}>Bekijk salon</Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.sideActions}>
@@ -201,15 +231,52 @@ const styles = StyleSheet.create({
   },
   cta: {
     alignSelf: "flex-start",
-    backgroundColor: "#df4f9a",
+    backgroundColor: "rgba(255,255,255,0.22)",
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
   },
   ctaText: {
     color: "#fff",
     fontWeight: "700",
+    fontSize: 12,
+  },
+  ctaRow: {
+    marginTop: 8,
+    gap: 8,
+    alignSelf: "stretch",
+    width: "100%",
+    maxWidth: 330,
+  },
+  bookServiceBtn: {
+    minHeight: 44,
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    backgroundColor: "rgba(223,79,154,0.86)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+  },
+  bookServiceTextWrap: {
+    gap: 0,
+  },
+  bookServiceTitle: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  bookServiceMeta: {
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 10,
+    fontWeight: "700",
+    maxWidth: 172,
   },
   followBtn: {
     alignSelf: "flex-start",

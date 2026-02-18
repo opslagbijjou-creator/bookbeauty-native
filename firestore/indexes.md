@@ -54,9 +54,16 @@ Maak deze composite indexes aan:
   - `companyId` Asc
   - `bookingDate` Asc
 
+9. `bookings`
+- Query: `where(staffId == X)` + `orderBy(startAt asc)` (optioneel voor grote medewerker-accounts)
+- Fields:
+  - `staffId` Asc
+  - `startAt` Asc
+
 ## Geen extra composite index nodig
 - `bookings` met alleen `where(companyId == X)`
 - `bookings` met alleen `where(customerId == X)`
+- `bookings` met alleen `where(staffId == X)`
 - `feed_public/{postId}/comments` met `orderBy(createdAt desc)` (single-field)
 - `companies/{companyId}/notifications` met `orderBy(createdAt desc)` of `where(read == false)` (single-field)
 - `booking_slot_locks` gebruikt punt-reads op document-ID (geen query-index)

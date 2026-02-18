@@ -106,9 +106,13 @@ export default function CustomerFeedScreen() {
 
   useEffect(() => {
     if (!uid) return;
-    getUserRole(uid).then((r) => {
-      if (r) setRole(r);
-    });
+    getUserRole(uid)
+      .then((r) => {
+        if (r) setRole(r);
+      })
+      .catch((error) => {
+        console.warn("[customer/feed] getUserRole failed", error);
+      });
   }, [uid]);
 
   useEffect(() => {
@@ -138,6 +142,13 @@ export default function CustomerFeedScreen() {
         setIndexFallback(Boolean(res.usedFallback));
         setActiveId(res.items[0]?.id ?? null);
         loadSocial(res.items).catch(() => null);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        console.warn("[customer/feed] fetchFeed failed", error);
+        setItems([]);
+        setLastDoc(null);
+        setActiveId(null);
       })
       .finally(() => {
         if (!mounted) return;
@@ -272,22 +283,33 @@ export default function CustomerFeedScreen() {
             showsVerticalScrollIndicator={false}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
-            renderItem={({ item }) => (
-              <VideoPostCard
-                post={item}
-                isActive={allowPlayback && item.id === activeId}
-                height={cardHeight}
-                liked={likedMap[item.id]}
-                likeCount={likeCountMap[item.id]}
-                commentCount={commentCountMap[item.id]}
-                following={followingMap[item.companyId]}
-                followerCount={followersCountMap[item.companyId]}
-                onToggleLike={() => onToggleLike(item.id)}
-                onOpenComments={() => setCommentsPostId(item.id)}
-                onToggleFollow={() => onToggleFollow(item.companyId)}
-                onOpenCompany={() => router.push(`/(customer)/company/${item.companyId}` as never)}
-              />
-            )}
+            renderItem={({ item }) => {
+              const rawServiceId = typeof item.serviceId === "string" ? item.serviceId.trim() : "";
+              const linkedServiceId =
+                rawServiceId && rawServiceId !== "undefined" && rawServiceId !== "null" ? rawServiceId : "";
+
+              return (
+                <VideoPostCard
+                  post={item}
+                  isActive={allowPlayback && item.id === activeId}
+                  height={cardHeight}
+                  liked={likedMap[item.id]}
+                  likeCount={likeCountMap[item.id]}
+                  commentCount={commentCountMap[item.id]}
+                  following={followingMap[item.companyId]}
+                  followerCount={followersCountMap[item.companyId]}
+                  onToggleLike={() => onToggleLike(item.id)}
+                  onOpenComments={() => setCommentsPostId(item.id)}
+                  onToggleFollow={() => onToggleFollow(item.companyId)}
+                  onOpenCompany={() => router.push(`/(customer)/company/${item.companyId}` as never)}
+                  onOpenLinkedService={
+                    linkedServiceId
+                      ? () => router.push(`/(customer)/book/${item.companyId}/${linkedServiceId}` as never)
+                      : undefined
+                  }
+                />
+              );
+            }}
             ListFooterComponent={
               loadingMore ? (
                 <View style={styles.footer}>
