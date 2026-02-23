@@ -7,6 +7,30 @@
   node_bundler = "esbuild"
 
 [[redirects]]
+  from = "https://bookbeauty.nl/.netlify/functions/*"
+  to = "https://bookbeauty.nl/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "http://bookbeauty.nl/*"
+  to = "https://www.bookbeauty.nl/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://bookbeauty.nl/*"
+  to = "https://www.bookbeauty.nl/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://bookybeauty.netlify.app/*"
+  to = "https://www.bookbeauty.nl/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
   from = "/.netlify/functions/*"
   to = "/.netlify/functions/:splat"
   status = 200
