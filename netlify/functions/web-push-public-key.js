@@ -24,17 +24,22 @@ exports.handler = async (event) => {
   const publicKey = String(
     process.env.WEB_PUSH_VAPID_PUBLIC_KEY || process.env.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY || ""
   ).trim();
+  const privateKeyConfigured = Boolean(String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "").trim());
 
   if (!publicKey) {
     return response(200, {
       ok: false,
       reason: "missing_public_key",
       publicKey: "",
+      serverCanSend: false,
+      privateKeyConfigured,
     });
   }
 
   return response(200, {
     ok: true,
     publicKey,
+    serverCanSend: privateKeyConfigured,
+    privateKeyConfigured,
   });
 };
