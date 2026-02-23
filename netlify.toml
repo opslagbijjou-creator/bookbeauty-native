@@ -1,8 +1,7 @@
 [build]
-  command = "npx expo export --platform web"
+  command = "npm run -s web:icons && npx expo export --platform web"
   publish = "dist"
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
-

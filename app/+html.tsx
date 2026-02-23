@@ -1,6 +1,7 @@
 import { ScrollViewStyleReset } from "expo-router/html";
 
 export default function Root({ children }: { children: React.ReactNode }) {
+  const iconVersion = "20260223";
   return (
     <html lang="nl">
       <head>
@@ -14,11 +15,11 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta name="apple-mobile-web-app-title" content="BookBeauty" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
-        <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-        <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
-        <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
-        <link rel="icon" type="image/png" href="/favicon.png" />
+        <link rel="manifest" href={`/manifest.webmanifest?v=${iconVersion}`} />
+        <link rel="apple-touch-icon" sizes="180x180" href={`/apple-touch-icon.png?v=${iconVersion}`} />
+        <link rel="icon" type="image/png" sizes="192x192" href={`/icon-192.png?v=${iconVersion}`} />
+        <link rel="icon" type="image/png" sizes="512x512" href={`/icon-512.png?v=${iconVersion}`} />
+        <link rel="icon" type="image/png" href={`/favicon.png?v=${iconVersion}`} />
 
         <style
           dangerouslySetInnerHTML={{
