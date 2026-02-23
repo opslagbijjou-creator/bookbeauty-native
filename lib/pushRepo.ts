@@ -2,7 +2,7 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { arrayUnion, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
 
 type PushMessage = {
   title: string;
@@ -17,6 +17,7 @@ type PushSubscriptionDoc = {
 };
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
+const PUSH_PROXY_ENDPOINT = "/.netlify/functions/send-expo-push";
 const BOOKING_SOUND_CHANNEL_ID = "booking-alerts";
 const SILENT_CHANNEL_ID = "silent-updates";
 const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
@@ -119,7 +120,6 @@ async function requestPushPermission(): Promise<boolean> {
 export async function registerPushTokenForUser(uid: string): Promise<void> {
   const cleanUid = String(uid ?? "").trim();
   if (!cleanUid) return;
-  if (Platform.OS === "web") return;
 
   configurePushNotifications();
 
@@ -131,7 +131,10 @@ export async function registerPushTokenForUser(uid: string): Promise<void> {
     ? Notifications.getExpoPushTokenAsync({ projectId })
     : Notifications.getExpoPushTokenAsync())
     .then((row) => String(row?.data ?? "").trim())
-    .catch(() => "");
+    .catch((error) => {
+      console.warn("[pushRepo] getExpoPushTokenAsync failed", error);
+      return "";
+    });
 
   if (!pushToken) return;
 
@@ -179,6 +182,32 @@ async function sendExpoPush(tokens: string[], message: PushMessage): Promise<voi
   }
 }
 
+async function sendPushViaBackendProxy(uid: string, message: PushMessage): Promise<boolean> {
+  if (Platform.OS !== "web") return false;
+  const currentUser = auth.currentUser;
+  if (!currentUser) return false;
+
+  const idToken = await currentUser.getIdToken().catch(() => "");
+  if (!idToken) return false;
+
+  const response = await fetch(PUSH_PROXY_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      uid,
+      title: message.title,
+      body: message.body,
+      data: message.data ?? {},
+      playSound: message.playSound === true,
+    }),
+  }).catch(() => null);
+
+  return Boolean(response?.ok);
+}
+
 export async function sendPushToUser(
   uid: string,
   message: {
@@ -190,6 +219,14 @@ export async function sendPushToUser(
 ): Promise<void> {
   const cleanUid = String(uid ?? "").trim();
   if (!cleanUid) return;
+
+  const pushedViaProxy = await sendPushViaBackendProxy(cleanUid, {
+    title: message.title,
+    body: message.body,
+    data: message.data,
+    playSound: message.playSound,
+  }).catch(() => false);
+  if (pushedViaProxy) return;
 
   const snap = await getDoc(doc(db, "push_subscriptions", cleanUid));
   if (!snap.exists()) return;
