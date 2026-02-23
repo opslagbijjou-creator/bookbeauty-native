@@ -817,129 +817,136 @@ export default function CompanyStudioScreen() {
 
     if (uploadStep === "select") {
       return (
-        <View style={styles.uploadFlowScreen}>
-          <View style={styles.uploadFlowTopRow}>
-            <View>
-              <Text style={styles.uploadFlowTitle}>Nieuwe post</Text>
-              <Text style={styles.uploadFlowSubTitle}>Stap 1 van 2 - kies je media</Text>
-            </View>
-            <View style={styles.uploadFlowStepPill}>
-              <Text style={styles.uploadFlowStepText}>1/2</Text>
-            </View>
-          </View>
-
-          {!hasActiveServices ? (
-            <View style={styles.requirementCard}>
-              <View style={styles.requirementTitleRow}>
-                <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
-                <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
+        <ScrollView
+          contentContainerStyle={styles.uploadSelectContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={styles.uploadFlowScreen}>
+            <View style={styles.uploadFlowTopRow}>
+              <View>
+                <Text style={styles.uploadFlowTitle}>Nieuwe post</Text>
+                <Text style={styles.uploadFlowSubTitle}>Stap 1 van 2 - kies je media</Text>
               </View>
-              <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
-              <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
-                <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
-              </Pressable>
+              <View style={styles.uploadFlowStepPill}>
+                <Text style={styles.uploadFlowStepText}>1/2</Text>
+              </View>
             </View>
-          ) : null}
 
-          <View style={[styles.dropZone, styles.fullScreenDropZone]}>
-            {previewNode}
-            {mediaActionRow}
-          </View>
-
-          {uploadMediaType === "video" ? (
-            <View style={styles.uploadHintRow}>
-              <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
-              <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
-            </View>
-          ) : null}
-
-          {uploadMediaType === "video" && videoLengthWarning ? (
-            <View style={styles.warningCard}>
-              <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
-              <Text style={styles.warningText}>{videoLengthWarning}</Text>
-            </View>
-          ) : null}
-
-          {uploadMediaType === "video" && video ? (
-            <View style={styles.trimCard}>
-              <View style={styles.trimTopRow}>
-                <View style={styles.trimTitleWrap}>
+            {!hasActiveServices ? (
+              <View style={styles.requirementCard}>
+                <View style={styles.requirementTitleRow}>
+                  <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
+                  <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
+                </View>
+                <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
+                <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
                   <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
-                  <Text style={styles.trimTitle}>Clip inkorten</Text>
+                  <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={[styles.dropZone, styles.fullScreenDropZone]}>
+              {previewNode}
+              {mediaActionRow}
+            </View>
+
+            {uploadMediaType === "video" ? (
+              <View style={styles.uploadHintRow}>
+                <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
+                <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
+              </View>
+            ) : null}
+
+            {uploadMediaType === "video" && videoLengthWarning ? (
+              <View style={styles.warningCard}>
+                <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
+                <Text style={styles.warningText}>{videoLengthWarning}</Text>
+              </View>
+            ) : null}
+
+            {uploadMediaType === "video" && video ? (
+              <View style={styles.trimCard}>
+                <View style={styles.trimTopRow}>
+                  <View style={styles.trimTitleWrap}>
+                    <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
+                    <Text style={styles.trimTitle}>Clip inkorten</Text>
+                  </View>
+                  <Text style={styles.trimRangeText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
                 </View>
-                <Text style={styles.trimRangeText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
-              </View>
-              <Text style={styles.trimHint}>
-                Duur: {clipDurationSec.toFixed(1)}s van {videoDurationSec > 0 ? videoDurationSec.toFixed(1) : "--"}s
-              </Text>
+                <Text style={styles.trimHint}>
+                  Duur: {clipDurationSec.toFixed(1)}s van {videoDurationSec > 0 ? videoDurationSec.toFixed(1) : "--"}s
+                </Text>
 
-              <View style={styles.trimButtonRow}>
-                <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}>
-                  <Text style={styles.trimBtnText}>Start -0.5s</Text>
-                </Pressable>
-                <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(CLIP_STEP_SEC)}>
-                  <Text style={styles.trimBtnText}>Start +0.5s</Text>
-                </Pressable>
-              </View>
-              <View style={styles.trimButtonRow}>
-                <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}>
-                  <Text style={styles.trimBtnText}>Eind -0.5s</Text>
-                </Pressable>
-                <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}>
-                  <Text style={styles.trimBtnText}>Eind +0.5s</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.trimPresetRow}>
-                {[5, 10, 15].map((preset) => (
-                  <Pressable key={preset} style={styles.trimPresetBtn} onPress={() => setClipByDuration(preset)}>
-                    <Text style={styles.trimPresetText}>{preset}s</Text>
+                <View style={styles.trimButtonRow}>
+                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}>
+                    <Text style={styles.trimBtnText}>Start -0.5s</Text>
                   </Pressable>
-                ))}
-              </View>
-
-              {hasVideoClipError ? (
-                <View style={styles.trimErrorCard}>
-                  <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
-                  <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
+                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(CLIP_STEP_SEC)}>
+                    <Text style={styles.trimBtnText}>Start +0.5s</Text>
+                  </Pressable>
                 </View>
-              ) : null}
-            </View>
-          ) : null}
+                <View style={styles.trimButtonRow}>
+                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}>
+                    <Text style={styles.trimBtnText}>Eind -0.5s</Text>
+                  </Pressable>
+                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}>
+                    <Text style={styles.trimBtnText}>Eind +0.5s</Text>
+                  </Pressable>
+                </View>
 
-          {editorCard}
+                <View style={styles.trimPresetRow}>
+                  {[5, 10, 15].map((preset) => (
+                    <Pressable key={preset} style={styles.trimPresetBtn} onPress={() => setClipByDuration(preset)}>
+                      <Text style={styles.trimPresetText}>{preset}s</Text>
+                    </Pressable>
+                  ))}
+                </View>
 
-          {video || imageMedia ? (
-            <View style={styles.fileCard}>
-              <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
-              <Text style={styles.fileText} numberOfLines={1}>
-                {video?.fileName || imageMedia?.fileName}{" "}
-                {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  setVideo(null);
-                  setImageMedia(null);
-                  setClipStartSec(0);
-                  setClipEndSec(MAX_VIDEO_SECONDS);
-                  setUploadStep("select");
-                }}
-              >
-                <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
-              </Pressable>
-            </View>
-          ) : null}
+                {hasVideoClipError ? (
+                  <View style={styles.trimErrorCard}>
+                    <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
+                    <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
-          <Pressable
-            style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
-            onPress={() => setUploadStep("details")}
-            disabled={!hasSelectedMedia}
-          >
-            <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
-            <Text style={styles.nextStepText}>Volgende stap</Text>
-          </Pressable>
-        </View>
+            {editorCard}
+
+            {video || imageMedia ? (
+              <View style={styles.fileCard}>
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+                <Text style={styles.fileText} numberOfLines={1}>
+                  {video?.fileName || imageMedia?.fileName}{" "}
+                  {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    setVideo(null);
+                    setImageMedia(null);
+                    setClipStartSec(0);
+                    setClipEndSec(MAX_VIDEO_SECONDS);
+                    setUploadStep("select");
+                  }}
+                >
+                  <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
+                </Pressable>
+              </View>
+            ) : null}
+
+            <Pressable
+              style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
+              onPress={() => setUploadStep("details")}
+              disabled={!hasSelectedMedia}
+            >
+              <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
+              <Text style={styles.nextStepText}>Volgende stap</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       );
     }
 
@@ -1520,9 +1527,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   uploadFlowScreen: {
-    flex: 1,
     gap: 12,
-    paddingBottom: 8,
+  },
+  uploadSelectContent: {
+    paddingBottom: 52,
   },
   uploadFlowTopRow: {
     flexDirection: "row",
@@ -1766,7 +1774,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   fullScreenDropZone: {
-    flex: 1,
     minHeight: 320,
   },
   dropPreview: {

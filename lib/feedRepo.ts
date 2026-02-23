@@ -508,21 +508,21 @@ export async function deleteMyFeedPost(postId: string): Promise<void> {
     throw new Error("Deze post bestaat niet meer.");
   }
 
-  const data = postSnap.data() as Record<string, unknown>;
-  const companyId = String(data.companyId ?? "").trim();
-  const influencerId = String(data.influencerId ?? "").trim();
-  const ownerUid = currentUser.uid.trim();
-  const isOwner = companyId === ownerUid || (influencerId && influencerId === ownerUid);
-  const isAdmin = isRootAdminIdentity({
-    uid: ownerUid,
-    email: String(currentUser.email ?? ""),
-  });
-
-  if (!isOwner && !isAdmin) {
-    throw new Error("Je hebt geen rechten om deze video te verwijderen.");
+  try {
+    await deleteDoc(postRef);
+  } catch (error: any) {
+    const code = String(error?.code ?? "");
+    if (code.includes("permission-denied")) {
+      const ownerUid = currentUser.uid.trim();
+      const isAdmin = isRootAdminIdentity({
+        uid: ownerUid,
+        email: String(currentUser.email ?? ""),
+      });
+      const adminHint = isAdmin ? "" : " Controleer of je met het juiste bedrijfs- of influencer-account bent ingelogd.";
+      throw new Error(`Je hebt geen rechten om deze video te verwijderen.${adminHint}`);
+    }
+    throw error;
   }
-
-  await deleteDoc(postRef);
 }
 
 export async function syncCompanyBrandingInFeed(companyId: string): Promise<void> {
