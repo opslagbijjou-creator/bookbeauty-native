@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
@@ -16,6 +16,8 @@ type VideoPostCardProps = {
   commentCount?: number;
   following?: boolean;
   followerCount?: number;
+  likeBusy?: boolean;
+  followBusy?: boolean;
   onToggleLike?: () => void;
   onToggleFollow?: () => void;
   onOpenComments?: () => void;
@@ -32,6 +34,8 @@ export default function VideoPostCard({
   commentCount,
   following,
   followerCount,
+  likeBusy,
+  followBusy,
   onToggleLike,
   onToggleFollow,
   onOpenComments,
@@ -112,8 +116,16 @@ export default function VideoPostCard({
               {post.hashtags.map((tag) => `#${tag}`).join(" ")}
             </Text>
           ) : null}
-          <Pressable style={[styles.followBtn, following && styles.followBtnActive]} onPress={onToggleFollow}>
-            <Ionicons name={following ? "checkmark-circle-outline" : "add-circle-outline"} size={14} color="#fff" />
+          <Pressable
+            style={[styles.followBtn, following && styles.followBtnActive, followBusy && styles.touchBusy]}
+            onPress={onToggleFollow}
+            disabled={followBusy}
+          >
+            {followBusy ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name={following ? "checkmark-circle-outline" : "add-circle-outline"} size={14} color="#fff" />
+            )}
             <Text style={styles.followText}>
               {following ? "Volgend" : "Volgen"} · {followerCount ?? 0}
             </Text>
@@ -143,8 +155,16 @@ export default function VideoPostCard({
 
         <View style={styles.sideActions}>
           <View style={styles.actionItem}>
-            <Pressable style={[styles.iconBtn, liked && styles.iconBtnActive]} onPress={onToggleLike}>
-              <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color="#fff" />
+            <Pressable
+              style={[styles.iconBtn, liked && styles.iconBtnActive, likeBusy && styles.touchBusy]}
+              onPress={onToggleLike}
+              disabled={likeBusy}
+            >
+              {likeBusy ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color="#fff" />
+              )}
             </Pressable>
             <Text style={styles.iconCount}>{likeCount ?? 0}</Text>
           </View>
@@ -323,6 +343,9 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  touchBusy: {
+    opacity: 0.75,
   },
   fallback: {
     flex: 1,

@@ -236,6 +236,12 @@ export default function CustomerBookingsScreen() {
                     })}
                   </Text>
                 ) : null}
+                {proposal && item.proposalNote ? (
+                  <View style={styles.proposalNoteCard}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={13} color="#3861bf" />
+                    <Text style={styles.proposalNoteText}>{item.proposalNote}</Text>
+                  </View>
+                ) : null}
                 {reschedulePending ? (
                   <Text style={styles.proposalMeta}>Je verplaatsingsverzoek wacht op akkoord van het bedrijf.</Text>
                 ) : null}
@@ -446,6 +452,25 @@ const styles = StyleSheet.create({
     color: "#2a5fcf",
     fontWeight: "700",
     fontSize: 12,
+  },
+  proposalNoteCard: {
+    marginTop: 4,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#d3def8",
+    backgroundColor: "#f7faff",
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  proposalNoteText: {
+    flex: 1,
+    color: "#2d4f96",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
   },
   feeText: {
     color: "#af552a",

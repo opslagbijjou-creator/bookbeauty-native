@@ -264,8 +264,17 @@ export default function CompanyHomeScreen() {
         { merge: true }
       );
 
-      await ensureOwnerBookableStaff(companyId, name.trim() || "Eigenaar");
-      await syncCompanyBrandingInFeed(companyId);
+      const [staffSyncResult, brandingSyncResult] = await Promise.allSettled([
+        ensureOwnerBookableStaff(companyId, name.trim() || "Eigenaar"),
+        syncCompanyBrandingInFeed(companyId),
+      ]);
+
+      if (staffSyncResult.status === "rejected") {
+        console.warn("[company/home] owner staff sync failed", staffSyncResult.reason);
+      }
+      if (brandingSyncResult.status === "rejected") {
+        console.warn("[company/home] feed branding sync failed", brandingSyncResult.reason);
+      }
 
       Alert.alert("Opgeslagen", "Bedrijfsprofiel is bijgewerkt.");
     } catch (error: any) {
@@ -520,6 +529,10 @@ export default function CompanyHomeScreen() {
         ) : null}
 
         <View style={styles.card}>
+          <View style={styles.cardHeadingRow}>
+            <Ionicons name="person-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.cardHeadingText}>Basisprofiel</Text>
+          </View>
           <TextInput
             style={styles.input}
             value={name}
@@ -542,6 +555,22 @@ export default function CompanyHomeScreen() {
             placeholderTextColor={COLORS.placeholder}
             multiline
           />
+
+          <Text style={styles.label}>Categorieen (meerdere kiezen)</Text>
+          <CategoryChips
+            items={[...CATEGORIES]}
+            selectedItems={categories}
+            multi
+            onToggle={toggleCategory}
+            iconMap={categoryIcons}
+          />
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.cardHeadingRow}>
+            <Ionicons name="briefcase-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.cardHeadingText}>Zakelijke gegevens</Text>
+          </View>
           <TextInput
             style={styles.input}
             value={kvk}
@@ -564,15 +593,7 @@ export default function CompanyHomeScreen() {
             placeholderTextColor={COLORS.placeholder}
             autoCapitalize="none"
           />
-
-          <Text style={styles.label}>Categorieen (meerdere kiezen)</Text>
-          <CategoryChips
-            items={[...CATEGORIES]}
-            selectedItems={categories}
-            multi
-            onToggle={toggleCategory}
-            iconMap={categoryIcons}
-          />
+          <Text style={styles.fieldHint}>Alles wordt netjes gesynchroniseerd na opslaan.</Text>
 
           <Pressable
             style={[styles.primaryBtn, (!canSave || saving) && styles.disabled]}
@@ -877,6 +898,16 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  cardHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  cardHeadingText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
   input: {
     backgroundColor: "#fff",
     borderWidth: 1,
@@ -892,6 +923,11 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontWeight: "700",
     fontSize: 12,
+  },
+  fieldHint: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: "700",
   },
   readonlyText: {
     color: COLORS.text,

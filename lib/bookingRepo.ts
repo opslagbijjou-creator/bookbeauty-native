@@ -111,6 +111,7 @@ export type Booking = {
   proposedOccupiedStartAtMs?: number;
   proposedOccupiedEndAtMs?: number;
   proposedAtMs?: number;
+  proposalNote?: string;
   customerRescheduleCount: number;
   customerConfirmedAtMs?: number;
   companyConfirmedAtMs?: number;
@@ -384,6 +385,7 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
     proposedOccupiedStartAtMs: proposedOccupiedStartAtMs || undefined,
     proposedOccupiedEndAtMs: proposedOccupiedEndAtMs || undefined,
     proposedAtMs: proposedAtMs || undefined,
+    proposalNote: typeof data.proposalNote === "string" ? data.proposalNote : undefined,
     customerRescheduleCount: normalizeNonNegativeInt(data.customerRescheduleCount, 0),
     customerConfirmedAtMs: customerConfirmedAtMs || undefined,
     companyConfirmedAtMs: companyConfirmedAtMs || undefined,
@@ -460,6 +462,7 @@ function clearProposalPatch(): Record<string, unknown> {
     proposedOccupiedStartAt: null,
     proposedOccupiedEndAt: null,
     proposedAt: null,
+    proposalNote: "",
   };
 }
 
@@ -1087,7 +1090,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       throw new Error("Dit tijdslot is net bezet. Kies een ander moment.");
     }
 
-    const status: BookingStatus = "pending";
+    const status: BookingStatus = settings.autoConfirm ? "confirmed" : "pending";
     const nowDate = new Date();
 
     lockIds.forEach((lockId, index) => {
@@ -1133,8 +1136,8 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       proposedAt: null,
       customerRescheduleCount: 0,
       customerConfirmedAt: nowDate,
-      companyConfirmedAt: null,
-      confirmedAt: null,
+      companyConfirmedAt: status === "confirmed" ? nowDate : null,
+      confirmedAt: status === "confirmed" ? nowDate : null,
       customerId: payload.customerId,
       customerName: payload.customerName.trim(),
       customerPhone: payload.customerPhone.trim(),
@@ -1161,7 +1164,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
     customerName: payload.customerName,
     serviceId: payload.serviceId,
     bookingId: bookingRef.id,
-    isAutoConfirmed: false,
+    isAutoConfirmed: result.status === "confirmed",
   }).catch(() => null);
 
   return {
@@ -1277,8 +1280,9 @@ export async function proposeBookingTimeByCompany(params: {
   bookingId: string;
   companyId: string;
   proposedStartAtMs: number;
+  proposalNote?: string;
 }): Promise<void> {
-  const { bookingId, companyId, proposedStartAtMs } = params;
+  const { bookingId, companyId, proposedStartAtMs, proposalNote } = params;
   const snap = await getDoc(doc(db, "bookings", bookingId));
   if (!snap.exists()) throw new Error("Boeking niet gevonden.");
 
@@ -1298,6 +1302,8 @@ export async function proposeBookingTimeByCompany(params: {
     row.serviceBufferBeforeMin,
     row.serviceBufferAfterMin
   );
+  const cleanedProposalNote =
+    typeof proposalNote === "string" ? proposalNote.trim().slice(0, 240) : "";
 
   await ensureWindowIsBookable({
     companyId,
@@ -1318,6 +1324,7 @@ export async function proposeBookingTimeByCompany(params: {
     proposedOccupiedStartAt: new Date(window.occupiedStartAtMs),
     proposedOccupiedEndAt: new Date(window.occupiedEndAtMs),
     proposedAt: serverTimestamp(),
+    proposalNote: cleanedProposalNote,
     companyConfirmedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

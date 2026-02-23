@@ -86,7 +86,7 @@ export default function BookServiceScreen() {
   const serviceId = typeof params.serviceId === "string" ? params.serviceId : "";
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [authReady, setAuthReady] = useState(Boolean(auth.currentUser));
-  const [userRole, setUserRole] = useState<"customer" | "company" | "admin" | null>(null);
+  const [userRole, setUserRole] = useState<"customer" | "company" | "employee" | "admin" | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
@@ -128,7 +128,7 @@ export default function BookServiceScreen() {
   );
   const canBook = Boolean(
     uid &&
-      userRole === "customer" &&
+      (userRole === "customer" || userRole === "company") &&
       service &&
       selectedStaff &&
       selectedSlot &&
@@ -222,7 +222,7 @@ export default function BookServiceScreen() {
       return;
     }
     getUserRole(uid)
-      .then((role) => setUserRole((role as "customer" | "company" | "admin") ?? null))
+      .then((role) => setUserRole((role as "customer" | "company" | "employee" | "admin") ?? null))
       .catch(() => setUserRole(null));
   }, [uid]);
 
@@ -287,11 +287,11 @@ export default function BookServiceScreen() {
 
   async function onSubmit() {
     if (!uid) {
-      Alert.alert("Login vereist", "Log in als klant om een afspraak te boeken.");
+      Alert.alert("Login vereist", "Log in om een afspraak te boeken.");
       return;
     }
-    if (userRole !== "customer") {
-      Alert.alert("Klantaccount vereist", "Gebruik een klantaccount om te boeken.");
+    if (userRole !== "customer" && userRole !== "company") {
+      Alert.alert("Niet beschikbaar", "Dit accounttype kan geen afspraak boeken.");
       return;
     }
     if (!service || !selectedStaff || !selectedSlot || !canBook || submitting) return;
@@ -382,7 +382,7 @@ export default function BookServiceScreen() {
               {!uid ? (
                 <View style={styles.loginCard}>
                   <Ionicons name="log-in-outline" size={15} color={COLORS.primary} />
-                  <Text style={styles.loginText}>Log in als klant om dit tijdslot te kunnen boeken.</Text>
+                  <Text style={styles.loginText}>Log in om dit tijdslot te kunnen boeken.</Text>
                 </View>
               ) : null}
 

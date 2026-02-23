@@ -81,6 +81,7 @@ export default function CompanyProfileScreen() {
   const [activeContent, setActiveContent] = useState<"services" | "videos">("services");
   const [role, setRole] = useState<AppRole>("customer");
   const [following, setFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [likesTotal, setLikesTotal] = useState(0);
   const [ratingAvg, setRatingAvg] = useState(0);
@@ -202,14 +203,25 @@ export default function CompanyProfileScreen() {
     : `${ratingCount}/${ratingMinReviews} reviews`;
 
   async function onToggleFollow() {
-    if (!id || !uid) return;
+    if (!id || !uid || followBusy) return;
+    const previousFollow = following;
+    const previousCount = followersCount;
+    const optimisticFollow = !previousFollow;
+    setFollowBusy(true);
+    setFollowing(optimisticFollow);
+    setFollowersCount(Math.max(0, previousCount + (optimisticFollow ? 1 : -1)));
     try {
       const next = await toggleFollowCompany(id, uid, role);
       setFollowing(next);
-      const count = await getCompanyFollowersCount(id);
-      setFollowersCount(count);
+      getCompanyFollowersCount(id)
+        .then((count) => setFollowersCount(count))
+        .catch(() => null);
     } catch (error: any) {
+      setFollowing(previousFollow);
+      setFollowersCount(previousCount);
       Alert.alert("Volgen mislukt", error?.message ?? "Kon salon niet volgen.");
+    } finally {
+      setFollowBusy(false);
     }
   }
 
@@ -306,9 +318,17 @@ export default function CompanyProfileScreen() {
 
           <View style={styles.actionRow}>
             {uid ? (
-              <Pressable style={[styles.followBtn, following && styles.followBtnActive]} onPress={onToggleFollow}>
-                <Ionicons name={following ? "checkmark-circle" : "add-circle"} size={19} color="#fff" />
-                <Text style={styles.followText}>{following ? "Volgend" : "Volgen"}</Text>
+              <Pressable
+                style={[styles.followBtn, following && styles.followBtnActive, followBusy && styles.disabled]}
+                onPress={onToggleFollow}
+                disabled={followBusy}
+              >
+                <Ionicons
+                  name={followBusy ? "hourglass-outline" : following ? "checkmark-circle" : "add-circle"}
+                  size={19}
+                  color="#fff"
+                />
+                <Text style={styles.followText}>{followBusy ? "Even..." : following ? "Volgend" : "Volgen"}</Text>
               </Pressable>
             ) : null}
             {id ? (
@@ -322,55 +342,34 @@ export default function CompanyProfileScreen() {
             ) : null}
           </View>
 
-          <View style={styles.contentHeaderCard}>
-            <View style={styles.contentHeaderTop}>
-              <Text style={styles.contentTitle}>Inhoud van dit profiel</Text>
-              <Text style={styles.contentHint}>Kies tussen diensten en video&apos;s</Text>
-            </View>
+          <View style={styles.tabShell}>
+            <Pressable
+              style={[styles.tabBtn, activeContent === "services" && styles.tabBtnActive]}
+              onPress={() => setActiveContent("services")}
+            >
+              <Ionicons
+                name={activeContent === "services" ? "cut" : "cut-outline"}
+                size={16}
+                color={activeContent === "services" ? "#fff" : COLORS.primary}
+              />
+              <Text style={[styles.tabText, activeContent === "services" && styles.tabTextActive]}>
+                Diensten ({serviceCount})
+              </Text>
+            </Pressable>
 
-            <View style={styles.contentSwitch}>
-              <Pressable
-                style={[styles.switchBtn, activeContent === "services" && styles.switchBtnActive]}
-                onPress={() => setActiveContent("services")}
-              >
-                <View style={[styles.switchIconWrap, activeContent === "services" && styles.switchIconWrapActive]}>
-                  <Ionicons
-                    name={activeContent === "services" ? "cut" : "cut-outline"}
-                    size={16}
-                    color={activeContent === "services" ? "#fff" : COLORS.primary}
-                  />
-                </View>
-                <View style={styles.switchTextBlock}>
-                  <Text style={[styles.switchText, activeContent === "services" && styles.switchTextActive]}>
-                    Diensten
-                  </Text>
-                  <Text style={[styles.switchMeta, activeContent === "services" && styles.switchMetaActive]}>
-                    {serviceCount} items
-                  </Text>
-                </View>
-              </Pressable>
-
-              <Pressable
-                style={[styles.switchBtn, activeContent === "videos" && styles.switchBtnActive]}
-                onPress={() => setActiveContent("videos")}
-              >
-                <View style={[styles.switchIconWrap, activeContent === "videos" && styles.switchIconWrapActive]}>
-                  <Ionicons
-                    name={activeContent === "videos" ? "play" : "play-outline"}
-                    size={16}
-                    color={activeContent === "videos" ? "#fff" : COLORS.primary}
-                  />
-                </View>
-                <View style={styles.switchTextBlock}>
-                  <Text style={[styles.switchText, activeContent === "videos" && styles.switchTextActive]}>
-                    Video&apos;s
-                  </Text>
-                  <Text style={[styles.switchMeta, activeContent === "videos" && styles.switchMetaActive]}>
-                    {videoCount} posts
-                  </Text>
-                </View>
-              </Pressable>
-            </View>
+            <Pressable
+              style={[styles.tabBtn, activeContent === "videos" && styles.tabBtnActive]}
+              onPress={() => setActiveContent("videos")}
+            >
+              <Ionicons
+                name={activeContent === "videos" ? "play" : "play-outline"}
+                size={16}
+                color={activeContent === "videos" ? "#fff" : COLORS.primary}
+              />
+              <Text style={[styles.tabText, activeContent === "videos" && styles.tabTextActive]}>
+                Video&apos;s ({videoCount})
+              </Text>
+            </Pressable>
           </View>
 
           {activeContent === "services" ? (
@@ -609,10 +608,11 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: "row",
     gap: 8,
+    marginTop: 2,
   },
   followBtn: {
     flex: 1,
-    minHeight: 50,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
   },
   openFeedBtn: {
     flex: 1,
-    minHeight: 50,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -644,6 +644,9 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "900",
+  },
+  disabled: {
+    opacity: 0.65,
   },
   ratingRow: {
     flexDirection: "row",
@@ -658,80 +661,39 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: COLORS.surface,
   },
-  contentHeaderCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
+  tabShell: {
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
-    padding: 10,
-    gap: 9,
-  },
-  contentHeaderTop: {
-    gap: 2,
-  },
-  contentTitle: {
-    color: COLORS.text,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  contentHint: {
-    color: COLORS.muted,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  contentSwitch: {
+    backgroundColor: COLORS.card,
+    padding: 6,
     flexDirection: "row",
     gap: 8,
   },
-  switchBtn: {
+  tabBtn: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-start",
+    justifyContent: "center",
     gap: 6,
-    minHeight: 52,
+    minHeight: 44,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
   },
-  switchBtnActive: {
-    backgroundColor: "#fff4fa",
-    borderColor: "#e9b4cf",
-  },
-  switchIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#efc9de",
-    backgroundColor: COLORS.primarySoft,
-  },
-  switchIconWrapActive: {
+  tabBtnActive: {
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
-  switchTextBlock: {
-    gap: 1,
-  },
-  switchText: {
+  tabText: {
     color: COLORS.muted,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "900",
   },
-  switchTextActive: {
-    color: COLORS.primary,
-  },
-  switchMeta: {
-    color: COLORS.muted,
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  switchMetaActive: {
-    color: COLORS.primary,
+  tabTextActive: {
+    color: "#fff",
   },
   section: {
     color: COLORS.text,

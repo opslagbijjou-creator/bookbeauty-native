@@ -56,6 +56,8 @@ export default function CompanyFeedScreen() {
   const [commentCountMap, setCommentCountMap] = useState<Record<string, number>>({});
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
   const [followersCountMap, setFollowersCountMap] = useState<Record<string, number>>({});
+  const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
+  const [followBusyMap, setFollowBusyMap] = useState<Record<string, boolean>>({});
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const allowPlayback = isFocused && isAppActive && !commentsPostId;
   const allowPlaybackRef = useRef(allowPlayback);
@@ -192,26 +194,50 @@ export default function CompanyFeedScreen() {
   }
 
   async function onToggleLike(postId: string) {
-    if (!uid) return;
+    if (!uid || likeBusyMap[postId]) return;
+    const prevLiked = Boolean(likedMap[postId]);
+    const prevCount = likeCountMap[postId] ?? 0;
+    const optimisticLiked = !prevLiked;
+    const optimisticCount = Math.max(0, prevCount + (optimisticLiked ? 1 : -1));
+    setLikeBusyMap((prev) => ({ ...prev, [postId]: true }));
+    setLikedMap((prev) => ({ ...prev, [postId]: optimisticLiked }));
+    setLikeCountMap((prev) => ({ ...prev, [postId]: optimisticCount }));
     try {
       const nextLiked = await togglePostLike(postId, uid, role);
-      const count = await getPostLikeCount(postId);
       setLikedMap((prev) => ({ ...prev, [postId]: nextLiked }));
-      setLikeCountMap((prev) => ({ ...prev, [postId]: count }));
+      getPostLikeCount(postId)
+        .then((count) => setLikeCountMap((prev) => ({ ...prev, [postId]: count })))
+        .catch(() => null);
     } catch (error: any) {
+      setLikedMap((prev) => ({ ...prev, [postId]: prevLiked }));
+      setLikeCountMap((prev) => ({ ...prev, [postId]: prevCount }));
       Alert.alert("Like mislukt", error?.message ?? "Kon like niet aanpassen.");
+    } finally {
+      setLikeBusyMap((prev) => ({ ...prev, [postId]: false }));
     }
   }
 
   async function onToggleFollow(companyId: string) {
-    if (!uid) return;
+    if (!uid || followBusyMap[companyId]) return;
+    const prevFollowing = Boolean(followingMap[companyId]);
+    const prevCount = followersCountMap[companyId] ?? 0;
+    const optimisticFollowing = !prevFollowing;
+    const optimisticCount = Math.max(0, prevCount + (optimisticFollowing ? 1 : -1));
+    setFollowBusyMap((prev) => ({ ...prev, [companyId]: true }));
+    setFollowingMap((prev) => ({ ...prev, [companyId]: optimisticFollowing }));
+    setFollowersCountMap((prev) => ({ ...prev, [companyId]: optimisticCount }));
     try {
       const next = await toggleFollowCompany(companyId, uid, role);
-      const count = await getCompanyFollowersCount(companyId);
       setFollowingMap((prev) => ({ ...prev, [companyId]: next }));
-      setFollowersCountMap((prev) => ({ ...prev, [companyId]: count }));
+      getCompanyFollowersCount(companyId)
+        .then((count) => setFollowersCountMap((prev) => ({ ...prev, [companyId]: count })))
+        .catch(() => null);
     } catch (error: any) {
+      setFollowingMap((prev) => ({ ...prev, [companyId]: prevFollowing }));
+      setFollowersCountMap((prev) => ({ ...prev, [companyId]: prevCount }));
       Alert.alert("Volgen mislukt", error?.message ?? "Kon salon niet volgen.");
+    } finally {
+      setFollowBusyMap((prev) => ({ ...prev, [companyId]: false }));
     }
   }
 
@@ -295,6 +321,8 @@ export default function CompanyFeedScreen() {
                   commentCount={commentCountMap[item.id]}
                   following={followingMap[item.companyId]}
                   followerCount={followersCountMap[item.companyId]}
+                  likeBusy={Boolean(likeBusyMap[item.id])}
+                  followBusy={Boolean(followBusyMap[item.companyId])}
                   onToggleLike={() => onToggleLike(item.id)}
                   onOpenComments={() => setCommentsPostId(item.id)}
                   onToggleFollow={() => onToggleFollow(item.companyId)}

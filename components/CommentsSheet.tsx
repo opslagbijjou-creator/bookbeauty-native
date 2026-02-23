@@ -66,6 +66,7 @@ export default function CommentsSheet({
   const [submitting, setSubmitting] = useState(false);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [likeCountMap, setLikeCountMap] = useState<Record<string, number>>({});
+  const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
   const [keyboardInset, setKeyboardInset] = useState(0);
   const loadTokenRef = useRef(0);
 
@@ -192,14 +193,26 @@ export default function CommentsSheet({
   }
 
   async function onToggleLike(commentId: string) {
-    if (!postId || !uid) return;
+    if (!postId || !uid || likeBusyMap[commentId]) return;
+    const previousLiked = Boolean(likedMap[commentId]);
+    const previousCount = likeCountMap[commentId] ?? 0;
+    const optimisticLiked = !previousLiked;
+    const optimisticCount = Math.max(0, previousCount + (optimisticLiked ? 1 : -1));
+    setLikeBusyMap((prev) => ({ ...prev, [commentId]: true }));
+    setLikedMap((prev) => ({ ...prev, [commentId]: optimisticLiked }));
+    setLikeCountMap((prev) => ({ ...prev, [commentId]: optimisticCount }));
     try {
       const next = await toggleCommentLike(postId, commentId, uid, role);
-      const count = await getCommentLikeCount(postId, commentId);
       setLikedMap((prev) => ({ ...prev, [commentId]: next }));
-      setLikeCountMap((prev) => ({ ...prev, [commentId]: count }));
+      getCommentLikeCount(postId, commentId)
+        .then((count) => setLikeCountMap((prev) => ({ ...prev, [commentId]: count })))
+        .catch(() => null);
     } catch (error: any) {
+      setLikedMap((prev) => ({ ...prev, [commentId]: previousLiked }));
+      setLikeCountMap((prev) => ({ ...prev, [commentId]: previousCount }));
       Alert.alert("Like mislukt", error?.message ?? "Kon like niet aanpassen.");
+    } finally {
+      setLikeBusyMap((prev) => ({ ...prev, [commentId]: false }));
     }
   }
 
@@ -273,7 +286,11 @@ export default function CommentsSheet({
                     </View>
                     <Text style={styles.commentText}>{item.text}</Text>
                     <View style={styles.commentActions}>
-                      <Pressable style={styles.likeBtn} onPress={() => onToggleLike(item.id)}>
+                      <Pressable
+                        style={[styles.likeBtn, likeBusyMap[item.id] && styles.likeBtnBusy]}
+                        onPress={() => onToggleLike(item.id)}
+                        disabled={Boolean(likeBusyMap[item.id])}
+                      >
                         <Ionicons
                           name={likedMap[item.id] ? "heart" : "heart-outline"}
                           size={14}
@@ -440,6 +457,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     backgroundColor: "#fff",
+  },
+  likeBtnBusy: {
+    opacity: 0.65,
   },
   likeText: {
     color: COLORS.muted,

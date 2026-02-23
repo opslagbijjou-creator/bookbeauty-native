@@ -7,11 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { doc, getDoc } from "firebase/firestore";
 import { getUserRole, logout } from "../../../lib/authRepo";
 import { auth, db } from "../../../lib/firebase";
-import {
-  getMyFollowingCount,
-  getMyLikesGivenCount,
-  getMyRatingsGivenCount,
-} from "../../../lib/socialRepo";
+import { getMyFollowingCount, getMyLikesGivenCount, getMyRatingsGivenCount } from "../../../lib/socialRepo";
 import { CATEGORIES, COLORS } from "../../../lib/ui";
 
 type ProfileStats = {
@@ -112,11 +108,11 @@ export default function CustomerProfileScreen() {
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={["#eb4b7a", "#cf2d71"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <LinearGradient colors={["#ef4e82", "#d33371"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
           <View style={styles.heroTop}>
             <View style={styles.heroTitleWrap}>
-              <Ionicons name="sparkles-outline" size={16} color="#fff" />
-              <Text style={styles.heroTitle}>Mijn Profiel</Text>
+              <Ionicons name="person-circle-outline" size={17} color="#fff" />
+              <Text style={styles.heroTitle}>Jouw profiel</Text>
             </View>
             <Pressable style={styles.settingsBtn}>
               <Ionicons name="settings-outline" size={16} color="#fff" />
@@ -127,56 +123,66 @@ export default function CustomerProfileScreen() {
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{initials}</Text>
             </View>
-            <View style={styles.heroTextWrap}>
+            <View style={styles.heroIdentity}>
               <Text style={styles.name}>{displayName}</Text>
               <Text style={styles.subTitle}>{user?.email ?? "Geen e-mail"}</Text>
+              <View style={styles.metaPills}>
+                <View style={styles.metaPill}>
+                  <Ionicons name="pricetag-outline" size={11} color="#fff" />
+                  <Text style={styles.metaPillText}>{role}</Text>
+                </View>
+                <View style={styles.metaPill}>
+                  <Ionicons name="calendar-outline" size={11} color="#fff" />
+                  <Text style={styles.metaPillText}>{joinedLabel}</Text>
+                </View>
+              </View>
             </View>
           </View>
         </LinearGradient>
 
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Ionicons name="people-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.statValue}>{loading ? "-" : stats.following}</Text>
-            <Text style={styles.statLabel}>Volgt</Text>
+        <View style={styles.metricsRow}>
+          <View style={styles.metricCard}>
+            <Ionicons name="people-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.metricValue}>{loading ? "-" : stats.following}</Text>
+            <Text style={styles.metricLabel}>Volgt</Text>
           </View>
-          <View style={styles.statCard}>
-            <Ionicons name="heart-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.statValue}>{loading ? "-" : stats.likesGiven}</Text>
-            <Text style={styles.statLabel}>Likes gegeven</Text>
+          <View style={styles.metricCard}>
+            <Ionicons name="heart-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.metricValue}>{loading ? "-" : stats.likesGiven}</Text>
+            <Text style={styles.metricLabel}>Likes gegeven</Text>
           </View>
-          <View style={styles.statCard}>
-            <Ionicons name="star-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.statValue}>{loading ? "-" : stats.ratingsGiven}</Text>
-            <Text style={styles.statLabel}>Reviews</Text>
+          <View style={styles.metricCard}>
+            <Ionicons name="star-outline" size={15} color={COLORS.primary} />
+            <Text style={styles.metricValue}>{loading ? "-" : stats.ratingsGiven}</Text>
+            <Text style={styles.metricLabel}>Reviews</Text>
           </View>
         </View>
 
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
+        <View style={styles.quickCard}>
+          <View style={styles.sectionHeader}>
             <Ionicons name="flash-outline" size={15} color={COLORS.primary} />
-            <Text style={styles.cardTitle}>Snelle acties</Text>
+            <Text style={styles.sectionTitle}>Snelle acties</Text>
           </View>
-          <View style={styles.actionRow}>
-            <Pressable style={styles.actionBtn} onPress={() => router.push("/(customer)/(tabs)" as never)}>
-              <Ionicons name="search-outline" size={15} color={COLORS.primary} />
-              <Text style={styles.actionText}>Ontdek</Text>
+          <View style={styles.quickGrid}>
+            <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/(tabs)" as never)}>
+              <Ionicons name="search-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.quickText}>Discover</Text>
             </Pressable>
-            <Pressable style={styles.actionBtn} onPress={() => router.push("/(customer)/(tabs)/feed" as never)}>
-              <Ionicons name="play-outline" size={15} color={COLORS.primary} />
-              <Text style={styles.actionText}>Feed</Text>
+            <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/(tabs)/feed" as never)}>
+              <Ionicons name="play-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.quickText}>Feed</Text>
             </Pressable>
-            <Pressable style={styles.actionBtn} onPress={() => router.push("/(customer)/(tabs)/bookings" as never)}>
-              <Ionicons name="calendar-outline" size={15} color={COLORS.primary} />
-              <Text style={styles.actionText}>Bookings</Text>
+            <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/(tabs)/bookings" as never)}>
+              <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.quickText}>Bookings</Text>
             </Pressable>
           </View>
         </View>
 
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
+          <View style={styles.sectionHeader}>
             <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
-            <Text style={styles.cardTitle}>Favoriete categorieen</Text>
+            <Text style={styles.sectionTitle}>Favoriete categorieen</Text>
           </View>
           <View style={styles.prefWrap}>
             {CATEGORIES.map((category) => {
@@ -195,9 +201,9 @@ export default function CustomerProfileScreen() {
         </View>
 
         <View style={styles.card}>
-          <View style={styles.cardHeader}>
+          <View style={styles.sectionHeader}>
             <Ionicons name="person-outline" size={15} color={COLORS.primary} />
-            <Text style={styles.cardTitle}>Account</Text>
+            <Text style={styles.sectionTitle}>Account</Text>
           </View>
           {loading ? (
             <View style={styles.loadingRow}>
@@ -243,15 +249,17 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
   hero: {
-    borderRadius: 24,
+    borderRadius: 22,
     padding: 14,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(255,255,255,0.26)",
+    gap: 12,
   },
   heroTop: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 8,
   },
   heroTitleWrap: {
     flexDirection: "row",
@@ -266,35 +274,34 @@ const styles = StyleSheet.create({
   settingsBtn: {
     width: 34,
     height: 34,
-    borderRadius: 17,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.34)",
+    borderColor: "rgba(255,255,255,0.35)",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.14)",
   },
   heroBottom: {
-    marginTop: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
   avatar: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.22)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.36)",
+    borderColor: "rgba(255,255,255,0.34)",
   },
   avatarText: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "900",
   },
-  heroTextWrap: {
+  heroIdentity: {
     flex: 1,
     gap: 3,
   },
@@ -304,15 +311,38 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   subTitle: {
-    color: "rgba(255,255,255,0.88)",
+    color: "rgba(255,255,255,0.9)",
     fontWeight: "700",
     fontSize: 12,
   },
-  statsGrid: {
+  metaPills: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.36)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  metaPillText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 11,
+  },
+  metricsRow: {
     flexDirection: "row",
     gap: 8,
   },
-  statCard: {
+  metricCard: {
     flex: 1,
     alignItems: "center",
     gap: 4,
@@ -322,18 +352,18 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     backgroundColor: COLORS.card,
   },
-  statValue: {
+  metricValue: {
     color: COLORS.text,
     fontWeight: "900",
     fontSize: 18,
   },
-  statLabel: {
+  metricLabel: {
     color: COLORS.muted,
     fontWeight: "700",
     fontSize: 11,
     textAlign: "center",
   },
-  card: {
+  quickCard: {
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -341,21 +371,21 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
-  cardHeader: {
+  sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
-  cardTitle: {
+  sectionTitle: {
     color: COLORS.text,
     fontWeight: "800",
     fontSize: 14,
   },
-  actionRow: {
+  quickGrid: {
     flexDirection: "row",
     gap: 8,
   },
-  actionBtn: {
+  quickBtn: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -364,12 +394,20 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     borderRadius: 12,
     backgroundColor: COLORS.surface,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
-  actionText: {
+  quickText: {
     color: COLORS.primary,
     fontWeight: "800",
     fontSize: 12,
+  },
+  card: {
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 18,
+    padding: 12,
+    gap: 10,
   },
   prefWrap: {
     flexDirection: "row",
