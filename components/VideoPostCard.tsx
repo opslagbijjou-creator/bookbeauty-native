@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { FeedPost } from "../lib/feedRepo";
+import { buildCloudinaryEditedUrl } from "../lib/mediaEdit";
 
 type VideoPostCardProps = {
   post: FeedPost;
@@ -22,6 +23,60 @@ type VideoPostCardProps = {
   onToggleFollow?: () => void;
   onOpenComments?: () => void;
 };
+
+let globalWebMuted = true;
+const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto";
+
+function normalizeCloudinaryVideoPlaybackUrl(rawUrl: string): string {
+  const source = String(rawUrl ?? "").trim();
+  if (!source || !source.includes("/upload/")) return source;
+  if (!source.includes("/video/upload/") && !/\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source)) return source;
+
+  const [rawPath, rawQuery = ""] = source.split("?");
+  const marker = "/upload/";
+  const markerIndex = rawPath.indexOf(marker);
+  if (markerIndex < 0) return source;
+
+  const basePath = rawPath.slice(0, markerIndex + marker.length);
+  const suffixPath = rawPath.slice(markerIndex + marker.length);
+  if (suffixPath.startsWith(`${CLOUDINARY_TRANSCODE_STEP}/`)) {
+    return source;
+  }
+
+  const nextPath = `${basePath}${CLOUDINARY_TRANSCODE_STEP}/${suffixPath}`;
+  return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
+}
+
+function buildVideoCandidates(
+  rawVideoInput: string,
+  rawSourceVideoInput: string,
+  cropPreset: FeedPost["cropPreset"],
+  filterPreset: FeedPost["filterPreset"]
+): string[] {
+  const rawVideo = String(rawVideoInput ?? "").trim();
+  const rawSourceVideo = String(rawSourceVideoInput ?? "").trim();
+
+  const editedFromSource = rawSourceVideo
+    ? buildCloudinaryEditedUrl(rawSourceVideo, {
+        cropPreset,
+        filterPreset,
+      })
+    : "";
+
+  const candidates = [
+    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
+    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
+    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
+    rawVideo,
+    rawSourceVideo,
+  ].filter(Boolean);
+
+  const unique: string[] = [];
+  candidates.forEach((candidate) => {
+    if (!unique.includes(candidate)) unique.push(candidate);
+  });
+  return unique;
+}
 
 export default function VideoPostCard({
   post,
@@ -42,7 +97,11 @@ export default function VideoPostCard({
 }: VideoPostCardProps) {
   const ref = useRef<Video | null>(null);
   const mediaType = post.mediaType === "image" ? "image" : "video";
-  const canPlayVideo = mediaType === "video" && Boolean(post.videoUrl);
+  const videoCandidates = useMemo(
+    () => buildVideoCandidates(post.videoUrl, post.sourceVideoUrl ?? "", post.cropPreset, post.filterPreset),
+    [post.videoUrl, post.sourceVideoUrl, post.cropPreset, post.filterPreset]
+  );
+  const canPlayVideo = mediaType === "video" && videoCandidates.length > 0;
   const imageUri = post.imageUrl || post.thumbnailUrl || "";
   const clipStartMs = Math.max(0, Math.round(Number(post.clipStartSec ?? 0) * 1000));
   const rawClipEndMs = Math.max(0, Math.round(Number(post.clipEndSec ?? 0) * 1000));
@@ -53,11 +112,28 @@ export default function VideoPostCard({
   const influencerName = typeof post.influencerName === "string" ? post.influencerName.trim() : "";
   const isInfluencerPost = post.creatorRole === "influencer" && Boolean(influencerName);
   const isWeb = Platform.OS === "web";
+  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
+  const activeVideoUrl = canPlayVideo ? videoCandidates[Math.min(videoSourceIndex, videoCandidates.length - 1)] : "";
+  const [muted, setMuted] = useState(isWeb ? globalWebMuted : false);
+  const [videoReady, setVideoReady] = useState(false);
+  const webSnapStyle: any = isWeb
+    ? { scrollSnapAlign: "start", scrollSnapStop: "always" }
+    : undefined;
+
+  useEffect(() => {
+    setVideoSourceIndex(0);
+    setVideoReady(false);
+  }, [post.id, videoCandidates.length]);
+
+  useEffect(() => {
+    if (!isWeb) return;
+    setMuted(globalWebMuted);
+  }, [isWeb, post.id]);
 
   const onPlaybackStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
-      if (!isActive || !hasClipWindow) return;
       if (!status.isLoaded) return;
+      if (!isActive || !hasClipWindow) return;
       const player = ref.current;
       if (!player) return;
       if (status.positionMillis >= rawClipEndMs - 80) {
@@ -67,11 +143,20 @@ export default function VideoPostCard({
     [isActive, hasClipWindow, rawClipEndMs, clipStartMs]
   );
 
+  const onVideoError = useCallback(() => {
+    setVideoReady(false);
+    setVideoSourceIndex((prev) => {
+      const next = prev + 1;
+      if (next >= videoCandidates.length) return prev;
+      return next;
+    });
+  }, [videoCandidates.length]);
+
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
 
-    if (isActive && canPlayVideo) {
+    if (isActive && canPlayVideo && activeVideoUrl) {
       if (clipStartMs > 0) {
         video
           .setPositionAsync(clipStartMs)
@@ -83,7 +168,18 @@ export default function VideoPostCard({
     } else {
       video.pauseAsync().catch(() => null);
     }
-  }, [isActive, canPlayVideo, clipStartMs]);
+  }, [isActive, canPlayVideo, clipStartMs, activeVideoUrl]);
+
+  async function onToggleMute() {
+    const nextMuted = !muted;
+    setMuted(nextMuted);
+    if (isWeb) {
+      globalWebMuted = nextMuted;
+    }
+    if (!nextMuted && isActive && canPlayVideo && activeVideoUrl) {
+      await ref.current?.playAsync().catch(() => null);
+    }
+  }
 
   useEffect(() => {
     const video = ref.current;
@@ -106,21 +202,38 @@ export default function VideoPostCard({
   }
 
   return (
-    <View style={[styles.container, { height }]}>
-      {canPlayVideo ? (
+    <View style={[styles.container, { height }, webSnapStyle]}>
+      {imageUri ? (
+        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+      ) : null}
+      {canPlayVideo && activeVideoUrl ? (
         <Video
           ref={ref}
-          source={{ uri: post.videoUrl }}
+          source={{ uri: activeVideoUrl }}
           style={StyleSheet.absoluteFillObject}
-          resizeMode={ResizeMode.CONTAIN}
+          resizeMode={ResizeMode.COVER}
           shouldPlay={isActive}
-          isLooping={!hasClipWindow}
-          isMuted={isWeb}
+          isLooping
+          isMuted={muted}
+          volume={muted ? 0 : 1}
+          progressUpdateIntervalMillis={90}
+          usePoster={Boolean(imageUri)}
+          posterSource={imageUri ? { uri: imageUri } : undefined}
+          posterStyle={StyleSheet.absoluteFillObject}
+          onLoadStart={() => setVideoReady(false)}
+          onReadyForDisplay={() => setVideoReady(true)}
+          onError={onVideoError}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
-      ) : (
-        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
-      )}
+      ) : null}
+      {canPlayVideo && !videoReady && imageUri ? <View style={styles.mediaShade} /> : null}
+
+      {canPlayVideo && isWeb && muted ? (
+        <Pressable style={styles.tapForSound} onPress={() => onToggleMute().catch(() => null)}>
+          <Ionicons name="volume-high-outline" size={14} color="#fff" />
+          <Text style={styles.tapForSoundText}>Tik voor geluid</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.overlay}>
         <View style={styles.meta}>
@@ -187,6 +300,14 @@ export default function VideoPostCard({
         </View>
 
         <View style={styles.sideActions}>
+          {canPlayVideo ? (
+            <View style={styles.actionItem}>
+              <Pressable style={[styles.iconBtn, !muted && styles.iconBtnActive]} onPress={() => onToggleMute().catch(() => null)}>
+                <Ionicons name={muted ? "volume-mute-outline" : "volume-high-outline"} size={21} color="#fff" />
+              </Pressable>
+              <Text style={styles.iconCount}>{muted ? "Geluid uit" : "Geluid aan"}</Text>
+            </View>
+          ) : null}
           <View style={styles.actionItem}>
             <Pressable
               style={[styles.iconBtn, liked && styles.iconBtnActive, likeBusy && styles.touchBusy]}
@@ -230,6 +351,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     padding: 16,
     backgroundColor: "rgba(0,0,0,0.22)",
+  },
+  mediaShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.2)",
+  },
+  tapForSound: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    zIndex: 4,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.42)",
+    backgroundColor: "rgba(0,0,0,0.58)",
+  },
+  tapForSoundText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 11,
   },
   meta: {
     flex: 1,

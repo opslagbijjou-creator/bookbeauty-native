@@ -68,6 +68,8 @@ export default function CustomerFeedScreen() {
   const allowPlaybackRef = useRef(allowPlayback);
   const loadingMoreRef = useRef(false);
   const listRef = useRef<FlatList<FeedPost> | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const scrollSnapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cardHeight = Math.max(320, Math.round(listHeight || 0));
   const stableHeightRef = useRef(0);
@@ -192,6 +194,17 @@ export default function CustomerFeedScreen() {
     () => items.map((_, index) => index * cardHeight),
     [items, cardHeight]
   );
+  const webListStyle = useMemo(
+    () =>
+      Platform.OS === "web"
+        ? ({
+            scrollSnapType: "y mandatory",
+            overscrollBehaviorY: "contain",
+            WebkitOverflowScrolling: "touch",
+          } as any)
+        : undefined,
+    []
+  );
 
   const snapToNearestItem = useCallback(
     (offsetY: number) => {
@@ -200,6 +213,7 @@ export default function CustomerFeedScreen() {
       const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(rawIndex)));
       const nextOffset = nextIndex * cardHeight;
       const nextId = items[nextIndex]?.id ?? null;
+      scrollOffsetRef.current = nextOffset;
       if (allowPlaybackRef.current && nextId) {
         setActiveId(nextId);
       }
@@ -211,17 +225,55 @@ export default function CustomerFeedScreen() {
 
   const onMomentumSnap = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      snapToNearestItem(event.nativeEvent.contentOffset.y);
+      const offsetY = event.nativeEvent.contentOffset.y;
+      scrollOffsetRef.current = offsetY;
+      snapToNearestItem(offsetY);
     },
     [snapToNearestItem]
   );
 
   const onDragSnap = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      snapToNearestItem(event.nativeEvent.contentOffset.y);
+      const offsetY = event.nativeEvent.contentOffset.y;
+      scrollOffsetRef.current = offsetY;
+      snapToNearestItem(offsetY);
     },
     [snapToNearestItem]
   );
+
+  const onFeedScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetY = event.nativeEvent.contentOffset.y;
+      scrollOffsetRef.current = offsetY;
+      if (Platform.OS !== "web") return;
+      if (scrollSnapTimerRef.current) {
+        clearTimeout(scrollSnapTimerRef.current);
+      }
+      scrollSnapTimerRef.current = setTimeout(() => {
+        snapToNearestItem(scrollOffsetRef.current);
+      }, 95);
+    },
+    [snapToNearestItem]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (!scrollSnapTimerRef.current) return;
+      clearTimeout(scrollSnapTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!items.length || cardHeight <= 0) return;
+    const currentOffset = scrollOffsetRef.current;
+    const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(currentOffset / cardHeight)));
+    const nextOffset = nextIndex * cardHeight;
+    scrollOffsetRef.current = nextOffset;
+    const raf = requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: nextOffset, animated: false });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [cardHeight, items.length]);
 
   useEffect(() => {
     if (!allowPlayback) {
@@ -373,8 +425,7 @@ export default function CustomerFeedScreen() {
             setListHeight(measured);
             return;
           }
-          // Ignore tiny iOS Safari viewport jitter to keep snapping stable.
-          if (Math.abs(measured - stableHeightRef.current) < 90) return;
+          if (Math.abs(measured - stableHeightRef.current) < 2) return;
           stableHeightRef.current = measured;
           setListHeight(measured);
         }}
@@ -386,6 +437,7 @@ export default function CustomerFeedScreen() {
         ) : (
           <FlatList
             ref={listRef}
+            style={[styles.feedList, webListStyle]}
             data={items}
             keyExtractor={(item) => item.id}
             pagingEnabled
@@ -397,6 +449,9 @@ export default function CustomerFeedScreen() {
             bounces={false}
             alwaysBounceVertical={false}
             overScrollMode="never"
+            directionalLockEnabled
+            onScroll={onFeedScroll}
+            scrollEventThrottle={16}
             onMomentumScrollEnd={onMomentumSnap}
             onScrollEndDrag={onDragSnap}
             onEndReachedThreshold={0.35}
@@ -546,6 +601,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   listWrap: {
+    flex: 1,
+  },
+  feedList: {
     flex: 1,
   },
   empty: {
