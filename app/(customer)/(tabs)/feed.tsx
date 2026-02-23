@@ -70,6 +70,7 @@ export default function CustomerFeedScreen() {
   const listRef = useRef<FlatList<FeedPost> | null>(null);
 
   const cardHeight = Math.max(320, Math.round(listHeight || 0));
+  const stableHeightRef = useRef(0);
   const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
     Alles: "apps-outline",
     Kapper: "cut-outline",
@@ -187,6 +188,10 @@ export default function CustomerFeedScreen() {
   }).current;
 
   const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 80 }), []);
+  const snapOffsets = useMemo(
+    () => items.map((_, index) => index * cardHeight),
+    [items, cardHeight]
+  );
 
   const snapToNearestItem = useCallback(
     (offsetY: number) => {
@@ -213,8 +218,6 @@ export default function CustomerFeedScreen() {
 
   const onDragSnap = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const velocityY = Number(event.nativeEvent.velocity?.y ?? 0);
-      if (Math.abs(velocityY) > 0.15) return;
       snapToNearestItem(event.nativeEvent.contentOffset.y);
     },
     [snapToNearestItem]
@@ -360,7 +363,22 @@ export default function CustomerFeedScreen() {
         )}
       </View>
 
-      <View style={styles.listWrap} onLayout={(event) => setListHeight(event.nativeEvent.layout.height)}>
+      <View
+        style={styles.listWrap}
+        onLayout={(event) => {
+          const measured = Math.round(event.nativeEvent.layout.height);
+          if (measured <= 0) return;
+          if (stableHeightRef.current <= 0) {
+            stableHeightRef.current = measured;
+            setListHeight(measured);
+            return;
+          }
+          // Ignore tiny iOS Safari viewport jitter to keep snapping stable.
+          if (Math.abs(measured - stableHeightRef.current) < 90) return;
+          stableHeightRef.current = measured;
+          setListHeight(measured);
+        }}
+      >
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator color={COLORS.primary} />
@@ -372,9 +390,13 @@ export default function CustomerFeedScreen() {
             keyExtractor={(item) => item.id}
             pagingEnabled
             snapToInterval={cardHeight}
+            snapToOffsets={snapOffsets}
             snapToAlignment="start"
             disableIntervalMomentum
             decelerationRate={Platform.OS === "ios" ? "fast" : 0.98}
+            bounces={false}
+            alwaysBounceVertical={false}
+            overScrollMode="never"
             onMomentumScrollEnd={onMomentumSnap}
             onScrollEndDrag={onDragSnap}
             onEndReachedThreshold={0.35}
