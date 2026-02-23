@@ -22,6 +22,7 @@ import { fetchInfluencerCommissionSummary } from "../../../lib/bookingRepo";
 import { fetchCompanies, CompanyPublic } from "../../../lib/companyRepo";
 import {
   addInfluencerFeedPost,
+  deleteMyFeedPost,
   fetchInfluencerFeedPosts,
   FeedPost,
 } from "../../../lib/feedRepo";
@@ -119,6 +120,7 @@ export default function InfluencerStudioScreen() {
   const [media, setMedia] = useState<PickedMedia | null>(null);
 
   const [saving, setSaving] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [summary, setSummary] = useState<Summary>(DEFAULT_SUMMARY);
 
@@ -301,6 +303,29 @@ export default function InfluencerStudioScreen() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function onDeletePost(post: FeedPost) {
+    if (deletingPostId) return;
+
+    Alert.alert("Post verwijderen", "Weet je zeker dat je deze post wilt verwijderen?", [
+      { text: "Annuleren", style: "cancel" },
+      {
+        text: "Verwijderen",
+        style: "destructive",
+        onPress: async () => {
+          setDeletingPostId(post.id);
+          try {
+            await deleteMyFeedPost(post.id);
+            await loadDashboard();
+          } catch (error: any) {
+            Alert.alert("Verwijderen mislukt", error?.message ?? "Kon deze post niet verwijderen.");
+          } finally {
+            setDeletingPostId(null);
+          }
+        },
+      },
+    ]);
   }
 
   return (
@@ -521,7 +546,17 @@ export default function InfluencerStudioScreen() {
                       <Text style={styles.postSub} numberOfLines={1}>{post.companyName}</Text>
                       <Text style={styles.postSub}>Commissie {post.influencerCommissionPercent ?? 0}%</Text>
                     </View>
-                    <Text style={styles.postDate}>{formatDate(post.createdAtMs)}</Text>
+                    <View style={styles.postRight}>
+                      <Text style={styles.postDate}>{formatDate(post.createdAtMs)}</Text>
+                      <Pressable
+                        style={[styles.postDeleteBtn, deletingPostId === post.id && styles.disabled]}
+                        onPress={() => onDeletePost(post)}
+                        disabled={deletingPostId === post.id}
+                      >
+                        <Ionicons name="trash-outline" size={13} color={COLORS.danger} />
+                        <Text style={styles.postDeleteText}>Verwijder</Text>
+                      </Pressable>
+                    </View>
                   </View>
                 ))}
                 {!posts.length ? <Text style={styles.helperText}>Nog geen influencer posts.</Text> : null}
@@ -819,6 +854,26 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 10,
     fontWeight: "700",
+  },
+  postRight: {
+    alignItems: "flex-end",
+    gap: 6,
+  },
+  postDeleteBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#f3cad6",
+    backgroundColor: "#fff2f7",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  postDeleteText: {
+    color: COLORS.danger,
+    fontSize: 10,
+    fontWeight: "800",
   },
   footerHintCard: {
     borderRadius: 11,

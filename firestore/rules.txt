@@ -346,7 +346,9 @@ service cloud.firestore {
 
       allow delete: if signedIn()
         && (
-          resource.data.companyId == request.auth.uid
+          isAdmin()
+          || resource.data.companyId == request.auth.uid
+          || isEmployeeOf(resource.data.companyId)
           || (isInfluencer() && resource.data.influencerId == request.auth.uid)
         );
 

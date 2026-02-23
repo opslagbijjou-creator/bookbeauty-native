@@ -16,7 +16,8 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { isRootAdminIdentity } from "./adminAccess";
+import { auth, db } from "./firebase";
 import {
   normalizeMediaCropPreset,
   normalizeMediaFilterPreset,
@@ -496,7 +497,32 @@ export async function updateMyFeedPost(postId: string, patch: Partial<AddFeedPos
 }
 
 export async function deleteMyFeedPost(postId: string): Promise<void> {
-  await deleteDoc(doc(db, "feed_public", postId));
+  const currentUser = auth.currentUser;
+  if (!currentUser?.uid) {
+    throw new Error("Je sessie is verlopen. Log opnieuw in.");
+  }
+
+  const postRef = doc(db, "feed_public", postId);
+  const postSnap = await getDoc(postRef);
+  if (!postSnap.exists()) {
+    throw new Error("Deze post bestaat niet meer.");
+  }
+
+  const data = postSnap.data() as Record<string, unknown>;
+  const companyId = String(data.companyId ?? "").trim();
+  const influencerId = String(data.influencerId ?? "").trim();
+  const ownerUid = currentUser.uid.trim();
+  const isOwner = companyId === ownerUid || (influencerId && influencerId === ownerUid);
+  const isAdmin = isRootAdminIdentity({
+    uid: ownerUid,
+    email: String(currentUser.email ?? ""),
+  });
+
+  if (!isOwner && !isAdmin) {
+    throw new Error("Je hebt geen rechten om deze video te verwijderen.");
+  }
+
+  await deleteDoc(postRef);
 }
 
 export async function syncCompanyBrandingInFeed(companyId: string): Promise<void> {
