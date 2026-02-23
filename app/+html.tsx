@@ -1,7 +1,7 @@
 import { ScrollViewStyleReset } from "expo-router/html";
 
 export default function Root({ children }: { children: React.ReactNode }) {
-  const iconVersion = "20260223";
+  const iconVersion = "20260223-2";
   return (
     <html lang="nl">
       <head>
