@@ -206,19 +206,20 @@ export default function CustomerFeedScreen() {
         pageSize: PAGE_SIZE,
         lastDoc,
       });
+      let appendedItems: FeedPost[] = [];
       setItems((prev) => {
         if (!res.items.length) return prev;
         const seen = new Set(prev.map((row) => row.id));
-        const next = res.items.filter((row) => !seen.has(row.id));
-        return next.length ? [...prev, ...next] : prev;
+        appendedItems = res.items.filter((row) => !seen.has(row.id));
+        return appendedItems.length ? [...prev, ...appendedItems] : prev;
       });
       setLastDoc(res.lastDoc ?? null);
-      setHasMore(Boolean(res.lastDoc) && res.items.length > 0);
+      setHasMore(Boolean(res.lastDoc) && appendedItems.length > 0);
       if (res.usedFallback) {
         setIndexFallback(true);
       }
-      if (res.items.length > 0) {
-        await loadSocial(res.items);
+      if (appendedItems.length > 0) {
+        await loadSocial(appendedItems);
       }
     } finally {
       setLoadingMore(false);

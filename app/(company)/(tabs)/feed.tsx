@@ -49,6 +49,7 @@ export default function CompanyFeedScreen() {
   const [loading, setLoading] = useState(true);
   const [lastDoc, setLastDoc] = useState<any>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [role, setRole] = useState<AppRole>("company");
   const [listHeight, setListHeight] = useState(0);
   const [indexFallback, setIndexFallback] = useState(false);
@@ -63,6 +64,7 @@ export default function CompanyFeedScreen() {
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const allowPlayback = isFocused && isAppActive && !commentsPostId;
   const allowPlaybackRef = useRef(allowPlayback);
+  const loadingMoreRef = useRef(false);
 
   const cardHeight = Math.max(320, listHeight || 0);
   const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -135,6 +137,7 @@ export default function CompanyFeedScreen() {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setHasMore(true);
 
     fetchFeed({
       category: companyFilter ? undefined : category === "Alles" ? undefined : (category as any),
@@ -145,6 +148,7 @@ export default function CompanyFeedScreen() {
         if (!mounted) return;
         setItems(res.items);
         setLastDoc(res.lastDoc);
+        setHasMore(Boolean(res.lastDoc));
         setIndexFallback(Boolean(res.usedFallback));
         setActiveId(res.items[0]?.id ?? null);
         loadSocial(res.items).catch(() => null);
@@ -181,7 +185,8 @@ export default function CompanyFeedScreen() {
   }, [allowPlayback, activeId, items]);
 
   async function loadMore() {
-    if (!lastDoc || loadingMore) return;
+    if (!lastDoc || loadingMoreRef.current || !hasMore) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const res = await fetchFeed({
@@ -190,14 +195,24 @@ export default function CompanyFeedScreen() {
         pageSize: PAGE_SIZE,
         lastDoc,
       });
-      setItems((prev) => [...prev, ...res.items]);
-      setLastDoc(res.lastDoc);
+      let appendedItems: FeedPost[] = [];
+      setItems((prev) => {
+        if (!res.items.length) return prev;
+        const seen = new Set(prev.map((row) => row.id));
+        appendedItems = res.items.filter((row) => !seen.has(row.id));
+        return appendedItems.length ? [...prev, ...appendedItems] : prev;
+      });
+      setLastDoc(res.lastDoc ?? null);
+      setHasMore(Boolean(res.lastDoc) && appendedItems.length > 0);
       if (res.usedFallback) {
         setIndexFallback(true);
       }
-      await loadSocial(res.items);
+      if (appendedItems.length > 0) {
+        await loadSocial(appendedItems);
+      }
     } finally {
       setLoadingMore(false);
+      loadingMoreRef.current = false;
     }
   }
 
@@ -316,12 +331,20 @@ export default function CompanyFeedScreen() {
           <FlatList
             data={items}
             keyExtractor={(item) => item.id}
-            pagingEnabled={Platform.OS !== "web"}
+            pagingEnabled
+            snapToInterval={cardHeight}
+            snapToAlignment="start"
+            disableIntervalMomentum
+            decelerationRate={Platform.OS === "ios" ? "fast" : 0.98}
             onEndReachedThreshold={0.35}
             onEndReached={loadMore}
             showsVerticalScrollIndicator={false}
             viewabilityConfig={viewabilityConfig}
             onViewableItemsChanged={onViewableItemsChanged}
+            getItemLayout={(_, index) => ({ length: cardHeight, offset: cardHeight * index, index })}
+            initialNumToRender={3}
+            windowSize={5}
+            maxToRenderPerBatch={4}
             renderItem={({ item }) => {
               const rawServiceId = typeof item.serviceId === "string" ? item.serviceId.trim() : "";
               const linkedServiceId =
@@ -355,6 +378,11 @@ export default function CompanyFeedScreen() {
               loadingMore ? (
                 <View style={styles.footer}>
                   <ActivityIndicator color={COLORS.primary} />
+                </View>
+              ) : !hasMore && items.length > 0 ? (
+                <View style={styles.footerEnd}>
+                  <Ionicons name="checkmark-circle-outline" size={14} color="#9fd3ff" />
+                  <Text style={styles.footerEndText}>Je hebt alles gezien.</Text>
                 </View>
               ) : null
             }
@@ -487,5 +515,17 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingVertical: 16,
+  },
+  footerEnd: {
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  footerEndText: {
+    color: "#9fd3ff",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });
