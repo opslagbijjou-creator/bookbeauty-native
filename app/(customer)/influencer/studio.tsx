@@ -81,7 +81,8 @@ function cloudinaryVideoThumbnailFromUrl(videoUrl: string): string {
   let path = rawPath;
 
   if (path.includes("/upload/")) {
-    path = path.replace("/upload/", "/upload/so_1,w_540,h_920,c_fill,q_auto,f_jpg/");
+    // Keep full frame in thumbnails (no crop/zoom), add letterboxing when needed.
+    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,ar_9:16,w_540,h_960,q_auto,f_jpg/");
   }
 
   if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
@@ -451,12 +452,12 @@ export default function InfluencerStudioScreen() {
                 {media ? (
                   <View style={styles.previewCard}>
                     {mediaType === "image" ? (
-                      <Image source={{ uri: media.uri }} style={styles.previewImage} contentFit="cover" />
+                      <Image source={{ uri: media.uri }} style={styles.previewImage} contentFit="contain" />
                     ) : (
                       <Video
                         source={{ uri: media.uri }}
                         style={styles.previewImage}
-                        resizeMode={ResizeMode.COVER}
+                        resizeMode={ResizeMode.CONTAIN}
                         shouldPlay
                         isMuted
                         isLooping

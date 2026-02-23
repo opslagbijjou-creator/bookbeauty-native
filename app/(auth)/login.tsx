@@ -31,7 +31,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const user = await login(email, password);
-      await registerPushTokenForUser(user.uid).catch(() => null);
+      await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
       const role = await getUserRole(user.uid);
 
       if (role === "company") {

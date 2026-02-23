@@ -17,12 +17,42 @@ type PushSubscriptionDoc = {
   webSubscriptions?: unknown;
 };
 
+export type PushRegistrationReason =
+  | "ok"
+  | "missing_uid"
+  | "not_web"
+  | "insecure_context"
+  | "unsupported_browser"
+  | "ios_requires_homescreen"
+  | "ios_version_unsupported"
+  | "permission_not_granted"
+  | "permission_denied"
+  | "missing_vapid_public_key"
+  | "service_worker_failed"
+  | "subscription_failed"
+  | "token_failed"
+  | "unknown_error";
+
+export type PushRegistrationResult = {
+  ok: boolean;
+  platform: "web" | "native";
+  channel?: "web_push" | "expo";
+  reason: PushRegistrationReason;
+  permission?: string;
+};
+
+export type RegisterPushOptions = {
+  requestPermission?: boolean;
+};
+
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const PUSH_PROXY_ENDPOINT = "/.netlify/functions/send-expo-push";
+const WEB_PUSH_PUBLIC_KEY_ENDPOINT = "/.netlify/functions/web-push-public-key";
 const BOOKING_SOUND_CHANNEL_ID = "booking-alerts";
 const SILENT_CHANNEL_ID = "silent-updates";
 const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
 let pushConfigured = false;
+let cachedVapidPublicKey = "";
 
 type WebPushSubscriptionShape = {
   endpoint: string;
@@ -99,12 +129,64 @@ function base64UrlToUint8Array(value: string): Uint8Array {
   return output;
 }
 
-function resolveWebPushVapidPublicKey(): string {
+function resolveWebPushVapidPublicKeyFromRuntime(): string {
   const processNode = (globalThis as { process?: { env?: Record<string, unknown> } }).process;
   const fromProcess = String(processNode?.env?.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim();
   if (fromProcess) return fromProcess;
   const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
   return String(extra.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim();
+}
+
+async function resolveWebPushVapidPublicKey(): Promise<string> {
+  if (cachedVapidPublicKey) return cachedVapidPublicKey;
+
+  const runtimeKey = resolveWebPushVapidPublicKeyFromRuntime();
+  if (runtimeKey) {
+    cachedVapidPublicKey = runtimeKey;
+    return runtimeKey;
+  }
+
+  if (Platform.OS !== "web") return "";
+  const response = await fetch(WEB_PUSH_PUBLIC_KEY_ENDPOINT, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  }).catch(() => null);
+  if (!response?.ok) return "";
+
+  const payload = await response.json().catch(() => null);
+  const publicKey = String(
+    (payload as Record<string, unknown> | null)?.publicKey ??
+      (payload as Record<string, unknown> | null)?.key ??
+      ""
+  ).trim();
+  if (!publicKey) return "";
+  cachedVapidPublicKey = publicKey;
+  return publicKey;
+}
+
+function isIosWebEnvironment(navigatorRef: Navigator): boolean {
+  const ua = String(navigatorRef.userAgent ?? "");
+  const touchCapableMac = /\bMacintosh\b/i.test(ua) && Number(navigatorRef.maxTouchPoints ?? 0) > 1;
+  return /\b(iPad|iPhone|iPod)\b/i.test(ua) || touchCapableMac;
+}
+
+function iosMajorMinorVersion(navigatorRef: Navigator): { major: number; minor: number } | null {
+  const ua = String(navigatorRef.userAgent ?? "");
+  const match = ua.match(/OS (\d+)[._](\d+)/i);
+  if (!match) return null;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+  return { major, minor };
+}
+
+function isStandaloneDisplayMode(navigatorRef: Navigator): boolean {
+  const navStandalone = Boolean((navigatorRef as Navigator & { standalone?: boolean }).standalone);
+  const mm = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
+  const displayModeStandalone = Boolean(mm?.("(display-mode: standalone)")?.matches);
+  return navStandalone || displayModeStandalone;
 }
 
 function resolveProjectId(): string | undefined {
@@ -181,39 +263,128 @@ async function requestPushPermission(): Promise<boolean> {
   return requested.granted;
 }
 
-async function registerWebPushSubscriptionForUser(uid: string): Promise<void> {
+async function registerWebPushSubscriptionForUser(
+  uid: string,
+  options: RegisterPushOptions = {}
+): Promise<PushRegistrationResult> {
   const cleanUid = String(uid ?? "").trim();
-  if (!cleanUid || Platform.OS !== "web") return;
-
-  const vapidPublicKey = resolveWebPushVapidPublicKey();
-  if (!vapidPublicKey) {
-    console.warn("[pushRepo] Missing EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY; web push subscription skipped.");
-    return;
+  if (!cleanUid) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "missing_uid",
+    };
+  }
+  if (Platform.OS !== "web") {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "not_web",
+    };
   }
 
   const nav = (globalThis as { navigator?: any }).navigator;
   const NotificationApi = (globalThis as { Notification?: any }).Notification;
   const PushManagerApi = (globalThis as { PushManager?: any }).PushManager;
-  if (!nav?.serviceWorker || !NotificationApi || !PushManagerApi) return;
-  if (!(globalThis as { isSecureContext?: boolean }).isSecureContext) return;
+  if (!nav?.serviceWorker || !NotificationApi || !PushManagerApi) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "unsupported_browser",
+    };
+  }
+  if (!(globalThis as { isSecureContext?: boolean }).isSecureContext) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "insecure_context",
+    };
+  }
+
+  if (isIosWebEnvironment(nav)) {
+    const iosVersion = iosMajorMinorVersion(nav);
+    if (iosVersion) {
+      if (iosVersion.major < 16 || (iosVersion.major === 16 && iosVersion.minor < 4)) {
+        return {
+          ok: false,
+          platform: "web",
+          reason: "ios_version_unsupported",
+        };
+      }
+    }
+    if (!isStandaloneDisplayMode(nav)) {
+      return {
+        ok: false,
+        platform: "web",
+        reason: "ios_requires_homescreen",
+      };
+    }
+  }
 
   const currentPermission = String(NotificationApi.permission ?? "default");
-  const permission =
-    currentPermission === "granted"
-      ? "granted"
-      : await Promise.resolve(NotificationApi.requestPermission?.()).catch(() => "default");
-  if (permission !== "granted") return;
+  let permission = currentPermission;
+  if (permission !== "granted") {
+    if (options.requestPermission !== true) {
+      return {
+        ok: false,
+        platform: "web",
+        reason: "permission_not_granted",
+        permission,
+      };
+    }
+    permission = await Promise.resolve(NotificationApi.requestPermission?.()).catch(() => "default");
+  }
+  if (permission !== "granted") {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "permission_denied",
+      permission,
+    };
+  }
+
+  const vapidPublicKey = await resolveWebPushVapidPublicKey();
+  if (!vapidPublicKey) {
+    console.warn("[pushRepo] Missing public VAPID key; web push subscription skipped.");
+    return {
+      ok: false,
+      platform: "web",
+      reason: "missing_vapid_public_key",
+      permission,
+    };
+  }
 
   const registration = await nav.serviceWorker.register("/web-push-sw.js").catch(() => null);
-  if (!registration) return;
+  if (!registration) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "service_worker_failed",
+      permission,
+    };
+  }
   const readyRegistration = await nav.serviceWorker.ready.catch(() => registration);
   const pushManager = readyRegistration?.pushManager ?? registration.pushManager;
-  if (!pushManager) return;
+  if (!pushManager) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "subscription_failed",
+      permission,
+    };
+  }
 
   let subscription = await pushManager.getSubscription().catch(() => null);
   if (!subscription) {
     const applicationServerKey = base64UrlToUint8Array(vapidPublicKey);
-    if (!applicationServerKey.length) return;
+    if (!applicationServerKey.length) {
+      return {
+        ok: false,
+        platform: "web",
+        reason: "missing_vapid_public_key",
+        permission,
+      };
+    }
     subscription = await pushManager
       .subscribe({
         userVisibleOnly: true,
@@ -221,12 +392,26 @@ async function registerWebPushSubscriptionForUser(uid: string): Promise<void> {
       })
       .catch(() => null);
   }
-  if (!subscription) return;
+  if (!subscription) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "subscription_failed",
+      permission,
+    };
+  }
 
   const payload = normalizeWebPushSubscription(
     typeof subscription.toJSON === "function" ? subscription.toJSON() : subscription
   );
-  if (!payload) return;
+  if (!payload) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "subscription_failed",
+      permission,
+    };
+  }
 
   const ref = doc(db, "push_subscriptions", cleanUid);
   const existingSnap = await getDoc(ref).catch(() => null);
@@ -244,21 +429,43 @@ async function registerWebPushSubscriptionForUser(uid: string): Promise<void> {
     },
     { merge: true }
   );
+
+  return {
+    ok: true,
+    platform: "web",
+    channel: "web_push",
+    reason: "ok",
+    permission,
+  };
 }
 
-export async function registerPushTokenForUser(uid: string): Promise<void> {
+export async function registerPushTokenForUser(
+  uid: string,
+  options: RegisterPushOptions = {}
+): Promise<PushRegistrationResult> {
   const cleanUid = String(uid ?? "").trim();
-  if (!cleanUid) return;
+  if (!cleanUid) {
+    return {
+      ok: false,
+      platform: Platform.OS === "web" ? "web" : "native",
+      reason: "missing_uid",
+    };
+  }
 
   if (Platform.OS === "web") {
-    await registerWebPushSubscriptionForUser(cleanUid);
-    return;
+    return registerWebPushSubscriptionForUser(cleanUid, options);
   }
 
   configurePushNotifications();
 
   const granted = await requestPushPermission().catch(() => false);
-  if (!granted) return;
+  if (!granted) {
+    return {
+      ok: false,
+      platform: "native",
+      reason: "permission_denied",
+    };
+  }
 
   const projectId = resolveProjectId();
   const pushToken = await (projectId
@@ -270,7 +477,13 @@ export async function registerPushTokenForUser(uid: string): Promise<void> {
       return "";
     });
 
-  if (!pushToken) return;
+  if (!pushToken) {
+    return {
+      ok: false,
+      platform: "native",
+      reason: "token_failed",
+    };
+  }
 
   await setDoc(
     doc(db, "push_subscriptions", cleanUid),
@@ -282,6 +495,13 @@ export async function registerPushTokenForUser(uid: string): Promise<void> {
     },
     { merge: true }
   );
+
+  return {
+    ok: true,
+    platform: "native",
+    channel: "expo",
+    reason: "ok",
+  };
 }
 
 async function sendExpoPush(tokens: string[], message: PushMessage): Promise<void> {
@@ -339,7 +559,24 @@ async function sendPushViaBackendProxy(uid: string, message: PushMessage): Promi
     }),
   }).catch(() => null);
 
-  return Boolean(response?.ok);
+  if (!response?.ok) return false;
+
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== "object") return true;
+
+  const sent = Number((payload as { sent?: unknown }).sent ?? 0);
+  if (Number.isFinite(sent) && sent > 0) return true;
+
+  const reason = String((payload as { reason?: unknown }).reason ?? "").trim();
+  if (reason === "no_subscription" || reason === "no_push_targets") return true;
+
+  const web = (payload as { web?: { configured?: unknown } }).web;
+  if (typeof web?.configured === "boolean" && web.configured === false) {
+    console.warn("[pushRepo] Web push backend is not configured (missing VAPID keys).");
+    return false;
+  }
+
+  return true;
 }
 
 export async function sendPushToUser(

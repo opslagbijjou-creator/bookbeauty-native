@@ -71,7 +71,7 @@ function AppBootstrapEffects() {
         return;
       }
       await syncUserSession(user.uid).catch(() => null);
-      registerPushTokenForUser(user.uid).catch(() => null);
+      registerPushTokenForUser(user.uid, { requestPermission: false }).catch(() => null);
     });
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {

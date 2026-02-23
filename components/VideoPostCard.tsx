@@ -64,12 +64,12 @@ function buildVideoCandidates(
     : "";
 
   const candidates = [
-    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
-    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
-    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
     rawSourceVideo,
     rawVideo,
     editedFromSource,
+    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
+    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
+    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
   ].filter(Boolean);
 
   const unique: string[] = [];
@@ -120,6 +120,10 @@ export default function VideoPostCard({
   const webSnapStyle: any = isWeb
     ? { scrollSnapAlign: "start", scrollSnapStop: "always" }
     : undefined;
+  const videoStyle: any = useMemo(
+    () => (isWeb ? [StyleSheet.absoluteFillObject, { objectFit: "contain" }] : StyleSheet.absoluteFillObject),
+    [isWeb]
+  );
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -204,23 +208,20 @@ export default function VideoPostCard({
 
   return (
     <View style={[styles.container, { height }, webSnapStyle]}>
-      {imageUri ? (
-        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+      {imageUri && (mediaType === "image" || !videoReady) ? (
+        <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="contain" />
       ) : null}
       {canPlayVideo && activeVideoUrl ? (
         <Video
           ref={ref}
           source={{ uri: activeVideoUrl }}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode={ResizeMode.COVER}
+          style={videoStyle}
+          resizeMode={ResizeMode.CONTAIN}
           shouldPlay={isActive}
           isLooping
           isMuted={muted}
           volume={muted ? 0 : 1}
           progressUpdateIntervalMillis={90}
-          usePoster={Boolean(imageUri)}
-          posterSource={imageUri ? { uri: imageUri } : undefined}
-          posterStyle={StyleSheet.absoluteFillObject}
           onLoadStart={() => setVideoReady(false)}
           onReadyForDisplay={() => setVideoReady(true)}
           onError={onVideoError}

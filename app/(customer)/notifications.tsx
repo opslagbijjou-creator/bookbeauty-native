@@ -107,11 +107,35 @@ export default function CustomerNotificationsScreen() {
     if (!uid || enablingPush) return;
     setEnablingPush(true);
     try {
-      await registerPushTokenForUser(uid);
-      Alert.alert(
-        "Push ingesteld",
-        "Als je toestemming hebt gegeven, ontvang je nu meldingen op dit toestel."
-      );
+      const result = await registerPushTokenForUser(uid, { requestPermission: true });
+      if (result.ok) {
+        Alert.alert("Push ingesteld", "Je ontvangt nu meldingen op dit toestel.");
+        return;
+      }
+
+      if (result.reason === "ios_requires_homescreen") {
+        Alert.alert(
+          "Zet op beginscherm",
+          "Op iPhone werkt web push alleen als je BookBeauty eerst op je beginscherm zet en als app opent."
+        );
+        return;
+      }
+      if (result.reason === "permission_denied" || result.reason === "permission_not_granted") {
+        Alert.alert(
+          "Notificaties uit",
+          "Geef meldingstoegang in Safari/iPhone instellingen en probeer opnieuw."
+        );
+        return;
+      }
+      if (result.reason === "missing_vapid_public_key") {
+        Alert.alert(
+          "Push server niet klaar",
+          "Web push staat server-side nog niet volledig ingesteld. Zet VAPID keys in Netlify."
+        );
+        return;
+      }
+
+      Alert.alert("Push niet geactiveerd", "Kon push op dit toestel nog niet activeren.");
     } catch {
       Alert.alert("Push mislukt", "Kon push-toestemming niet instellen. Probeer opnieuw.");
     } finally {

@@ -62,7 +62,7 @@ export default function RegisterScreen() {
     try {
       if (role === "customer") {
         const user = await registerCustomer(email, password);
-        await registerPushTokenForUser(user.uid).catch(() => null);
+        await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
         router.replace("/(customer)/(tabs)" as never);
       } else if (role === "influencer") {
         const user = await registerInfluencer({
@@ -70,7 +70,7 @@ export default function RegisterScreen() {
           password,
           name: influencerName.trim(),
         });
-        await registerPushTokenForUser(user.uid).catch(() => null);
+        await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
         router.replace("/(customer)/(tabs)/profile" as never);
       } else {
         const user = await registerCompany({
@@ -83,7 +83,7 @@ export default function RegisterScreen() {
           kvk: kvk.trim(),
           phone: phone.trim(),
         });
-        await registerPushTokenForUser(user.uid).catch(() => null);
+        await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
         router.replace("/(company)/(tabs)/home" as never);
       }
     } catch (error: any) {
