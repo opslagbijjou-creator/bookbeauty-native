@@ -159,6 +159,11 @@ service cloud.firestore {
         allow delete: if signedIn() && request.auth.uid == followerId;
       }
 
+      match /stories/{storyId} {
+        allow read: if true;
+        allow create, update, delete: if isOwner(companyId) || isAdmin();
+      }
+
       match /staff_public/{staffId} {
         allow read: if true;
         allow create, update, delete: if isOwner(companyId) || isAdmin();

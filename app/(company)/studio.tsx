@@ -22,7 +22,6 @@ import { useRouter, useSegments } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { subscribeAuth } from "../../lib/authRepo";
 import CategoryChips from "../../components/CategoryChips";
-import InAppCaptureModal, { CapturedMedia } from "../../components/InAppCaptureModal";
 import {
   addMyFeedPost,
   deleteMyFeedPost,
@@ -32,10 +31,8 @@ import {
 } from "../../lib/feedRepo";
 import { auth } from "../../lib/firebase";
 import {
-  getCameraPermissionState,
   getMediaLibraryPermissionState,
-  pickVideoFromLibrary,
-  requestCameraPermission,
+  pickAnyMediaFromLibrary,
   requestMediaLibraryPermission,
   type PickedMedia,
   uploadUriToStorage,
@@ -47,6 +44,7 @@ import {
 } from "../../lib/mediaEdit";
 import { fetchMyServices, type CompanyService } from "../../lib/serviceRepo";
 import { getPostLikeCount } from "../../lib/socialRepo";
+import { addCompanyStory } from "../../lib/storyRepo";
 import { CATEGORIES, COLORS } from "../../lib/ui";
 
 const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -63,14 +61,21 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 const MAX_HASHTAGS = 12;
 const MAX_VIDEO_SECONDS = 15;
-const INPUT_HINT_COLOR = "#363636";
+const INPUT_HINT_COLOR = "#5f5f5f";
 
 type StudioTab = "upload" | "videos";
 type UploadVisibility = "public" | "clients";
 type UploadStep = "select" | "details";
 type UploadMediaType = "video" | "image";
 type PermissionState = "granted" | "denied" | "undetermined";
-type PendingMediaAction = "library" | "camera";
+type PendingMediaAction = "library";
+
+type PublishOverlayState = {
+  visible: boolean;
+  loading: boolean;
+  title: string;
+  message: string;
+};
 
 const DEFAULT_CROP_PRESET: MediaCropPreset = "original";
 const DEFAULT_FILTER_PRESET: MediaFilterPreset = "none";
@@ -138,11 +143,6 @@ function formatDate(ms?: number): string {
   });
 }
 
-function formatDuration(seconds?: number | null): string {
-  if (!seconds || !Number.isFinite(seconds)) return "";
-  return `${Math.round(seconds)}s`;
-}
-
 function formatClipRange(startSec: number, endSec: number): string {
   const start = Math.max(0, startSec);
   const end = Math.max(start, endSec);
@@ -185,9 +185,14 @@ export default function CompanyStudioScreen() {
   const [startRailWidth, setStartRailWidth] = useState(0);
   const [endRailWidth, setEndRailWidth] = useState(0);
   const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
-  const [cameraPermission, setCameraPermission] = useState<PermissionState>("undetermined");
   const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
-  const [captureVisible, setCaptureVisible] = useState(false);
+  const [postingStory, setPostingStory] = useState(false);
+  const [publishOverlay, setPublishOverlay] = useState<PublishOverlayState>({
+    visible: false,
+    loading: false,
+    title: "",
+    message: "",
+  });
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
 
@@ -218,6 +223,14 @@ export default function CompanyStudioScreen() {
     return buildCloudinaryEditedUrl(baseVideo, { cropPreset, filterPreset });
   }, [uploadMediaType, video?.uri, editingItem, cropPreset, filterPreset]);
   const hasLiveVideoPreview = Boolean(previewVideoUri);
+  const previewImageUri = useMemo(() => {
+    if (uploadMediaType !== "image") return "";
+    if (imageMedia?.uri) return imageMedia.uri;
+
+    const baseImage = editingItem?.sourceImageUrl?.trim() || editingItem?.imageUrl?.trim() || "";
+    if (!baseImage) return "";
+    return buildCloudinaryEditedUrl(baseImage, { cropPreset, filterPreset });
+  }, [uploadMediaType, imageMedia?.uri, editingItem, cropPreset, filterPreset]);
   const videoDurationSec = useMemo(
     () => (video?.durationMs ? Math.max(0, video.durationMs / 1000) : 0),
     [video?.durationMs]
@@ -321,12 +334,10 @@ export default function CompanyStudioScreen() {
   }, [uploading, title, editingPostId, video, imageMedia, hasVideoClipError]);
 
   const refreshPermissionStates = useCallback(async () => {
-    const [libraryState, cameraState] = await Promise.all([
-      getMediaLibraryPermissionState().catch(() => "undetermined" as PermissionState),
-      getCameraPermissionState().catch(() => "undetermined" as PermissionState),
-    ]);
+    const libraryState = await getMediaLibraryPermissionState().catch(
+      () => "undetermined" as PermissionState
+    );
     setLibraryPermission(libraryState);
-    setCameraPermission(cameraState);
   }, []);
 
   useEffect(() => {
@@ -392,6 +403,27 @@ export default function CompanyStudioScreen() {
     return () => clearTimeout(timer);
   }, [uploadStatusText]);
 
+  function showPublishOverlay(title: string, message: string) {
+    setPublishOverlay({
+      visible: true,
+      loading: true,
+      title,
+      message,
+    });
+  }
+
+  function completePublishOverlay(title: string, message: string) {
+    setPublishOverlay({
+      visible: true,
+      loading: false,
+      title,
+      message,
+    });
+    setTimeout(() => {
+      setPublishOverlay((prev) => ({ ...prev, visible: false }));
+    }, 1500);
+  }
+
   function resetForm() {
     setCategory(CATEGORIES[0]);
     setTitle("");
@@ -413,6 +445,7 @@ export default function CompanyStudioScreen() {
     setVideoLengthWarning(null);
     setEditingPostId(null);
     setRefreshingAfterUpload(false);
+    setPostingStory(false);
   }
 
   function applyEditForm(post: FeedPost) {
@@ -444,8 +477,17 @@ export default function CompanyStudioScreen() {
   }
 
   function applyPickedMedia(picked: PickedMedia, kind: "video" | "image") {
-    if (kind !== "video") {
-      Alert.alert("Alleen video", "Kies een video uit je galerij om verder te gaan.");
+    if (kind === "image") {
+      setUploadMediaType("image");
+      setVideo(null);
+      setImageMedia(picked);
+      setClipStartSec(0);
+      setClipEndSec(0);
+      setDetectedPreviewDurationSec(0);
+      setStartRailWidth(0);
+      setEndRailWidth(0);
+      setVideoLengthWarning(null);
+      setUploadStep("select");
       return;
     }
 
@@ -459,6 +501,7 @@ export default function CompanyStudioScreen() {
     setDetectedPreviewDurationSec(durationSec);
     setStartRailWidth(0);
     setEndRailWidth(0);
+    setUploadStep("select");
     if (durationSec > MAX_VIDEO_SECONDS) {
       setVideoLengthWarning(
         `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
@@ -466,18 +509,6 @@ export default function CompanyStudioScreen() {
     } else {
       setVideoLengthWarning(null);
     }
-  }
-
-  function setClipByDuration(durationSec: number) {
-    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
-    const nextDuration = Math.min(MAX_VIDEO_SECONDS, Math.max(1, durationSec));
-    const nextEnd = Math.min(totalDuration, clipStartSec + nextDuration);
-    if (nextEnd - clipStartSec < 1) {
-      setClipStartSec(Math.max(0, totalDuration - nextDuration));
-      setClipEndSec(totalDuration);
-      return;
-    }
-    setClipEndSec(nextEnd);
   }
 
   function setClipStartFromRatio(ratioRaw: number) {
@@ -512,20 +543,15 @@ export default function CompanyStudioScreen() {
   }
 
   async function executeMediaAction(action: PendingMediaAction) {
-    if (action === "library") {
-      const picked = await pickVideoFromLibrary({ maxDurationMs: 0 });
-      if (!picked) return;
-      applyPickedMedia(picked, "video");
-      return;
-    }
-    setCaptureVisible(true);
+    if (action !== "library") return;
+    const picked = await pickAnyMediaFromLibrary({ maxDurationMs: 0 });
+    if (!picked) return;
+    applyPickedMedia(picked, picked.kind);
   }
 
   function needsPermissionForAction(action: PendingMediaAction): boolean {
-    if (action === "library") {
-      return libraryPermission !== "granted";
-    }
-    return cameraPermission !== "granted";
+    if (action !== "library") return false;
+    return libraryPermission !== "granted";
   }
 
   function openActionWithPermission(action: PendingMediaAction) {
@@ -545,16 +571,13 @@ export default function CompanyStudioScreen() {
   async function onGrantPendingPermission() {
     if (!pendingMediaAction) return;
 
-    const needLibrary = pendingMediaAction === "library";
-    const granted = needLibrary ? await requestMediaLibraryPermission() : await requestCameraPermission();
+    const granted = await requestMediaLibraryPermission();
     await refreshPermissionStates();
 
     if (!granted) {
       Alert.alert(
         "Toegang nodig",
-        needLibrary
-          ? "Zonder galerij-toegang kun je geen video kiezen."
-          : "Zonder camera-toegang kun je geen video opnemen."
+        "Zonder galerij-toegang kun je geen media kiezen."
       );
       return;
     }
@@ -562,6 +585,101 @@ export default function CompanyStudioScreen() {
     const nextAction = pendingMediaAction;
     setPendingMediaAction(null);
     executeMediaAction(nextAction).catch(() => null);
+  }
+
+  function getActiveMediaType(): UploadMediaType {
+    if (imageMedia) return "image";
+    if (video) return "video";
+    return uploadMediaType;
+  }
+
+  async function uploadCurrentMediaIfNeeded(
+    companyId: string,
+    targetMediaType: UploadMediaType
+  ): Promise<{ sourceVideoUrl: string; sourceImageUrl: string }> {
+    let sourceVideoUrl = String(editingItem?.sourceVideoUrl ?? editingItem?.videoUrl ?? "").trim();
+    let sourceImageUrl = String(editingItem?.sourceImageUrl ?? editingItem?.imageUrl ?? "").trim();
+
+    if (targetMediaType === "video" && video) {
+      sourceVideoUrl = await uploadUriToStorage(
+        `companies/${companyId}/feed/${Date.now()}-${video.fileName}`,
+        video.uri,
+        video.mimeType,
+        video.webFile
+      );
+      sourceImageUrl = "";
+    }
+
+    if (targetMediaType === "image" && imageMedia) {
+      sourceImageUrl = await uploadUriToStorage(
+        `companies/${companyId}/feed/${Date.now()}-${imageMedia.fileName}`,
+        imageMedia.uri,
+        imageMedia.mimeType,
+        imageMedia.webFile
+      );
+      sourceVideoUrl = "";
+    }
+
+    return { sourceVideoUrl, sourceImageUrl };
+  }
+
+  async function onPostStory() {
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om een story te plaatsen.");
+      return;
+    }
+
+    if (postingStory || uploading) return;
+
+    const selectedMediaType = getActiveMediaType();
+    if (selectedMediaType === "video" && !previewVideoUri && !video && !editingItem) {
+      Alert.alert("Media ontbreekt", "Kies eerst een video of foto.");
+      return;
+    }
+    if (selectedMediaType === "image" && !previewImageUri && !imageMedia && !editingItem) {
+      Alert.alert("Media ontbreekt", "Kies eerst een video of foto.");
+      return;
+    }
+    if (selectedMediaType === "video" && hasVideoClipError) {
+      Alert.alert("Clip niet geldig", `Kies een videosegment van 1s tot ${MAX_VIDEO_SECONDS}s.`);
+      return;
+    }
+
+    setPostingStory(true);
+    showPublishOverlay("Story plaatsen", "Je story wordt nu verwerkt...");
+
+    try {
+      const { sourceVideoUrl, sourceImageUrl } = await uploadCurrentMediaIfNeeded(uid, selectedMediaType);
+      const storyVideoUrl =
+        selectedMediaType === "video"
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+          : "";
+      const storyImageUrl =
+        selectedMediaType === "image"
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+          : "";
+      const storyThumbnail =
+        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(storyVideoUrl) : storyImageUrl;
+
+      await addCompanyStory(uid, {
+        mediaType: selectedMediaType,
+        videoUrl: storyVideoUrl,
+        imageUrl: storyImageUrl,
+        thumbnailUrl: storyThumbnail || undefined,
+        title: title.trim(),
+        caption: description.trim(),
+        clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
+        clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
+      });
+
+      completePublishOverlay("Story geplaatst", "Je story blijft 24 uur zichtbaar.");
+      setUploadStatusText("Story geplaatst (24 uur zichtbaar).");
+    } catch (error: any) {
+      setPublishOverlay((prev) => ({ ...prev, visible: false, loading: false }));
+      Alert.alert("Story mislukt", error?.message ?? "Kon story niet plaatsen.");
+    } finally {
+      setPostingStory(false);
+    }
   }
 
   async function onSubmit() {
@@ -575,57 +693,65 @@ export default function CompanyStudioScreen() {
       return;
     }
 
-    if (!editingPostId && !video && !imageMedia) {
-      Alert.alert("Media ontbreekt", "Kies eerst een video om te uploaden.");
+    const selectedMediaType = getActiveMediaType();
+    const hasSelectedMedia =
+      selectedMediaType === "video"
+        ? Boolean(
+            previewVideoUri ||
+              video?.uri ||
+              (editingItem?.mediaType === "video" &&
+                (editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim()))
+          )
+        : Boolean(
+            previewImageUri ||
+              imageMedia?.uri ||
+              (editingItem?.mediaType === "image" &&
+                (editingItem.sourceImageUrl?.trim() || editingItem.imageUrl?.trim()))
+          );
+
+    if (!editingPostId && !hasSelectedMedia) {
+      Alert.alert("Media ontbreekt", "Kies eerst een video of foto om te uploaden.");
       return;
     }
-    if (hasVideoClipError) {
+    if (selectedMediaType === "video" && hasVideoClipError) {
       Alert.alert("Clip niet geldig", `Kies een videosegment van minimaal 1s en maximaal ${MAX_VIDEO_SECONDS}s.`);
       return;
     }
 
     setUploading(true);
+    showPublishOverlay(
+      editingPostId ? "Wijzigingen opslaan" : "Post plaatsen",
+      editingPostId ? "Je wijzigingen worden verwerkt..." : "Je post wordt geupload..."
+    );
 
     try {
       const nextVisibility = visibility === "public" ? "public" : "clients_only";
       const nextIsActive = visibility === "public";
       const serviceName = selectedService?.name ?? "";
-      const selectedMediaType: UploadMediaType = imageMedia ? "image" : video ? "video" : uploadMediaType;
+      const { sourceVideoUrl, sourceImageUrl } = await uploadCurrentMediaIfNeeded(uid, selectedMediaType);
+      const fallbackVideoDurationSec = Math.max(
+        clipEndSec,
+        Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec
+      );
+      const nextVideoUrl =
+        selectedMediaType === "video"
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+          : "";
+      const nextImageUrl =
+        selectedMediaType === "image"
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+          : "";
+      const nextThumbUrl =
+        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(nextVideoUrl) : nextImageUrl;
+
+      if (selectedMediaType === "video" && !nextVideoUrl) {
+        throw new Error("Video ontbreekt.");
+      }
+      if (selectedMediaType === "image" && !nextImageUrl) {
+        throw new Error("Foto ontbreekt.");
+      }
 
       if (editingPostId) {
-        let sourceVideoUrl = String(editingItem?.sourceVideoUrl ?? editingItem?.videoUrl ?? "").trim();
-        let sourceImageUrl = String(editingItem?.sourceImageUrl ?? editingItem?.imageUrl ?? "").trim();
-        const fallbackVideoDurationSec = Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
-
-        if (video) {
-          sourceVideoUrl = await uploadUriToStorage(
-            `companies/${uid}/feed/${Date.now()}-${video.fileName}`,
-            video.uri,
-            video.mimeType,
-            video.webFile
-          );
-          sourceImageUrl = "";
-        }
-        if (imageMedia) {
-          sourceImageUrl = await uploadUriToStorage(
-            `companies/${uid}/feed/${Date.now()}-${imageMedia.fileName}`,
-            imageMedia.uri,
-            imageMedia.mimeType,
-            imageMedia.webFile
-          );
-          sourceVideoUrl = "";
-        }
-
-        const nextVideoUrl =
-          selectedMediaType === "video"
-            ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
-            : "";
-        const nextImageUrl =
-          selectedMediaType === "image"
-            ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
-            : "";
-        const nextThumbUrl = selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(nextVideoUrl) : nextImageUrl;
-
         await updateMyFeedPost(editingPostId, {
           category,
           title: title.trim(),
@@ -659,42 +785,9 @@ export default function CompanyStudioScreen() {
             : {}),
         });
 
-        Alert.alert("Opgeslagen", "Je feed post is bijgewerkt.");
+        completePublishOverlay("Opgeslagen", "Je feed post is bijgewerkt.");
         setUploadStatusText("Wijzigingen opgeslagen.");
       } else {
-        let sourceVideoUrl = "";
-        let sourceImageUrl = "";
-
-        if (selectedMediaType === "video") {
-          const pickedVideo = video;
-          if (!pickedVideo) return;
-          sourceVideoUrl = await uploadUriToStorage(
-            `companies/${uid}/feed/${Date.now()}-${pickedVideo.fileName}`,
-            pickedVideo.uri,
-            pickedVideo.mimeType,
-            pickedVideo.webFile
-          );
-        } else {
-          const pickedImage = imageMedia;
-          if (!pickedImage) return;
-          sourceImageUrl = await uploadUriToStorage(
-            `companies/${uid}/feed/${Date.now()}-${pickedImage.fileName}`,
-            pickedImage.uri,
-            pickedImage.mimeType,
-            pickedImage.webFile
-          );
-        }
-
-        const uploadedVideoUrl =
-          selectedMediaType === "video"
-            ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
-            : "";
-        const uploadedImageUrl =
-          selectedMediaType === "image"
-            ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
-            : "";
-        const uploadedThumb = selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(uploadedVideoUrl) : uploadedImageUrl;
-
         await addMyFeedPost(uid, {
           category,
           title: title.trim(),
@@ -705,9 +798,9 @@ export default function CompanyStudioScreen() {
           visibility: nextVisibility,
           isActive: nextIsActive,
           mediaType: selectedMediaType,
-          videoUrl: uploadedVideoUrl,
-          imageUrl: uploadedImageUrl,
-          thumbnailUrl: uploadedThumb || undefined,
+          videoUrl: nextVideoUrl,
+          imageUrl: nextImageUrl,
+          thumbnailUrl: nextThumbUrl || undefined,
           sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
           cropPreset,
@@ -719,7 +812,7 @@ export default function CompanyStudioScreen() {
           viewCount: 0,
         });
 
-        Alert.alert("Geplaatst", "Je feed post staat in je content library.");
+        completePublishOverlay("Geplaatst", "Je feed post staat in je content library.");
         setUploadStatusText("Upload geplaatst.");
       }
 
@@ -730,6 +823,7 @@ export default function CompanyStudioScreen() {
         .catch(() => null)
         .finally(() => setRefreshingAfterUpload(false));
     } catch (error: any) {
+      setPublishOverlay((prev) => ({ ...prev, visible: false, loading: false }));
       Alert.alert("Upload mislukt", error?.message ?? "Kon post niet opslaan.");
     } finally {
       setUploading(false);
@@ -797,15 +891,10 @@ export default function CompanyStudioScreen() {
       effectiveVideoDurationSec > 0
         ? effectiveVideoDurationSec
         : Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
-    const hasSelectedVideo =
-      uploadMediaType === "video" &&
-      Boolean(
-        previewVideoUri ||
-          video?.uri ||
-          (editingItem?.mediaType === "video" &&
-            (editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim()))
-      );
-    const canContinue = hasSelectedVideo && !hasVideoClipError;
+    const hasSelectedVideo = uploadMediaType === "video" && Boolean(previewVideoUri);
+    const hasSelectedImage = uploadMediaType === "image" && Boolean(previewImageUri);
+    const hasSelectedMedia = hasSelectedVideo || hasSelectedImage;
+    const canContinue = hasSelectedMedia && (uploadMediaType !== "video" || !hasVideoClipError);
     const safeDurationForUi = Math.max(
       selectedVideoDurationSec,
       clipEndSec,
@@ -813,13 +902,15 @@ export default function CompanyStudioScreen() {
       0.1
     );
     const clipStartPercent = Math.max(0, Math.min(100, (clipStartSec / safeDurationForUi) * 100));
+    const clipEndPercent = Math.max(0, Math.min(100, (clipEndSec / safeDurationForUi) * 100));
     const clipWidthPercent = Math.max(2, Math.min(100 - clipStartPercent, (clipDurationSec / safeDurationForUi) * 100));
+    const storyBusy = postingStory || uploading;
 
     if (uploadStep === "select") {
       return (
         <View style={styles.uploadEditorScreen}>
           <View style={styles.uploadEditorHeroFull}>
-            {hasLiveVideoPreview ? (
+            {hasSelectedVideo ? (
               <Video
                 ref={previewVideoRef}
                 source={{ uri: previewVideoUri }}
@@ -830,11 +921,13 @@ export default function CompanyStudioScreen() {
                 isLooping={false}
                 onPlaybackStatusUpdate={onPreviewStatusUpdate}
               />
+            ) : hasSelectedImage ? (
+              <Image source={{ uri: previewImageUri }} style={styles.uploadEditorVideo} contentFit="contain" />
             ) : (
               <Pressable style={styles.uploadEditorEmpty} onPress={() => openActionWithPermission("library")}>
                 <Ionicons name="cloud-upload-outline" size={46} color="#fff" />
                 <Text style={styles.uploadEditorEmptyTitle}>Druk hier om te uploaden</Text>
-                <Text style={styles.uploadEditorEmptyText}>Kies 1 video uit je galerij</Text>
+                <Text style={styles.uploadEditorEmptyText}>Kies een video of foto uit je galerij</Text>
               </Pressable>
             )}
 
@@ -845,152 +938,140 @@ export default function CompanyStudioScreen() {
                 <Text style={styles.uploadEditorBadgeText}>Stap 1/2</Text>
               </View>
               <View style={styles.uploadEditorBadge}>
-                <Text style={styles.uploadEditorBadgeText}>Max {MAX_VIDEO_SECONDS}s</Text>
+                <Text style={styles.uploadEditorBadgeText}>
+                  {uploadMediaType === "video" ? `Video · max ${MAX_VIDEO_SECONDS}s` : "Foto"}
+                </Text>
               </View>
             </View>
 
-            {!hasSelectedVideo ? (
+            {!hasSelectedMedia ? (
               <View style={styles.uploadEditorFloatingActions}>
                 <Pressable style={styles.uploadEditorPrimaryBtn} onPress={() => openActionWithPermission("library")}>
                   <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
-                  <Text style={styles.uploadEditorPrimaryBtnText}>Upload video</Text>
+                  <Text style={styles.uploadEditorPrimaryBtnText}>Upload media</Text>
                 </Pressable>
               </View>
             ) : (
-              <View style={styles.uploadEditorBottomSheet}>
+              <View style={styles.uploadPreviewBottomDock}>
                 <View style={styles.uploadEditorBottomInfo}>
-                  <Ionicons name="repeat-outline" size={14} color="#fff" />
-                  <Text style={styles.uploadEditorBottomInfoText}>Preview loopt automatisch in een lus.</Text>
+                  <Ionicons
+                    name={uploadMediaType === "video" ? "videocam-outline" : "image-outline"}
+                    size={14}
+                    color="#fff"
+                  />
+                  <Text style={styles.uploadEditorBottomInfoText}>
+                    {uploadMediaType === "video"
+                      ? `Clip: ${formatClipRange(clipStartSec, clipEndSec)}`
+                      : "Foto preview op volledig scherm"}
+                  </Text>
                 </View>
 
-                <ScrollView
-                  contentContainerStyle={styles.uploadEditorBottomSheetScroll}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-                >
-                  <Pressable
-                    style={styles.uploadEditorPrimaryBtn}
-                    onPress={() => openActionWithPermission("library")}
-                  >
-                    <Ionicons name="images-outline" size={16} color="#fff" />
-                    <Text style={styles.uploadEditorPrimaryBtnText}>Kies andere video</Text>
-                  </Pressable>
+                {uploadMediaType === "video" ? (
+                  <>
+                    <View style={styles.uploadEditorMetaRow}>
+                      <Text style={styles.uploadEditorSectionTitle}>Kort je video in</Text>
+                      <Text style={styles.uploadEditorMetaText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
+                    </View>
+                    <Text style={styles.uploadEditorMetaText}>
+                      Duur: {clipDurationSec.toFixed(1)}s van {" "}
+                      {selectedVideoDurationSec > 0 ? selectedVideoDurationSec.toFixed(1) : "--"}s
+                    </Text>
 
-                  <View style={styles.uploadEditorMetaRow}>
-                    <Text style={styles.uploadEditorSectionTitle}>Kort je video in</Text>
-                    <Text style={styles.uploadEditorMetaText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
-                  </View>
-                  <Text style={styles.uploadEditorMetaText}>
-                    Duur: {clipDurationSec.toFixed(1)}s van{" "}
-                    {selectedVideoDurationSec > 0 ? selectedVideoDurationSec.toFixed(1) : "--"}s
-                  </Text>
-
-                  <View style={styles.uploadEditorTimelineRail}>
-                    <View
-                      style={[
-                        styles.uploadEditorTimelineWindow,
-                        {
-                          marginLeft: `${clipStartPercent}%`,
-                          width: `${clipWidthPercent}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-
-                  <View style={styles.trimDirectRow}>
-                    <Text style={styles.trimDirectLabel}>Start: {clipStartSec.toFixed(1)}s</Text>
-                    <Pressable
-                      style={styles.trimTapRail}
-                      onLayout={(event) => setStartRailWidth(event.nativeEvent.layout.width)}
-                      onPress={(event) => {
-                        const ratio = event.nativeEvent.locationX / Math.max(1, startRailWidth);
-                        setClipStartFromRatio(ratio);
-                      }}
-                    >
-                      <View
-                        style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, clipStartPercent))}%` }]}
-                      />
-                      <View style={[styles.trimTapThumb, { left: `${clipStartPercent}%` }]} />
-                    </Pressable>
-                  </View>
-
-                  <View style={styles.trimDirectRow}>
-                    <Text style={styles.trimDirectLabel}>Eind: {clipEndSec.toFixed(1)}s</Text>
-                    <Pressable
-                      style={styles.trimTapRail}
-                      onLayout={(event) => setEndRailWidth(event.nativeEvent.layout.width)}
-                      onPress={(event) => {
-                        const ratio = event.nativeEvent.locationX / Math.max(1, endRailWidth);
-                        setClipEndFromRatio(ratio);
-                      }}
-                    >
-                      <View
-                        style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, (clipEndSec / safeDurationForUi) * 100))}%` }]}
-                      />
+                    <View style={styles.uploadEditorTimelineRail}>
                       <View
                         style={[
-                          styles.trimTapThumb,
-                          { left: `${Math.max(0, Math.min(100, (clipEndSec / safeDurationForUi) * 100))}%` },
+                          styles.uploadEditorTimelineWindow,
+                          {
+                            marginLeft: `${clipStartPercent}%`,
+                            width: `${clipWidthPercent}%`,
+                          },
                         ]}
                       />
-                    </Pressable>
-                  </View>
-
-                  <View style={styles.uploadBottomRow}>
-                    <Pressable style={styles.secondaryDarkBtn} onPress={() => setClipByDuration(15)}>
-                      <Ionicons name="cut-outline" size={15} color="#fff" />
-                      <Text style={styles.secondaryDarkBtnText}>Automatisch 15s</Text>
-                    </Pressable>
-                  </View>
-
-                  {hasVideoClipError ? (
-                    <View style={styles.trimErrorCard}>
-                      <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
-                      <Text style={styles.trimErrorText}>
-                        Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.
-                      </Text>
                     </View>
-                  ) : null}
 
-                  {videoLengthWarning ? (
-                    <View style={styles.warningCard}>
-                      <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
-                      <Text style={styles.warningText}>{videoLengthWarning}</Text>
-                    </View>
-                  ) : null}
-
-                  {video ? (
-                    <View style={styles.fileCardDark}>
-                      <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
-                      <Text style={styles.fileDarkText} numberOfLines={1}>
-                        {video.fileName} {formatDuration(video.durationMs ? video.durationMs / 1000 : undefined)}
-                      </Text>
+                    <View style={styles.trimDirectRow}>
+                      <Text style={styles.trimDirectLabel}>Start: {clipStartSec.toFixed(1)}s</Text>
                       <Pressable
-                        onPress={() => {
-                          setVideo(null);
-                          setImageMedia(null);
-                          setClipStartSec(0);
-                          setClipEndSec(MAX_VIDEO_SECONDS);
-                          setVideoLengthWarning(null);
+                        style={styles.trimTapRail}
+                        onLayout={(event) => setStartRailWidth(event.nativeEvent.layout.width)}
+                        onPress={(event) => {
+                          const ratio = event.nativeEvent.locationX / Math.max(1, startRailWidth);
+                          setClipStartFromRatio(ratio);
                         }}
                       >
-                        <Ionicons name="close-circle-outline" size={17} color="#fff" />
+                        <View
+                          style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, clipStartPercent))}%` }]}
+                        />
+                        <View style={[styles.trimTapThumb, { left: `${clipStartPercent}%` }]} />
                       </Pressable>
                     </View>
-                  ) : null}
 
-                  <View style={styles.uploadBottomRow}>
-                    <Pressable
-                      style={[styles.nextStepBtn, !canContinue && styles.disabled]}
-                      onPress={() => setUploadStep("details")}
-                      disabled={!canContinue}
-                    >
-                      <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
-                      <Text style={styles.nextStepText}>Verder</Text>
-                    </Pressable>
+                    <View style={styles.trimDirectRow}>
+                      <Text style={styles.trimDirectLabel}>Eind: {clipEndSec.toFixed(1)}s</Text>
+                      <Pressable
+                        style={styles.trimTapRail}
+                        onLayout={(event) => setEndRailWidth(event.nativeEvent.layout.width)}
+                        onPress={(event) => {
+                          const ratio = event.nativeEvent.locationX / Math.max(1, endRailWidth);
+                          setClipEndFromRatio(ratio);
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.trimTapFill,
+                            { width: `${Math.max(2, Math.min(100, clipEndPercent))}%` },
+                          ]}
+                        />
+                        <View style={[styles.trimTapThumb, { left: `${clipEndPercent}%` }]} />
+                      </Pressable>
+                    </View>
+                  </>
+                ) : (
+                  <Text style={styles.uploadEditorMetaText}>Deze foto wordt direct als volledige preview gebruikt.</Text>
+                )}
+
+                {hasVideoClipError ? (
+                  <View style={styles.trimErrorCard}>
+                    <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
+                    <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
                   </View>
-                </ScrollView>
+                ) : null}
+
+                {videoLengthWarning ? (
+                  <View style={styles.warningCardDark}>
+                    <Ionicons name="alert-circle-outline" size={14} color="#ff8da8" />
+                    <Text style={styles.warningTextDark}>{videoLengthWarning}</Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.uploadActionsRow}>
+                  <Pressable style={styles.uploadGhostDarkBtn} onPress={() => openActionWithPermission("library")}>
+                    <Ionicons name="images-outline" size={15} color="#fff" />
+                    <Text style={styles.uploadGhostDarkBtnText}>Andere media</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.uploadStoryBtn, (storyBusy || !canContinue) && styles.disabled]}
+                    onPress={() => onPostStory().catch(() => null)}
+                    disabled={storyBusy || !canContinue}
+                  >
+                    {postingStory ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <Ionicons name="sparkles-outline" size={15} color="#fff" />
+                    )}
+                    <Text style={styles.uploadStoryBtnText}>{postingStory ? "Plaatsen..." : "Jouw story"}</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[styles.nextStepBtn, !canContinue && styles.disabled]}
+                    onPress={() => setUploadStep("details")}
+                    disabled={!canContinue}
+                  >
+                    <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
+                    <Text style={styles.nextStepText}>Volgende</Text>
+                  </Pressable>
+                </View>
               </View>
             )}
           </View>
@@ -1009,7 +1090,7 @@ export default function CompanyStudioScreen() {
         <View style={styles.uploadDetailsTopRow}>
           <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
             <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
-            <Text style={styles.backToStepText}>Terug naar video</Text>
+            <Text style={styles.backToStepText}>Terug naar preview</Text>
           </Pressable>
           <View style={styles.uploadFlowStepPill}>
             <Text style={styles.uploadFlowStepText}>2/2</Text>
@@ -1021,41 +1102,11 @@ export default function CompanyStudioScreen() {
           <Text style={styles.uploadFlowSubTitle}>Voeg titel, omschrijving en instellingen toe</Text>
         </View>
 
-        <View style={styles.uploadDetailsMediaCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="film-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.sectionTitle}>Preview</Text>
-          </View>
-          <View style={styles.selectedVideoCard}>
-            {hasLiveVideoPreview ? (
-              <Video
-                ref={previewVideoRef}
-                source={{ uri: previewVideoUri }}
-                style={styles.selectedVideoPreview}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay
-                isMuted
-                isLooping={false}
-                onPlaybackStatusUpdate={onPreviewStatusUpdate}
-              />
-            ) : (
-              <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
-                <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
-              </View>
-            )}
-            <Pressable style={styles.ghostBtn} onPress={() => openActionWithPermission("library")}>
-              <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.ghostBtnText}>Kies andere video</Text>
-            </Pressable>
-            <View style={styles.selectedEditRow}>
-              <View style={styles.selectedEditPill}>
-                <Ionicons name="cut-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.selectedEditText}>
-                  Clip: {formatClipRange(clipStartSec, clipEndSec)}
-                </Text>
-              </View>
-            </View>
-          </View>
+        <View style={styles.uploadTypePill}>
+          <Ionicons name={uploadMediaType === "video" ? "videocam-outline" : "image-outline"} size={14} color={COLORS.primary} />
+          <Text style={styles.uploadTypePillText}>
+            {uploadMediaType === "video" ? `Video geselecteerd · ${clipDurationSec.toFixed(1)}s` : "Foto geselecteerd"}
+          </Text>
         </View>
 
         <View style={styles.uploadDetailsFormCard}>
@@ -1064,7 +1115,7 @@ export default function CompanyStudioScreen() {
             <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="Geef je video een duidelijke titel"
+              placeholder="Geef je upload een duidelijke titel"
               placeholderTextColor={INPUT_HINT_COLOR}
               style={styles.input}
             />
@@ -1075,7 +1126,7 @@ export default function CompanyStudioScreen() {
             <TextInput
               value={description}
               onChangeText={setDescription}
-              placeholder="Wat laat je in deze video zien?"
+              placeholder="Wat laat je in deze upload zien?"
               placeholderTextColor={INPUT_HINT_COLOR}
               style={[styles.input, styles.textarea]}
               multiline
@@ -1113,7 +1164,11 @@ export default function CompanyStudioScreen() {
               {activeServices.map((service) => {
                 const active = selectedServiceId === service.id;
                 return (
-                  <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
+                  <Pressable
+                    key={service.id}
+                    style={[styles.serviceChip, active && styles.serviceChipActive]}
+                    onPress={() => setSelectedServiceId(service.id)}
+                  >
                     <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
                   </Pressable>
                 );
@@ -1182,6 +1237,7 @@ export default function CompanyStudioScreen() {
       </ScrollView>
     );
   }
+
 
   function renderVideoCard(item: FeedPost) {
     const thumbnail = getPostThumbnail(item);
@@ -1334,15 +1390,6 @@ export default function CompanyStudioScreen() {
         </Animated.View>
       </KeyboardAvoidingView>
 
-      <InAppCaptureModal
-        visible={captureVisible}
-        onClose={() => setCaptureVisible(false)}
-        onCaptured={(captured: CapturedMedia) => {
-          setCaptureVisible(false);
-          applyPickedMedia(captured, captured.kind === "video" ? "video" : "image");
-        }}
-      />
-
       <Modal
         visible={Boolean(pendingMediaAction)}
         transparent
@@ -1352,19 +1399,11 @@ export default function CompanyStudioScreen() {
         <View style={styles.permissionModalOverlay}>
           <View style={styles.permissionModalCard}>
             <View style={styles.permissionModalTop}>
-              <Ionicons
-                name={
-                  pendingMediaAction === "library" ? "images-outline" : "camera-outline"
-                }
-                size={18}
-                color={COLORS.primary}
-              />
+              <Ionicons name="images-outline" size={18} color={COLORS.primary} />
               <Text style={styles.permissionModalTitle}>Toegang voor creator upload</Text>
             </View>
             <Text style={styles.permissionModalText}>
-              {pendingMediaAction === "library"
-                ? "Geef galerij-toegang om video&apos;s te kiezen en te bewerken."
-                : "Geef camera-toegang om direct video&apos;s op te nemen."}
+              Geef galerij-toegang om video&apos;s en foto&apos;s te kiezen en te bewerken.
             </Text>
 
             <View style={styles.permissionModalActions}>
@@ -1387,6 +1426,20 @@ export default function CompanyStudioScreen() {
                 <Text style={styles.permissionGhostText}>Nu niet</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={publishOverlay.visible} transparent animationType="fade" onRequestClose={() => null}>
+        <View style={styles.publishOverlayBackdrop}>
+          <View style={styles.publishOverlayCard}>
+            {publishOverlay.loading ? (
+              <ActivityIndicator color={COLORS.primary} />
+            ) : (
+              <Ionicons name="checkmark-circle" size={32} color={COLORS.success} />
+            )}
+            <Text style={styles.publishOverlayTitle}>{publishOverlay.title}</Text>
+            <Text style={styles.publishOverlayText}>{publishOverlay.message}</Text>
           </View>
         </View>
       </Modal>
@@ -1761,6 +1814,55 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     fontWeight: "700",
+  },
+  uploadPreviewBottomDock: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(8,8,8,0.88)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 9,
+  },
+  uploadActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  uploadGhostDarkBtn: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.28)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  uploadGhostDarkBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  uploadStoryBtn: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 11,
+    backgroundColor: "#1a7dff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  uploadStoryBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
   uploadEditorFloatingActions: {
     position: "absolute",
@@ -2370,6 +2472,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  warningCardDark: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(190,54,86,0.22)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  warningTextDark: {
+    flex: 1,
+    color: "#ffd5df",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   fileCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -2480,6 +2599,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: COLORS.text,
+    fontSize: 16,
     fontWeight: "600",
   },
   textarea: {
@@ -2566,6 +2686,23 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   backToStepText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  uploadTypePill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  uploadTypePillText: {
     color: COLORS.primary,
     fontSize: 12,
     fontWeight: "800",
@@ -2966,6 +3103,38 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
     fontWeight: "800",
     fontSize: 12,
+  },
+  publishOverlayBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  publishOverlayCard: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    alignItems: "center",
+    gap: 9,
+  },
+  publishOverlayTitle: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  publishOverlayText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    lineHeight: 18,
   },
   disabled: {
     opacity: 0.5,

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,6 +24,7 @@ import {
   rateService,
   toggleFollowCompany,
 } from "../../../lib/socialRepo";
+import { CompanyStory, subscribeCompanyActiveStories } from "../../../lib/storyRepo";
 import { COLORS } from "../../../lib/ui";
 
 const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -68,6 +70,13 @@ function feedPreviewImage(item: FeedPost): string {
   return cloudinaryVideoThumbnailFromUrl(item.videoUrl);
 }
 
+function storyPreviewMedia(story: CompanyStory): string {
+  if (story.mediaType === "image") {
+    return story.imageUrl || story.thumbnailUrl || "";
+  }
+  return story.videoUrl || story.thumbnailUrl || "";
+}
+
 export default function CompanyProfileScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -89,6 +98,9 @@ export default function CompanyProfileScreen() {
   const [ratingMinReviews, setRatingMinReviews] = useState(10);
   const [serviceRatingMap, setServiceRatingMap] = useState<Record<string, { avg: number; count: number }>>({});
   const [myServiceRatingMap, setMyServiceRatingMap] = useState<Record<string, number | null>>({});
+  const [stories, setStories] = useState<CompanyStory[]>([]);
+  const [storyViewerVisible, setStoryViewerVisible] = useState(false);
+  const [storyIndex, setStoryIndex] = useState(0);
 
   const loadSocial = useCallback(
     async (companyId: string) => {
@@ -185,6 +197,49 @@ export default function CompanyProfileScreen() {
     };
   }, [id, loadSocial, loadServiceRatings]);
 
+  useEffect(() => {
+    if (!id) {
+      setStories([]);
+      return;
+    }
+
+    const unsub = subscribeCompanyActiveStories(
+      id,
+      (nextStories) => {
+        setStories(nextStories);
+      },
+      (error) => {
+        console.warn("[customer/company-profile] stories subscribe failed", error);
+      }
+    );
+
+    return unsub;
+  }, [id]);
+
+  useEffect(() => {
+    if (!storyViewerVisible || stories.length === 0) return;
+    const activeStory = stories[Math.min(storyIndex, stories.length - 1)];
+    if (!activeStory) return;
+    if (activeStory.mediaType === "video") return;
+
+    const timer = setTimeout(() => {
+      setStoryIndex((prev) => {
+        if (prev >= stories.length - 1) {
+          setStoryViewerVisible(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 5200);
+
+    return () => clearTimeout(timer);
+  }, [storyViewerVisible, stories, storyIndex]);
+
+  useEffect(() => {
+    if (storyIndex < stories.length) return;
+    setStoryIndex(Math.max(0, stories.length - 1));
+  }, [storyIndex, stories.length]);
+
   const categories = useMemo(() => {
     const unique = new Set(services.map((s) => s.category));
     return ["Alles", ...Array.from(unique)];
@@ -204,11 +259,44 @@ export default function CompanyProfileScreen() {
   const bookingTotal = Math.max(0, Number(company?.bookingCountTotal ?? 0));
   const canUseCustomerActions = !uid || role === "customer";
   const isBusinessViewer = role === "company" || role === "employee" || role === "admin";
+  const hasStories = stories.length > 0;
+  const currentStory = hasStories ? stories[Math.min(storyIndex, stories.length - 1)] : null;
   const openFeedRoute = id
     ? isBusinessViewer
       ? (`/(company)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
       : (`/(customer)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
     : "";
+
+  function openStoryViewer() {
+    if (!hasStories) return;
+    setStoryIndex(0);
+    setStoryViewerVisible(true);
+  }
+
+  function closeStoryViewer() {
+    setStoryViewerVisible(false);
+  }
+
+  function goToNextStory() {
+    setStoryIndex((prev) => {
+      if (prev >= stories.length - 1) {
+        setStoryViewerVisible(false);
+        return prev;
+      }
+      return prev + 1;
+    });
+  }
+
+  function goToPreviousStory() {
+    setStoryIndex((prev) => Math.max(0, prev - 1));
+  }
+
+  function onStoryVideoStatus(status: AVPlaybackStatus) {
+    if (!status.isLoaded) return;
+    if (status.didJustFinish) {
+      goToNextStory();
+    }
+  }
 
   async function onToggleFollow() {
     if (!id || !uid || followBusy || role !== "customer") return;
@@ -279,13 +367,24 @@ export default function CompanyProfileScreen() {
               ))}
             </View>
             <View style={styles.heroTopRow}>
-              <View style={styles.logoWrap}>
-                {company.logoUrl ? (
-                  <Image source={{ uri: company.logoUrl }} style={styles.logoImg} contentFit="cover" />
-                ) : (
-                  <Ionicons name="business-outline" size={28} color="#fff" />
-                )}
-              </View>
+              <Pressable
+                style={[styles.logoRingWrap, hasStories && styles.logoRingWrapActive]}
+                onPress={openStoryViewer}
+                disabled={!hasStories}
+              >
+                <View style={styles.logoWrap}>
+                  {company.logoUrl ? (
+                    <Image source={{ uri: company.logoUrl }} style={styles.logoImg} contentFit="cover" />
+                  ) : (
+                    <Ionicons name="business-outline" size={28} color="#fff" />
+                  )}
+                </View>
+                {hasStories ? (
+                  <View style={styles.storyBadge}>
+                    <Text style={styles.storyBadgeText}>Story</Text>
+                  </View>
+                ) : null}
+              </Pressable>
               <View style={styles.nameBlock}>
                 <View style={styles.nameBadgeRow}>
                   <Text style={styles.name}>{company.name}</Text>
@@ -485,6 +584,75 @@ export default function CompanyProfileScreen() {
           </View>
         </ScrollView>
       )}
+
+      <Modal visible={storyViewerVisible} transparent animationType="fade" onRequestClose={closeStoryViewer}>
+        <View style={styles.storyModalBackdrop}>
+          <View style={styles.storyModalCard}>
+            <View style={styles.storyProgressRow}>
+              {stories.map((story, index) => (
+                <View key={story.id} style={[styles.storyProgressTrack, index <= storyIndex && styles.storyProgressTrackActive]} />
+              ))}
+            </View>
+
+            <View style={styles.storyTopRow}>
+              <View style={styles.storyCompanyRow}>
+                <View style={styles.storyCompanyLogo}>
+                  {company?.logoUrl ? (
+                    <Image source={{ uri: company.logoUrl }} style={styles.storyCompanyLogoImg} contentFit="cover" />
+                  ) : (
+                    <Ionicons name="business-outline" size={13} color="#fff" />
+                  )}
+                </View>
+                <Text style={styles.storyCompanyName}>{company?.name || "Story"}</Text>
+              </View>
+              <Pressable style={styles.storyCloseBtn} onPress={closeStoryViewer}>
+                <Ionicons name="close" size={16} color="#fff" />
+              </Pressable>
+            </View>
+
+            <View style={styles.storyMediaWrap}>
+              {currentStory ? (
+                currentStory.mediaType === "video" && currentStory.videoUrl ? (
+                  <Video
+                    source={{ uri: currentStory.videoUrl }}
+                    style={styles.storyMedia}
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay
+                    isLooping={false}
+                    onPlaybackStatusUpdate={onStoryVideoStatus}
+                  />
+                ) : (
+                  <Image source={{ uri: storyPreviewMedia(currentStory) }} style={styles.storyMedia} contentFit="contain" />
+                )
+              ) : (
+                <View style={[styles.storyMedia, styles.storyMediaFallback]}>
+                  <Ionicons name="image-outline" size={22} color="rgba(255,255,255,0.7)" />
+                </View>
+              )}
+            </View>
+
+            {currentStory?.title ? <Text style={styles.storyTitle}>{currentStory.title}</Text> : null}
+            {currentStory?.caption ? <Text style={styles.storyCaption}>{currentStory.caption}</Text> : null}
+
+            <View style={styles.storyControlsRow}>
+              <Pressable
+                style={[styles.storyControlBtn, storyIndex === 0 && styles.disabled]}
+                onPress={goToPreviousStory}
+                disabled={storyIndex === 0}
+              >
+                <Ionicons name="chevron-back" size={14} color="#fff" />
+                <Text style={styles.storyControlText}>Vorige</Text>
+              </Pressable>
+              <Pressable style={styles.storyControlBtnPrimary} onPress={goToNextStory}>
+                <Text style={styles.storyControlTextPrimary}>
+                  {storyIndex >= stories.length - 1 ? "Sluiten" : "Volgende"}
+                </Text>
+                <Ionicons name="chevron-forward" size={14} color="#fff" />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -570,6 +738,15 @@ const styles = StyleSheet.create({
     gap: 6,
     flexWrap: "wrap",
   },
+  logoRingWrap: {
+    borderRadius: 50,
+    padding: 2,
+  },
+  logoRingWrapActive: {
+    borderWidth: 2,
+    borderColor: "#7ad9ff",
+    backgroundColor: "rgba(122,217,255,0.2)",
+  },
   logoWrap: {
     width: 84,
     height: 84,
@@ -580,6 +757,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
+  },
+  storyBadge: {
+    position: "absolute",
+    bottom: -4,
+    left: "50%",
+    marginLeft: -22,
+    minWidth: 44,
+    minHeight: 18,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: "#a9ebff",
+    backgroundColor: "#4eb7e6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storyBadgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
   },
   logoImg: {
     width: "100%",
@@ -879,5 +1076,130 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontWeight: "600",
     marginVertical: 14,
+  },
+  storyModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "center",
+    padding: 16,
+  },
+  storyModalCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "#090909",
+    padding: 12,
+    gap: 10,
+  },
+  storyProgressRow: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  storyProgressTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  storyProgressTrackActive: {
+    backgroundColor: "#7ad9ff",
+  },
+  storyTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  storyCompanyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  storyCompanyLogo: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.2)",
+  },
+  storyCompanyLogoImg: {
+    width: "100%",
+    height: "100%",
+  },
+  storyCompanyName: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  storyCloseBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  storyMediaWrap: {
+    width: "100%",
+    aspectRatio: 9 / 15,
+    borderRadius: 14,
+    overflow: "hidden",
+    backgroundColor: "#000",
+  },
+  storyMedia: {
+    width: "100%",
+    height: "100%",
+  },
+  storyMediaFallback: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storyTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  storyCaption: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  storyControlsRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  storyControlBtn: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  storyControlText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  storyControlBtnPrimary: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 10,
+    backgroundColor: "#3f97ff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  storyControlTextPrimary: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
   },
 });

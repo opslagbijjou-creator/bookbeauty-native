@@ -20,6 +20,9 @@ type PickVideoFromLibraryOptions = {
   allowEditing?: boolean;
   maxDurationMs?: number;
 };
+type PickAnyMediaFromLibraryOptions = {
+  maxDurationMs?: number;
+};
 
 const MAX_VIDEO_DURATION_MS = 15_000;
 type PermissionState = "granted" | "denied" | "undetermined";
@@ -374,14 +377,26 @@ function toPickedMediaWithKind(asset: ImagePicker.ImagePickerAsset): PickedMedia
   };
 }
 
-function ensurePickedVideoDurationWithinLimit(picked: PickedMediaWithKind): void {
+function ensurePickedVideoDurationWithinLimit(
+  picked: PickedMediaWithKind,
+  maxDurationMs: number = MAX_VIDEO_DURATION_MS
+): void {
   if (picked.kind !== "video") return;
-  if (typeof picked.durationMs === "number" && picked.durationMs > MAX_VIDEO_DURATION_MS) {
-    throw new Error("Video mag maximaal 15 seconden zijn.");
+  if (maxDurationMs <= 0) return;
+  if (typeof picked.durationMs === "number" && picked.durationMs > maxDurationMs) {
+    const secondsLimit = Math.max(1, Math.round(maxDurationMs / 1000));
+    throw new Error(`Video mag maximaal ${secondsLimit} seconden zijn.`);
   }
 }
 
-export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | null> {
+export async function pickAnyMediaFromLibrary(
+  options?: PickAnyMediaFromLibraryOptions
+): Promise<PickedMediaWithKind | null> {
+  const maxDurationMs =
+    typeof options?.maxDurationMs === "number" && Number.isFinite(options.maxDurationMs)
+      ? Math.max(0, options.maxDurationMs)
+      : MAX_VIDEO_DURATION_MS;
+
   if (canUseWebFilePicker()) {
     const file = await pickWebFile("image/*,video/*");
     if (!file) return null;
@@ -396,7 +411,7 @@ export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | n
       durationMs,
       webFile: file,
     };
-    ensurePickedVideoDurationWithinLimit(picked);
+    ensurePickedVideoDurationWithinLimit(picked, maxDurationMs);
     return picked;
   }
 
@@ -410,7 +425,7 @@ export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | n
 
   if (result.canceled || !result.assets?.[0]) return null;
   const picked = toPickedMediaWithKind(result.assets[0]);
-  ensurePickedVideoDurationWithinLimit(picked);
+  ensurePickedVideoDurationWithinLimit(picked, maxDurationMs);
   return picked;
 }
 
