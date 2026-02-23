@@ -4,6 +4,8 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -65,8 +67,9 @@ export default function CustomerFeedScreen() {
   const allowPlayback = isFocused && isAppActive && !commentsPostId;
   const allowPlaybackRef = useRef(allowPlayback);
   const loadingMoreRef = useRef(false);
+  const listRef = useRef<FlatList<FeedPost> | null>(null);
 
-  const cardHeight = Math.max(320, listHeight || 0);
+  const cardHeight = Math.max(320, Math.round(listHeight || 0));
   const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
     Alles: "apps-outline",
     Kapper: "cut-outline",
@@ -184,6 +187,38 @@ export default function CustomerFeedScreen() {
   }).current;
 
   const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 80 }), []);
+
+  const snapToNearestItem = useCallback(
+    (offsetY: number) => {
+      if (cardHeight <= 0 || !items.length) return;
+      const rawIndex = offsetY / cardHeight;
+      const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(rawIndex)));
+      const nextOffset = nextIndex * cardHeight;
+      const nextId = items[nextIndex]?.id ?? null;
+      if (allowPlaybackRef.current && nextId) {
+        setActiveId(nextId);
+      }
+      if (Math.abs(nextOffset - offsetY) <= 2) return;
+      listRef.current?.scrollToOffset({ offset: nextOffset, animated: true });
+    },
+    [cardHeight, items]
+  );
+
+  const onMomentumSnap = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      snapToNearestItem(event.nativeEvent.contentOffset.y);
+    },
+    [snapToNearestItem]
+  );
+
+  const onDragSnap = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const velocityY = Number(event.nativeEvent.velocity?.y ?? 0);
+      if (Math.abs(velocityY) > 0.15) return;
+      snapToNearestItem(event.nativeEvent.contentOffset.y);
+    },
+    [snapToNearestItem]
+  );
 
   useEffect(() => {
     if (!allowPlayback) {
@@ -332,6 +367,7 @@ export default function CustomerFeedScreen() {
           </View>
         ) : (
           <FlatList
+            ref={listRef}
             data={items}
             keyExtractor={(item) => item.id}
             pagingEnabled
@@ -339,6 +375,8 @@ export default function CustomerFeedScreen() {
             snapToAlignment="start"
             disableIntervalMomentum
             decelerationRate={Platform.OS === "ios" ? "fast" : 0.98}
+            onMomentumScrollEnd={onMomentumSnap}
+            onScrollEndDrag={onDragSnap}
             onEndReachedThreshold={0.35}
             onEndReached={loadMore}
             showsVerticalScrollIndicator={false}
