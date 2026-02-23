@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -10,6 +10,7 @@ import {
   subscribeMyCustomerNotifications,
 } from "../../lib/notificationRepo";
 import { auth } from "../../lib/firebase";
+import { registerPushTokenForUser } from "../../lib/pushRepo";
 import { COLORS } from "../../lib/ui";
 
 function typeIcon(type: CustomerNotification["type"]): keyof typeof Ionicons.glyphMap {
@@ -54,6 +55,7 @@ export default function CustomerNotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [enablingPush, setEnablingPush] = useState(false);
   const [items, setItems] = useState<CustomerNotification[]>([]);
 
   useEffect(() => {
@@ -101,6 +103,22 @@ export default function CustomerNotificationsScreen() {
     }
   }
 
+  async function onEnablePush() {
+    if (!uid || enablingPush) return;
+    setEnablingPush(true);
+    try {
+      await registerPushTokenForUser(uid);
+      Alert.alert(
+        "Push ingesteld",
+        "Als je toestemming hebt gegeven, ontvang je nu meldingen op dit toestel."
+      );
+    } catch {
+      Alert.alert("Push mislukt", "Kon push-toestemming niet instellen. Probeer opnieuw.");
+    } finally {
+      setEnablingPush(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
       <View style={styles.topRow}>
@@ -123,6 +141,14 @@ export default function CustomerNotificationsScreen() {
         <Text style={styles.title}>Meldingen</Text>
       </View>
       <Text style={styles.subtitle}>{unreadCount} ongelezen</Text>
+      <Pressable style={[styles.pushBtn, enablingPush && styles.disabled]} onPress={onEnablePush} disabled={enablingPush}>
+        {enablingPush ? (
+          <ActivityIndicator size="small" color={COLORS.primary} />
+        ) : (
+          <Ionicons name="notifications-circle-outline" size={15} color={COLORS.primary} />
+        )}
+        <Text style={styles.pushBtnText}>{enablingPush ? "Activeren..." : "Push op dit toestel activeren"}</Text>
+      </Pressable>
 
       {loading ? (
         <View style={styles.stateWrap}>
@@ -231,6 +257,24 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontWeight: "700",
     marginBottom: 2,
+  },
+  pushBtn: {
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  pushBtnText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "800",
   },
   stateWrap: {
     flex: 1,

@@ -15,6 +15,7 @@ import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { getUserRole, login } from "../../lib/authRepo";
+import { registerPushTokenForUser } from "../../lib/pushRepo";
 import { COLORS } from "../../lib/ui";
 
 export default function LoginScreen() {
@@ -30,6 +31,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const user = await login(email, password);
+      await registerPushTokenForUser(user.uid).catch(() => null);
       const role = await getUserRole(user.uid);
 
       if (role === "company") {

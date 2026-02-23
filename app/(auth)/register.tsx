@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CategoryChips from "../../components/CategoryChips";
 import { registerCompany, registerCustomer, registerInfluencer } from "../../lib/authRepo";
+import { registerPushTokenForUser } from "../../lib/pushRepo";
 import { CATEGORIES, COLORS } from "../../lib/ui";
 
 type RolePick = "customer" | "company" | "influencer";
@@ -60,17 +61,19 @@ export default function RegisterScreen() {
 
     try {
       if (role === "customer") {
-        await registerCustomer(email, password);
+        const user = await registerCustomer(email, password);
+        await registerPushTokenForUser(user.uid).catch(() => null);
         router.replace("/(customer)/(tabs)" as never);
       } else if (role === "influencer") {
-        await registerInfluencer({
+        const user = await registerInfluencer({
           email,
           password,
           name: influencerName.trim(),
         });
+        await registerPushTokenForUser(user.uid).catch(() => null);
         router.replace("/(customer)/(tabs)/profile" as never);
       } else {
-        await registerCompany({
+        const user = await registerCompany({
           email,
           password,
           name: name.trim(),
@@ -80,6 +83,7 @@ export default function RegisterScreen() {
           kvk: kvk.trim(),
           phone: phone.trim(),
         });
+        await registerPushTokenForUser(user.uid).catch(() => null);
         router.replace("/(company)/(tabs)/home" as never);
       }
     } catch (error: any) {

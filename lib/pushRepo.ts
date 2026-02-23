@@ -14,6 +14,7 @@ type PushMessage = {
 type PushSubscriptionDoc = {
   uid?: unknown;
   tokens?: unknown;
+  webSubscriptions?: unknown;
 };
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
@@ -22,6 +23,15 @@ const BOOKING_SOUND_CHANNEL_ID = "booking-alerts";
 const SILENT_CHANNEL_ID = "silent-updates";
 const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
 let pushConfigured = false;
+
+type WebPushSubscriptionShape = {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+};
 
 function chunk<T>(items: T[], size: number): T[][] {
   if (size <= 0) return [items];
@@ -41,6 +51,60 @@ function normalizeTokens(value: unknown): string[] {
         .filter((item) => item.startsWith("ExponentPushToken[") && item.endsWith("]"))
     )
   );
+}
+
+function normalizeWebPushSubscription(value: unknown): WebPushSubscriptionShape | null {
+  const node = (value as Record<string, unknown> | undefined) ?? {};
+  const endpoint = String(node.endpoint ?? "").trim();
+  const keysNode = (node.keys as Record<string, unknown> | undefined) ?? {};
+  const p256dh = String(keysNode.p256dh ?? "").trim();
+  const auth = String(keysNode.auth ?? "").trim();
+  if (!endpoint || !p256dh || !auth) return null;
+
+  const expirationRaw = node.expirationTime;
+  const expirationTime =
+    typeof expirationRaw === "number" && Number.isFinite(expirationRaw) ? expirationRaw : null;
+
+  return {
+    endpoint,
+    expirationTime,
+    keys: { p256dh, auth },
+  };
+}
+
+function normalizeWebPushSubscriptions(value: unknown): WebPushSubscriptionShape[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const output: WebPushSubscriptionShape[] = [];
+  value.forEach((row) => {
+    const normalized = normalizeWebPushSubscription(row);
+    if (!normalized) return;
+    if (seen.has(normalized.endpoint)) return;
+    seen.add(normalized.endpoint);
+    output.push(normalized);
+  });
+  return output;
+}
+
+function base64UrlToUint8Array(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const atobFn = (globalThis as { atob?: (raw: string) => string }).atob;
+  if (typeof atobFn !== "function") return new Uint8Array();
+  const raw = atobFn(padded);
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) {
+    output[i] = raw.charCodeAt(i);
+  }
+  return output;
+}
+
+function resolveWebPushVapidPublicKey(): string {
+  const processNode = (globalThis as { process?: { env?: Record<string, unknown> } }).process;
+  const fromProcess = String(processNode?.env?.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim();
+  if (fromProcess) return fromProcess;
+  const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
+  return String(extra.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim();
 }
 
 function resolveProjectId(): string | undefined {
@@ -117,9 +181,79 @@ async function requestPushPermission(): Promise<boolean> {
   return requested.granted;
 }
 
+async function registerWebPushSubscriptionForUser(uid: string): Promise<void> {
+  const cleanUid = String(uid ?? "").trim();
+  if (!cleanUid || Platform.OS !== "web") return;
+
+  const vapidPublicKey = resolveWebPushVapidPublicKey();
+  if (!vapidPublicKey) {
+    console.warn("[pushRepo] Missing EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY; web push subscription skipped.");
+    return;
+  }
+
+  const nav = (globalThis as { navigator?: any }).navigator;
+  const NotificationApi = (globalThis as { Notification?: any }).Notification;
+  const PushManagerApi = (globalThis as { PushManager?: any }).PushManager;
+  if (!nav?.serviceWorker || !NotificationApi || !PushManagerApi) return;
+  if (!(globalThis as { isSecureContext?: boolean }).isSecureContext) return;
+
+  const currentPermission = String(NotificationApi.permission ?? "default");
+  const permission =
+    currentPermission === "granted"
+      ? "granted"
+      : await Promise.resolve(NotificationApi.requestPermission?.()).catch(() => "default");
+  if (permission !== "granted") return;
+
+  const registration = await nav.serviceWorker.register("/web-push-sw.js").catch(() => null);
+  if (!registration) return;
+  const readyRegistration = await nav.serviceWorker.ready.catch(() => registration);
+  const pushManager = readyRegistration?.pushManager ?? registration.pushManager;
+  if (!pushManager) return;
+
+  let subscription = await pushManager.getSubscription().catch(() => null);
+  if (!subscription) {
+    const applicationServerKey = base64UrlToUint8Array(vapidPublicKey);
+    if (!applicationServerKey.length) return;
+    subscription = await pushManager
+      .subscribe({
+        userVisibleOnly: true,
+        applicationServerKey,
+      })
+      .catch(() => null);
+  }
+  if (!subscription) return;
+
+  const payload = normalizeWebPushSubscription(
+    typeof subscription.toJSON === "function" ? subscription.toJSON() : subscription
+  );
+  if (!payload) return;
+
+  const ref = doc(db, "push_subscriptions", cleanUid);
+  const existingSnap = await getDoc(ref).catch(() => null);
+  const existing = normalizeWebPushSubscriptions(existingSnap?.data()?.webSubscriptions);
+  const merged = [payload, ...existing.filter((row) => row.endpoint !== payload.endpoint)].slice(0, 15);
+
+  await setDoc(
+    ref,
+    {
+      uid: cleanUid,
+      webSubscriptions: merged,
+      platform: Platform.OS,
+      updatedAt: serverTimestamp(),
+      webPushUpdatedAtMs: Date.now(),
+    },
+    { merge: true }
+  );
+}
+
 export async function registerPushTokenForUser(uid: string): Promise<void> {
   const cleanUid = String(uid ?? "").trim();
   if (!cleanUid) return;
+
+  if (Platform.OS === "web") {
+    await registerWebPushSubscriptionForUser(cleanUid);
+    return;
+  }
 
   configurePushNotifications();
 

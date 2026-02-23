@@ -111,6 +111,25 @@ function AppBootstrapEffects() {
     return () => sub.remove();
   }, [openRouteFromPushData]);
 
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const nav = (globalThis as { navigator?: any }).navigator;
+    const worker = nav?.serviceWorker;
+    if (!worker?.addEventListener) return;
+
+    const onWorkerMessage = (event: any) => {
+      const payload = (event?.data ?? {}) as Record<string, unknown>;
+      if (String(payload.type ?? "") !== "bookbeauty-notification-click") return;
+      const data = (payload.data ?? {}) as Record<string, unknown>;
+      openRouteFromPushData(data);
+    };
+
+    worker.addEventListener("message", onWorkerMessage);
+    return () => {
+      worker.removeEventListener("message", onWorkerMessage);
+    };
+  }, [openRouteFromPushData]);
+
   return null;
 }
 
