@@ -1,4 +1,5 @@
 import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "./cloudinary";
+import { Platform } from "react-native";
 
 type UploadToCloudinaryOptions = {
   mimeType?: string;
@@ -36,11 +37,24 @@ export async function uploadToCloudinary(
   const resourceType = options.resourceType || inferResourceType(mimeType, fileName);
 
   const formData = new FormData();
-  formData.append("file", {
-    uri,
-    type: mimeType,
-    name: fileName,
-  } as any);
+  if (Platform.OS === "web") {
+    const fileResponse = await fetch(uri);
+    if (!fileResponse.ok) {
+      throw new Error("Kon geselecteerde media niet lezen in de browser.");
+    }
+    const blob = await fileResponse.blob();
+    if (typeof File !== "undefined") {
+      formData.append("file", new File([blob], fileName, { type: mimeType || blob.type || "application/octet-stream" }));
+    } else {
+      formData.append("file", blob, fileName);
+    }
+  } else {
+    formData.append("file", {
+      uri,
+      type: mimeType,
+      name: fileName,
+    } as any);
+  }
   formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
   if (options.folder) {
     formData.append("folder", options.folder);

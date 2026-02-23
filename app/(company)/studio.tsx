@@ -23,7 +23,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { subscribeAuth } from "../../lib/authRepo";
 import CategoryChips from "../../components/CategoryChips";
 import InAppCaptureModal, { CapturedMedia } from "../../components/InAppCaptureModal";
-import MediaLibraryPickerModal, { PickedLibraryMedia } from "../../components/MediaLibraryPickerModal";
 import {
   addMyFeedPost,
   deleteMyFeedPost,
@@ -33,10 +32,9 @@ import {
 } from "../../lib/feedRepo";
 import { auth } from "../../lib/firebase";
 import {
-  captureAnyMediaWithCamera,
   getCameraPermissionState,
   getMediaLibraryPermissionState,
-  pickAnyMediaFromLibrary,
+  pickVideoFromLibrary,
   requestCameraPermission,
   requestMediaLibraryPermission,
   type PickedMedia,
@@ -187,7 +185,6 @@ export default function CompanyStudioScreen() {
   const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
   const [cameraPermission, setCameraPermission] = useState<PermissionState>("undetermined");
   const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
-  const [libraryPickerVisible, setLibraryPickerVisible] = useState(false);
   const [captureVisible, setCaptureVisible] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
@@ -506,18 +503,10 @@ export default function CompanyStudioScreen() {
   }
 
   async function executeMediaAction(action: PendingMediaAction) {
-    if (Platform.OS === "web") {
-      const picked =
-        action === "library"
-          ? await pickAnyMediaFromLibrary()
-          : await captureAnyMediaWithCamera();
-      if (!picked) return;
-      applyPickedMedia(picked, picked.kind);
-      return;
-    }
-
     if (action === "library") {
-      setLibraryPickerVisible(true);
+      const picked = await pickVideoFromLibrary({ maxDurationMs: 0 });
+      if (!picked) return;
+      applyPickedMedia(picked, "video");
       return;
     }
     setCaptureVisible(true);
@@ -1318,15 +1307,6 @@ export default function CompanyStudioScreen() {
           {studioTab === "upload" ? renderUploadTab() : renderVideosTab()}
         </Animated.View>
       </KeyboardAvoidingView>
-
-      <MediaLibraryPickerModal
-        visible={libraryPickerVisible}
-        onClose={() => setLibraryPickerVisible(false)}
-        onPick={(picked: PickedLibraryMedia) => {
-          setLibraryPickerVisible(false);
-          applyPickedMedia(picked, picked.kind);
-        }}
-      />
 
       <InAppCaptureModal
         visible={captureVisible}

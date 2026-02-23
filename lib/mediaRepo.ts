@@ -242,6 +242,8 @@ function ensurePickedVideoDurationWithinLimit(picked: PickedMediaWithKind): void
 }
 
 export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | null> {
+  await ensureLibraryPermission();
+
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images", "videos"],
     quality: 0.9,
@@ -255,6 +257,8 @@ export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | n
 }
 
 export async function captureAnyMediaWithCamera(): Promise<PickedMediaWithKind | null> {
+  await ensureCameraPermission();
+
   const result = await ImagePicker.launchCameraAsync({
     mediaTypes: ["images", "videos"],
     quality: 0.9,
