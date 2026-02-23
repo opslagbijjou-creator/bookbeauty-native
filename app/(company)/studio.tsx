@@ -71,13 +71,6 @@ type UploadMediaType = "video" | "image";
 type PermissionState = "granted" | "denied" | "undetermined";
 type PendingMediaAction = "library";
 
-type PublishOverlayState = {
-  visible: boolean;
-  loading: boolean;
-  title: string;
-  message: string;
-};
-
 const DEFAULT_CROP_PRESET: MediaCropPreset = "original";
 const DEFAULT_FILTER_PRESET: MediaFilterPreset = "none";
 const FILTER_OPTIONS: { key: MediaFilterPreset; label: string }[] = [
@@ -188,12 +181,6 @@ export default function CompanyStudioScreen() {
   const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
   const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
   const [postingStory, setPostingStory] = useState(false);
-  const [publishOverlay, setPublishOverlay] = useState<PublishOverlayState>({
-    visible: false,
-    loading: false,
-    title: "",
-    message: "",
-  });
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
 
@@ -404,27 +391,6 @@ export default function CompanyStudioScreen() {
     return () => clearTimeout(timer);
   }, [uploadStatusText]);
 
-  function showPublishOverlay(title: string, message: string) {
-    setPublishOverlay({
-      visible: true,
-      loading: true,
-      title,
-      message,
-    });
-  }
-
-  function completePublishOverlay(title: string, message: string) {
-    setPublishOverlay({
-      visible: true,
-      loading: false,
-      title,
-      message,
-    });
-    setTimeout(() => {
-      setPublishOverlay((prev) => ({ ...prev, visible: false }));
-    }, 1500);
-  }
-
   function resetForm() {
     setCategory(CATEGORIES[0]);
     setTitle("");
@@ -462,7 +428,7 @@ export default function CompanyStudioScreen() {
     setSelectedServiceId(post.serviceId ?? "");
     setVisibility(post.visibility === "clients_only" || !post.isActive ? "clients" : "public");
     setUploadMediaType(post.mediaType === "image" ? "image" : "video");
-    setCropPreset(post.cropPreset ?? DEFAULT_CROP_PRESET);
+    setCropPreset(DEFAULT_CROP_PRESET);
     setFilterPreset(post.filterPreset ?? DEFAULT_FILTER_PRESET);
     setVideo(null);
     setImageMedia(null);
@@ -478,6 +444,7 @@ export default function CompanyStudioScreen() {
   }
 
   function applyPickedMedia(picked: PickedMedia, kind: "video" | "image") {
+    setCropPreset(DEFAULT_CROP_PRESET);
     if (kind === "image") {
       setUploadMediaType("image");
       setVideo(null);
@@ -647,17 +614,18 @@ export default function CompanyStudioScreen() {
     }
 
     setPostingStory(true);
-    showPublishOverlay("Story plaatsen", "Je story wordt nu verwerkt...");
+    setUploadStatusText("Story wordt geplaatst...");
 
     try {
+      const safeCropPreset: MediaCropPreset = DEFAULT_CROP_PRESET;
       const { sourceVideoUrl, sourceImageUrl } = await uploadCurrentMediaIfNeeded(uid, selectedMediaType);
       const storyVideoUrl =
         selectedMediaType === "video"
-          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset: safeCropPreset, filterPreset })
           : "";
       const storyImageUrl =
         selectedMediaType === "image"
-          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset })
           : "";
       const storyThumbnail =
         selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(storyVideoUrl) : storyImageUrl;
@@ -673,10 +641,9 @@ export default function CompanyStudioScreen() {
         clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
       });
 
-      completePublishOverlay("Story geplaatst", "Je story blijft 24 uur zichtbaar.");
       setUploadStatusText("Story geplaatst (24 uur zichtbaar).");
     } catch (error: any) {
-      setPublishOverlay((prev) => ({ ...prev, visible: false, loading: false }));
+      setUploadStatusText("");
       Alert.alert("Story mislukt", error?.message ?? "Kon story niet plaatsen.");
     } finally {
       setPostingStory(false);
@@ -720,12 +687,10 @@ export default function CompanyStudioScreen() {
     }
 
     setUploading(true);
-    showPublishOverlay(
-      editingPostId ? "Wijzigingen opslaan" : "Post plaatsen",
-      editingPostId ? "Je wijzigingen worden verwerkt..." : "Je post wordt geupload..."
-    );
+    setUploadStatusText(editingPostId ? "Wijzigingen worden opgeslagen..." : "Upload wordt geplaatst...");
 
     try {
+      const safeCropPreset: MediaCropPreset = DEFAULT_CROP_PRESET;
       const nextVisibility = visibility === "public" ? "public" : "clients_only";
       const nextIsActive = visibility === "public";
       const serviceName = selectedService?.name ?? "";
@@ -736,11 +701,11 @@ export default function CompanyStudioScreen() {
       );
       const nextVideoUrl =
         selectedMediaType === "video"
-          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset: safeCropPreset, filterPreset })
           : "";
       const nextImageUrl =
         selectedMediaType === "image"
-          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset })
           : "";
       const nextThumbUrl =
         selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(nextVideoUrl) : nextImageUrl;
@@ -768,7 +733,7 @@ export default function CompanyStudioScreen() {
           thumbnailUrl: nextThumbUrl || undefined,
           sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
-          cropPreset,
+          cropPreset: safeCropPreset,
           filterPreset,
           ...(selectedMediaType === "video"
             ? {
@@ -786,7 +751,6 @@ export default function CompanyStudioScreen() {
             : {}),
         });
 
-        completePublishOverlay("Opgeslagen", "Je feed post is bijgewerkt.");
         setUploadStatusText("Wijzigingen opgeslagen.");
       } else {
         await addMyFeedPost(uid, {
@@ -804,7 +768,7 @@ export default function CompanyStudioScreen() {
           thumbnailUrl: nextThumbUrl || undefined,
           sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
-          cropPreset,
+          cropPreset: safeCropPreset,
           filterPreset,
           clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
           clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
@@ -813,7 +777,6 @@ export default function CompanyStudioScreen() {
           viewCount: 0,
         });
 
-        completePublishOverlay("Geplaatst", "Je feed post staat in je content library.");
         setUploadStatusText("Upload geplaatst.");
       }
 
@@ -824,7 +787,7 @@ export default function CompanyStudioScreen() {
         .catch(() => null)
         .finally(() => setRefreshingAfterUpload(false));
     } catch (error: any) {
-      setPublishOverlay((prev) => ({ ...prev, visible: false, loading: false }));
+      setUploadStatusText("");
       Alert.alert("Upload mislukt", error?.message ?? "Kon post niet opslaan.");
     } finally {
       setUploading(false);
@@ -1314,6 +1277,17 @@ export default function CompanyStudioScreen() {
     );
   }
 
+  const hasBusyStatus = uploading || postingStory || refreshingAfterUpload;
+  const statusText =
+    uploadStatusText ||
+    (uploading
+      ? "Upload wordt geplaatst..."
+      : postingStory
+        ? "Story wordt geplaatst..."
+        : refreshingAfterUpload
+          ? "Content wordt ververst..."
+          : "");
+
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
       {!inTabs ? (
@@ -1342,11 +1316,14 @@ export default function CompanyStudioScreen() {
         </Pressable>
       </View>
 
-      {uploadStatusText ? (
+      {statusText ? (
         <View style={styles.uploadStatusCard}>
-          <Ionicons name="checkmark-circle-outline" size={15} color={COLORS.success} />
-          <Text style={styles.uploadStatusText}>{uploadStatusText}</Text>
-          {refreshingAfterUpload ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+          {hasBusyStatus ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons name="checkmark-circle-outline" size={15} color={COLORS.success} />
+          )}
+          <Text style={styles.uploadStatusText}>{statusText}</Text>
         </View>
       ) : null}
 
@@ -1411,20 +1388,6 @@ export default function CompanyStudioScreen() {
                 <Text style={styles.permissionGhostText}>Nu niet</Text>
               </Pressable>
             </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={publishOverlay.visible} transparent animationType="fade" onRequestClose={() => null}>
-        <View style={styles.publishOverlayBackdrop}>
-          <View style={styles.publishOverlayCard}>
-            {publishOverlay.loading ? (
-              <ActivityIndicator color={COLORS.primary} />
-            ) : (
-              <Ionicons name="checkmark-circle" size={32} color={COLORS.success} />
-            )}
-            <Text style={styles.publishOverlayTitle}>{publishOverlay.title}</Text>
-            <Text style={styles.publishOverlayText}>{publishOverlay.message}</Text>
           </View>
         </View>
       </Modal>
@@ -3088,38 +3051,6 @@ const styles = StyleSheet.create({
     color: COLORS.danger,
     fontWeight: "800",
     fontSize: 12,
-  },
-  publishOverlayBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  publishOverlayCard: {
-    width: "100%",
-    maxWidth: 320,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#fff",
-    paddingHorizontal: 18,
-    paddingVertical: 20,
-    alignItems: "center",
-    gap: 9,
-  },
-  publishOverlayTitle: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  publishOverlayText: {
-    color: COLORS.muted,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center",
-    lineHeight: 18,
   },
   disabled: {
     opacity: 0.5,

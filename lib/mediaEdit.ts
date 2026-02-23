@@ -18,7 +18,8 @@ export function normalizeMediaFilterPreset(value: unknown): MediaFilterPreset {
 
 function buildCropTransform(cropPreset: MediaCropPreset): string {
   if (cropPreset === "original") return "";
-  return `c_fill,g_auto,ar_${cropPreset}`;
+  // Avoid aggressive zoom-in cropping; keep the full frame and pad to aspect ratio.
+  return `c_pad,g_auto,ar_${cropPreset}`;
 }
 
 function buildFilterTransforms(filterPreset: MediaFilterPreset): string[] {

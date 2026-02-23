@@ -64,11 +64,12 @@ function buildVideoCandidates(
     : "";
 
   const candidates = [
-    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
-    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
     normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
-    rawVideo,
+    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
+    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
     rawSourceVideo,
+    rawVideo,
+    editedFromSource,
   ].filter(Boolean);
 
   const unique: string[] = [];
