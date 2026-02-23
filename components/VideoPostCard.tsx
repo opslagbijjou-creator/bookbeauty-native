@@ -25,7 +25,7 @@ type VideoPostCardProps = {
 };
 
 let globalWebMuted = true;
-const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto";
+const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
 
 function normalizeCloudinaryVideoPlaybackUrl(rawUrl: string): string {
   const source = String(rawUrl ?? "").trim();
@@ -64,12 +64,12 @@ function buildVideoCandidates(
     : "";
 
   const candidates = [
-    rawSourceVideo,
-    rawVideo,
-    editedFromSource,
     normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
     normalizeCloudinaryVideoPlaybackUrl(rawVideo),
     normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
+    rawSourceVideo,
+    rawVideo,
+    editedFromSource,
   ].filter(Boolean);
 
   const unique: string[] = [];
