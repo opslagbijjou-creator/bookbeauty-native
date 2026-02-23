@@ -11,8 +11,19 @@ service cloud.firestore {
 
     function hasRole(role) {
       return signedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+        && (
+          (
+            role == "admin"
+            && request.auth.uid == "mR3MZu9ankZbckM4HZ4ZLFhP8UV2"
+            && request.auth.token.email == "hamza@bookbeauty.nl"
+          )
+          || (
+            role != "admin"
+            &&
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role
+          )
+        );
     }
 
     function isEmployeeOf(companyId) {
@@ -22,6 +33,10 @@ service cloud.firestore {
 
     function isAdmin() {
       return hasRole("admin");
+    }
+
+    function isInfluencer() {
+      return hasRole("influencer");
     }
 
     function canActAsCustomer() {
@@ -37,7 +52,6 @@ service cloud.firestore {
         && (
           !exists(/databases/$(database)/documents/users/$(request.auth.uid))
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "customer"
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "company"
         );
     }
 
@@ -83,7 +97,16 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.email is string
-        && (request.resource.data.role == "customer" || request.resource.data.role == "company");
+        && (
+          request.resource.data.role == "customer"
+          || request.resource.data.role == "company"
+          || request.resource.data.role == "influencer"
+          || (
+            request.resource.data.role == "admin"
+            && request.auth.uid == "mR3MZu9ankZbckM4HZ4ZLFhP8UV2"
+            && request.auth.token.email == "hamza@bookbeauty.nl"
+          )
+        );
       allow update: if signedIn() && (
         isAdmin()
         || ownerCanAssignEmployee(uid)
@@ -92,6 +115,15 @@ service cloud.firestore {
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "companyId"]))
       );
       allow delete: if isAdmin();
+
+      match /notifications/{notificationId} {
+        allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+        allow create: if signedIn()
+          && request.resource.data.customerId == uid
+          && request.resource.data.actorId == request.auth.uid
+          && request.resource.data.read == false;
+        allow update, delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+      }
     }
 
     match /user_lookup/{emailKey} {
@@ -233,16 +265,90 @@ service cloud.firestore {
         );
     }
 
+    match /presence/{uid} {
+      allow read: if signedIn() && (isAdmin() || request.auth.uid == uid);
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+    }
+
+    match /support_threads/{threadId} {
+      allow read: if signedIn() && (isAdmin() || resource.data.createdById == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.createdById == request.auth.uid
+        && (
+          (isAdmin() && request.resource.data.createdByRole == "admin")
+          || (!isAdmin() && request.resource.data.createdByRole != "admin")
+        )
+        && request.resource.data.subject is string
+        && (
+          request.resource.data.status == "open"
+          || request.resource.data.status == "closed"
+        );
+      allow update: if signedIn()
+        && (
+          isAdmin()
+          || (
+            resource.data.createdById == request.auth.uid
+            && request.resource.data.createdById == resource.data.createdById
+            && request.resource.data.createdByRole == resource.data.createdByRole
+          )
+        );
+      allow delete: if signedIn() && (isAdmin() || resource.data.createdById == request.auth.uid);
+
+      match /messages/{messageId} {
+        allow read: if signedIn()
+          && (
+            isAdmin()
+            || get(/databases/$(database)/documents/support_threads/$(threadId)).data.createdById == request.auth.uid
+          );
+        allow create: if signedIn()
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.threadId == threadId
+          && (
+            (isAdmin() && request.resource.data.senderRole == "admin")
+            || (!isAdmin() && request.resource.data.senderRole != "admin")
+          )
+          && request.resource.data.text is string;
+        allow update, delete: if false;
+      }
+    }
+
     match /feed_public/{postId} {
       allow read: if true;
 
-      allow create: if signedIn() && request.resource.data.companyId == request.auth.uid;
+      allow create: if signedIn()
+        && (
+          request.resource.data.companyId == request.auth.uid
+          || (
+            isInfluencer()
+            && request.resource.data.influencerId == request.auth.uid
+            && request.resource.data.creatorRole == "influencer"
+            && request.resource.data.companyId is string
+          )
+        );
 
       allow update: if signedIn()
-        && resource.data.companyId == request.auth.uid
-        && request.resource.data.companyId == request.auth.uid;
+        && (
+          (
+            resource.data.companyId == request.auth.uid
+            && request.resource.data.companyId == request.auth.uid
+          )
+          || (
+            isInfluencer()
+            && resource.data.creatorRole == "influencer"
+            && resource.data.influencerId == request.auth.uid
+            && request.resource.data.influencerId == request.auth.uid
+            && request.resource.data.companyId == resource.data.companyId
+          )
+        );
 
-      allow delete: if signedIn() && resource.data.companyId == request.auth.uid;
+      allow delete: if signedIn()
+        && (
+          resource.data.companyId == request.auth.uid
+          || (isInfluencer() && resource.data.influencerId == request.auth.uid)
+        );
 
       match /likes/{uid} {
         allow read: if true;

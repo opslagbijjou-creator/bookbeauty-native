@@ -4,7 +4,10 @@ import {
   Alert,
   Animated,
   FlatList,
+  KeyboardAvoidingView,
+  Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,10 +17,12 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { ResizeMode, Video } from "expo-av";
+import { type AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { useRouter, useSegments } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CategoryChips from "../../components/CategoryChips";
+import InAppCaptureModal, { CapturedMedia } from "../../components/InAppCaptureModal";
+import MediaLibraryPickerModal, { PickedLibraryMedia } from "../../components/MediaLibraryPickerModal";
 import {
   addMyFeedPost,
   deleteMyFeedPost,
@@ -27,13 +32,18 @@ import {
 } from "../../lib/feedRepo";
 import { auth } from "../../lib/firebase";
 import {
-  captureImageWithCamera,
-  pickImageFromLibrary,
-  pickVideoFromLibrary,
-  recordVideoWithCamera,
+  getCameraPermissionState,
+  getMediaLibraryPermissionState,
+  requestCameraPermission,
+  requestMediaLibraryPermission,
   type PickedMedia,
   uploadUriToStorage,
 } from "../../lib/mediaRepo";
+import {
+  buildCloudinaryEditedUrl,
+  type MediaCropPreset,
+  type MediaFilterPreset,
+} from "../../lib/mediaEdit";
 import { fetchMyServices, type CompanyService } from "../../lib/serviceRepo";
 import { getPostLikeCount } from "../../lib/socialRepo";
 import { CATEGORIES, COLORS } from "../../lib/ui";
@@ -57,6 +67,26 @@ type StudioTab = "upload" | "videos";
 type UploadVisibility = "public" | "clients";
 type UploadStep = "select" | "details";
 type UploadMediaType = "video" | "image";
+type PermissionState = "granted" | "denied" | "undetermined";
+type PendingMediaAction = "library" | "camera";
+
+const CLIP_STEP_SEC = 0.5;
+const DEFAULT_CROP_PRESET: MediaCropPreset = "9:16";
+const DEFAULT_FILTER_PRESET: MediaFilterPreset = "none";
+const CROP_OPTIONS: { key: MediaCropPreset; label: string }[] = [
+  { key: "9:16", label: "9:16" },
+  { key: "4:5", label: "4:5" },
+  { key: "1:1", label: "1:1" },
+  { key: "16:9", label: "16:9" },
+  { key: "original", label: "Origineel" },
+];
+const FILTER_OPTIONS: { key: MediaFilterPreset; label: string }[] = [
+  { key: "none", label: "Geen" },
+  { key: "clean", label: "Clean" },
+  { key: "vivid", label: "Vivid" },
+  { key: "warm", label: "Warm" },
+  { key: "mono", label: "Mono" },
+];
 
 function parseHashtagsInput(value: string): string[] {
   const normalized = value
@@ -111,9 +141,10 @@ function formatDuration(seconds?: number | null): string {
   return `${Math.round(seconds)}s`;
 }
 
-function isTooLongVideoMessage(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes("maximaal 15") || lower.includes("langer dan 15");
+function formatClipRange(startSec: number, endSec: number): string {
+  const start = Math.max(0, startSec);
+  const end = Math.max(start, endSec);
+  return `${start.toFixed(1)}s - ${end.toFixed(1)}s`;
 }
 
 export default function CompanyStudioScreen() {
@@ -141,12 +172,23 @@ export default function CompanyStudioScreen() {
   const [uploadMediaType, setUploadMediaType] = useState<UploadMediaType>("video");
   const [video, setVideo] = useState<PickedMedia | null>(null);
   const [imageMedia, setImageMedia] = useState<PickedMedia | null>(null);
+  const [cropPreset, setCropPreset] = useState<MediaCropPreset>(DEFAULT_CROP_PRESET);
+  const [filterPreset, setFilterPreset] = useState<MediaFilterPreset>(DEFAULT_FILTER_PRESET);
   const [uploadStep, setUploadStep] = useState<UploadStep>("select");
   const [videoLengthWarning, setVideoLengthWarning] = useState<string | null>(null);
+  const [clipStartSec, setClipStartSec] = useState(0);
+  const [clipEndSec, setClipEndSec] = useState(MAX_VIDEO_SECONDS);
+  const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
+  const [cameraPermission, setCameraPermission] = useState<PermissionState>("undetermined");
+  const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
+  const [libraryPickerVisible, setLibraryPickerVisible] = useState(false);
+  const [captureVisible, setCaptureVisible] = useState(false);
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [detailPostId, setDetailPostId] = useState<string | null>(null);
 
   const tabOpacity = useRef(new Animated.Value(1)).current;
+  const previewVideoRef = useRef<Video | null>(null);
+  const previewSeekingRef = useRef(false);
 
   const activeServices = useMemo(() => services.filter((service) => service.isActive), [services]);
   const hashtags = useMemo(() => parseHashtagsInput(hashtagsInput), [hashtagsInput]);
@@ -162,16 +204,84 @@ export default function CompanyStudioScreen() {
 
   const liveCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
   const totalViews = useMemo(() => items.reduce((acc, item) => acc + (item.viewCount ?? 0), 0), [items]);
-  const totalLikes = useMemo(
-    () => items.reduce((acc, item) => acc + (likesByPost[item.id] ?? 0), 0),
-    [items, likesByPost]
-  );
-
   const previewThumbnail = useMemo(() => {
     if (video || imageMedia) return "";
     if (!editingItem) return "";
+
+    const baseVideo = editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim() || "";
+    const baseImage = editingItem.sourceImageUrl?.trim() || editingItem.imageUrl?.trim() || "";
+    if (editingItem.mediaType === "image" && baseImage) {
+      return buildCloudinaryEditedUrl(baseImage, { cropPreset, filterPreset });
+    }
+    if (baseImage && !baseVideo) {
+      return buildCloudinaryEditedUrl(baseImage, { cropPreset, filterPreset });
+    }
+    if (baseVideo) {
+      const editedVideoUrl = buildCloudinaryEditedUrl(baseVideo, { cropPreset, filterPreset });
+      return cloudinaryVideoThumbnailFromUrl(editedVideoUrl);
+    }
     return getPostThumbnail(editingItem);
-  }, [editingItem, video, imageMedia]);
+  }, [editingItem, video, imageMedia, cropPreset, filterPreset]);
+  const previewVideoUri = useMemo(() => {
+    if (uploadMediaType !== "video") return "";
+    if (video?.uri) return video.uri;
+
+    const baseVideo = editingItem?.sourceVideoUrl?.trim() || editingItem?.videoUrl?.trim() || "";
+    if (!baseVideo) return "";
+    return buildCloudinaryEditedUrl(baseVideo, { cropPreset, filterPreset });
+  }, [uploadMediaType, video?.uri, editingItem, cropPreset, filterPreset]);
+  const hasLiveVideoPreview = Boolean(previewVideoUri);
+  const videoDurationSec = useMemo(
+    () => (video?.durationMs ? Math.max(0, video.durationMs / 1000) : 0),
+    [video?.durationMs]
+  );
+  const clipDurationSec = useMemo(
+    () => Math.max(0, Number((clipEndSec - clipStartSec).toFixed(2))),
+    [clipEndSec, clipStartSec]
+  );
+  const hasVideoClipError =
+    Boolean(video) &&
+    (clipDurationSec < 1 ||
+      clipDurationSec > MAX_VIDEO_SECONDS ||
+      clipStartSec < 0 ||
+      clipEndSec <= clipStartSec ||
+      (videoDurationSec > 0 && clipEndSec > videoDurationSec + 0.001));
+
+  const onPreviewStatusUpdate = useCallback(
+    (status: AVPlaybackStatus) => {
+      if (!status.isLoaded || uploadMediaType !== "video" || !hasLiveVideoPreview) return;
+      if (previewSeekingRef.current) return;
+
+      const minStartSec = Math.max(0, clipStartSec);
+      const maxEndSec = Math.max(minStartSec + 0.25, clipEndSec);
+      const endMs = maxEndSec * 1000;
+      if (!status.didJustFinish && status.positionMillis < endMs - 90) return;
+
+      previewSeekingRef.current = true;
+      previewVideoRef.current
+        ?.setPositionAsync(minStartSec * 1000)
+        .then(() => previewVideoRef.current?.playAsync())
+        .catch(() => null)
+        .finally(() => {
+          previewSeekingRef.current = false;
+        });
+    },
+    [uploadMediaType, hasLiveVideoPreview, clipStartSec, clipEndSec]
+  );
+
+  useEffect(() => {
+    if (!hasLiveVideoPreview || uploadMediaType !== "video") return;
+    const targetMs = Math.max(0, clipStartSec * 1000);
+
+    const timer = setTimeout(() => {
+      previewVideoRef.current
+        ?.setPositionAsync(targetMs)
+        .then(() => previewVideoRef.current?.playAsync())
+        .catch(() => null);
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [hasLiveVideoPreview, uploadMediaType, previewVideoUri, clipStartSec, clipEndSec, uploadStep]);
 
   const submitLabel = editingPostId ? "Wijzigingen opslaan" : "Upload plaatsen";
   const canSubmit = useMemo(() => {
@@ -179,19 +289,22 @@ export default function CompanyStudioScreen() {
     if (title.trim().length < 2) return false;
     if (!editingPostId && !video && !imageMedia) return false;
     if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) return false;
+    if (hasVideoClipError) return false;
     return true;
-  }, [uploading, title, editingPostId, video, imageMedia, hasActiveServices]);
+  }, [uploading, title, editingPostId, video, imageMedia, hasActiveServices, hasVideoClipError]);
 
-  function switchUploadMediaType(nextType: UploadMediaType) {
-    setUploadMediaType(nextType);
-    if (nextType === "video") {
-      setImageMedia(null);
-      return;
-    }
+  const refreshPermissionStates = useCallback(async () => {
+    const [libraryState, cameraState] = await Promise.all([
+      getMediaLibraryPermissionState().catch(() => "undetermined" as PermissionState),
+      getCameraPermissionState().catch(() => "undetermined" as PermissionState),
+    ]);
+    setLibraryPermission(libraryState);
+    setCameraPermission(cameraState);
+  }, []);
 
-    setVideo(null);
-    setVideoLengthWarning(null);
-  }
+  useEffect(() => {
+    refreshPermissionStates().catch(() => null);
+  }, [refreshPermissionStates]);
 
   const load = useCallback(async () => {
     if (!uid) return;
@@ -245,12 +358,20 @@ export default function CompanyStudioScreen() {
     setUploadMediaType("video");
     setVideo(null);
     setImageMedia(null);
+    setCropPreset(DEFAULT_CROP_PRESET);
+    setFilterPreset(DEFAULT_FILTER_PRESET);
+    setClipStartSec(0);
+    setClipEndSec(MAX_VIDEO_SECONDS);
     setUploadStep("select");
     setVideoLengthWarning(null);
     setEditingPostId(null);
   }
 
   function applyEditForm(post: FeedPost) {
+    const nextClipStart = Math.max(0, Number(post.clipStartSec ?? 0) || 0);
+    const rawClipEnd = Math.max(0, Number(post.clipEndSec ?? 0) || 0);
+    const nextClipEnd = rawClipEnd > nextClipStart ? rawClipEnd : nextClipStart + MAX_VIDEO_SECONDS;
+
     setEditingPostId(post.id);
     setCategory(post.category || CATEGORIES[0]);
     setTitle(post.title ?? "");
@@ -259,88 +380,123 @@ export default function CompanyStudioScreen() {
     setSelectedServiceId(post.serviceId ?? "");
     setVisibility(post.visibility === "clients_only" || !post.isActive ? "clients" : "public");
     setUploadMediaType(post.mediaType === "image" ? "image" : "video");
+    setCropPreset(post.cropPreset ?? DEFAULT_CROP_PRESET);
+    setFilterPreset(post.filterPreset ?? DEFAULT_FILTER_PRESET);
     setVideo(null);
     setImageMedia(null);
+    setClipStartSec(nextClipStart);
+    setClipEndSec(nextClipEnd);
     setUploadStep("details");
     setVideoLengthWarning(null);
     setStudioTab("upload");
     setDetailPostId(null);
   }
 
-  async function selectVideo(source: "gallery" | "camera", options?: { allowTrimInPicker?: boolean }) {
-    if (!hasActiveServices && !editingPostId) {
-      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een video uploadt.");
-      return;
-    }
-
-    try {
-      const picked =
-        source === "gallery"
-          ? await pickVideoFromLibrary({ allowEditing: Boolean(options?.allowTrimInPicker) })
-          : await recordVideoWithCamera();
-      if (!picked) return;
-
-      if (typeof picked.durationMs === "number" && picked.durationMs > MAX_VIDEO_SECONDS * 1000) {
-        setVideoLengthWarning(`Deze video is langer dan ${MAX_VIDEO_SECONDS} seconden. Kort hem eerst in.`);
-        Alert.alert(
-          "Video te lang",
-          `Video mag maximaal ${MAX_VIDEO_SECONDS} seconden zijn. Kort de video in en probeer opnieuw.`
-        );
-        return;
-      }
-
+  function applyPickedMedia(picked: PickedMedia, kind: "video" | "image") {
+    if (kind === "video") {
+      const durationSec = picked.durationMs ? Math.max(0, picked.durationMs / 1000) : 0;
+      const defaultEnd = durationSec > 0 ? Math.min(durationSec, MAX_VIDEO_SECONDS) : MAX_VIDEO_SECONDS;
       setUploadMediaType("video");
       setImageMedia(null);
       setVideo(picked);
-      setVideoLengthWarning(null);
-    } catch (error: any) {
-      const message = error?.message ?? "Probeer opnieuw.";
-
-      if (source === "gallery" && isTooLongVideoMessage(message) && !options?.allowTrimInPicker) {
-        setVideoLengthWarning(`Je video is te lang. Gebruik inkorten en houd het onder ${MAX_VIDEO_SECONDS} seconden.`);
-        Alert.alert(
-          "Video te lang",
-          `Je video is langer dan ${MAX_VIDEO_SECONDS} seconden.`,
-          [
-            {
-              text: "Inkorten",
-              onPress: () => {
-                selectVideo("gallery", { allowTrimInPicker: true }).catch(() => null);
-              },
-            },
-            {
-              text: "Opnemen (15s)",
-              onPress: () => {
-                selectVideo("camera").catch(() => null);
-              },
-            },
-            { text: "Annuleren", style: "cancel" },
-          ]
+      setClipStartSec(0);
+      setClipEndSec(defaultEnd);
+      if (durationSec > MAX_VIDEO_SECONDS) {
+        setVideoLengthWarning(
+          `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
         );
-        return;
+      } else {
+        setVideoLengthWarning(null);
       }
-
-      Alert.alert("Kon video niet kiezen", message);
-    }
-  }
-
-  async function selectImage(source: "gallery" | "camera") {
-    if (!hasActiveServices && !editingPostId) {
-      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een feed post maakt.");
+      setUploadStep("details");
       return;
     }
 
-    try {
-      const picked = source === "gallery" ? await pickImageFromLibrary() : await captureImageWithCamera();
-      if (!picked) return;
+    setUploadMediaType("image");
+    setVideo(null);
+    setClipStartSec(0);
+    setClipEndSec(MAX_VIDEO_SECONDS);
+    setVideoLengthWarning(null);
+    setImageMedia(picked);
+    setUploadStep("details");
+  }
 
-      setUploadMediaType("image");
-      setVideo(null);
-      setVideoLengthWarning(null);
-      setImageMedia(picked);
-    } catch (error: any) {
-      Alert.alert("Kon foto niet kiezen", error?.message ?? "Probeer opnieuw.");
+  function setClipByDuration(durationSec: number) {
+    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
+    const nextDuration = Math.min(MAX_VIDEO_SECONDS, Math.max(1, durationSec));
+    const nextEnd = Math.min(totalDuration, clipStartSec + nextDuration);
+    if (nextEnd - clipStartSec < 1) {
+      setClipStartSec(Math.max(0, totalDuration - nextDuration));
+      setClipEndSec(totalDuration);
+      return;
     }
+    setClipEndSec(nextEnd);
+  }
+
+  function nudgeClipStart(deltaSec: number) {
+    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
+    const clipDuration = Math.max(1, clipEndSec - clipStartSec);
+    const maxStart = Math.max(0, totalDuration - clipDuration);
+    const nextStart = Math.min(maxStart, Math.max(0, clipStartSec + deltaSec));
+    setClipStartSec(nextStart);
+    setClipEndSec(Math.min(totalDuration, nextStart + clipDuration));
+  }
+
+  function nudgeClipEnd(deltaSec: number) {
+    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
+    const minEnd = clipStartSec + 1;
+    const maxEnd = Math.min(totalDuration, clipStartSec + MAX_VIDEO_SECONDS);
+    const nextEnd = Math.min(maxEnd, Math.max(minEnd, clipEndSec + deltaSec));
+    setClipEndSec(nextEnd);
+  }
+
+  async function executeMediaAction(action: PendingMediaAction) {
+    if (action === "library") {
+      setLibraryPickerVisible(true);
+      return;
+    }
+    setCaptureVisible(true);
+  }
+
+  function needsPermissionForAction(action: PendingMediaAction): boolean {
+    if (action === "library") {
+      return libraryPermission !== "granted";
+    }
+    return cameraPermission !== "granted";
+  }
+
+  function openActionWithPermission(action: PendingMediaAction) {
+    if (!hasActiveServices && !editingPostId) {
+      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je media uploadt.");
+      return;
+    }
+    if (needsPermissionForAction(action)) {
+      setPendingMediaAction(action);
+      return;
+    }
+    executeMediaAction(action).catch(() => null);
+  }
+
+  async function onGrantPendingPermission() {
+    if (!pendingMediaAction) return;
+
+    const needLibrary = pendingMediaAction === "library";
+    const granted = needLibrary ? await requestMediaLibraryPermission() : await requestCameraPermission();
+    await refreshPermissionStates();
+
+    if (!granted) {
+      Alert.alert(
+        "Toegang nodig",
+        needLibrary
+          ? "Zonder galerij-toegang kun je geen video of foto kiezen."
+          : "Zonder camera-toegang kun je geen video of foto opnemen."
+      );
+      return;
+    }
+
+    const nextAction = pendingMediaAction;
+    setPendingMediaAction(null);
+    executeMediaAction(nextAction).catch(() => null);
   }
 
   async function onSubmit() {
@@ -360,6 +516,10 @@ export default function CompanyStudioScreen() {
       Alert.alert("Media ontbreekt", "Kies eerst een video of foto om te uploaden.");
       return;
     }
+    if (hasVideoClipError) {
+      Alert.alert("Clip niet geldig", `Kies een videosegment van minimaal 1s en maximaal ${MAX_VIDEO_SECONDS}s.`);
+      return;
+    }
 
     setUploading(true);
 
@@ -367,29 +527,39 @@ export default function CompanyStudioScreen() {
       const nextVisibility = visibility === "public" ? "public" : "clients_only";
       const nextIsActive = visibility === "public";
       const serviceName = selectedService?.name ?? "";
-      const selectedMediaType: UploadMediaType = imageMedia ? "image" : "video";
+      const selectedMediaType: UploadMediaType = imageMedia ? "image" : video ? "video" : uploadMediaType;
 
       if (editingPostId) {
-        let nextVideoUrl: string | undefined;
-        let nextImageUrl: string | undefined;
-        let nextThumbUrl: string | undefined;
+        let sourceVideoUrl = String(editingItem?.sourceVideoUrl ?? editingItem?.videoUrl ?? "").trim();
+        let sourceImageUrl = String(editingItem?.sourceImageUrl ?? editingItem?.imageUrl ?? "").trim();
+        const fallbackVideoDurationSec = Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
 
         if (video) {
-          nextVideoUrl = await uploadUriToStorage(
+          sourceVideoUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${video.fileName}`,
             video.uri,
             video.mimeType
           );
-          nextThumbUrl = cloudinaryVideoThumbnailFromUrl(nextVideoUrl);
+          sourceImageUrl = "";
         }
         if (imageMedia) {
-          nextImageUrl = await uploadUriToStorage(
+          sourceImageUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${imageMedia.fileName}`,
             imageMedia.uri,
             imageMedia.mimeType
           );
-          nextThumbUrl = nextImageUrl;
+          sourceVideoUrl = "";
         }
+
+        const nextVideoUrl =
+          selectedMediaType === "video"
+            ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+            : "";
+        const nextImageUrl =
+          selectedMediaType === "image"
+            ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+            : "";
+        const nextThumbUrl = selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(nextVideoUrl) : nextImageUrl;
 
         await updateMyFeedPost(editingPostId, {
           category,
@@ -400,49 +570,62 @@ export default function CompanyStudioScreen() {
           serviceName,
           visibility: nextVisibility,
           isActive: nextIsActive,
-          ...(nextVideoUrl
+          mediaType: selectedMediaType,
+          videoUrl: selectedMediaType === "video" ? nextVideoUrl : "",
+          imageUrl: selectedMediaType === "image" ? nextImageUrl : "",
+          thumbnailUrl: nextThumbUrl || undefined,
+          sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
+          sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
+          cropPreset,
+          filterPreset,
+          ...(selectedMediaType === "video"
             ? {
-                mediaType: "video",
-                videoUrl: nextVideoUrl,
-                imageUrl: "",
-                thumbnailUrl: nextThumbUrl || undefined,
+                clipStartSec: clipStartSec,
+                clipEndSec: clipEndSec,
+                videoDurationSec: Math.max(videoDurationSec, fallbackVideoDurationSec),
               }
             : {}),
-          ...(nextImageUrl
+          ...(selectedMediaType === "image"
             ? {
-                mediaType: "image",
-                imageUrl: nextImageUrl,
-                videoUrl: "",
-                thumbnailUrl: nextThumbUrl || undefined,
+                clipStartSec: 0,
+                clipEndSec: 0,
+                videoDurationSec: 0,
               }
             : {}),
         });
 
         Alert.alert("Opgeslagen", "Je feed post is bijgewerkt.");
       } else {
-        let uploadedVideoUrl = "";
-        let uploadedImageUrl = "";
-        let uploadedThumb = "";
+        let sourceVideoUrl = "";
+        let sourceImageUrl = "";
 
         if (selectedMediaType === "video") {
           const pickedVideo = video;
           if (!pickedVideo) return;
-          uploadedVideoUrl = await uploadUriToStorage(
+          sourceVideoUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${pickedVideo.fileName}`,
             pickedVideo.uri,
             pickedVideo.mimeType
           );
-          uploadedThumb = cloudinaryVideoThumbnailFromUrl(uploadedVideoUrl);
         } else {
           const pickedImage = imageMedia;
           if (!pickedImage) return;
-          uploadedImageUrl = await uploadUriToStorage(
+          sourceImageUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${pickedImage.fileName}`,
             pickedImage.uri,
             pickedImage.mimeType
           );
-          uploadedThumb = uploadedImageUrl;
         }
+
+        const uploadedVideoUrl =
+          selectedMediaType === "video"
+            ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset, filterPreset })
+            : "";
+        const uploadedImageUrl =
+          selectedMediaType === "image"
+            ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset, filterPreset })
+            : "";
+        const uploadedThumb = selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(uploadedVideoUrl) : uploadedImageUrl;
 
         await addMyFeedPost(uid, {
           category,
@@ -457,6 +640,14 @@ export default function CompanyStudioScreen() {
           videoUrl: uploadedVideoUrl,
           imageUrl: uploadedImageUrl,
           thumbnailUrl: uploadedThumb || undefined,
+          sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
+          sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
+          cropPreset,
+          filterPreset,
+          clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
+          clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
+          videoDurationSec:
+            selectedMediaType === "video" ? Math.max(videoDurationSec, clipEndSec) : 0,
           viewCount: 0,
         });
 
@@ -516,35 +707,263 @@ export default function CompanyStudioScreen() {
 
   function renderUploadTab() {
     const hasSelectedMedia = Boolean(video?.uri || imageMedia?.uri || previewThumbnail);
+    const previewNode = hasLiveVideoPreview ? (
+      <Video
+        ref={previewVideoRef}
+        source={{ uri: previewVideoUri }}
+        style={styles.dropPreview}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay
+        isMuted
+        isLooping={false}
+        onPlaybackStatusUpdate={onPreviewStatusUpdate}
+      />
+    ) : imageMedia?.uri ? (
+      <Image source={{ uri: imageMedia.uri }} style={styles.dropPreview} contentFit="cover" />
+    ) : previewThumbnail ? (
+      <Image source={{ uri: previewThumbnail }} style={styles.dropPreview} contentFit="cover" />
+    ) : (
+      <View style={styles.dropPlaceholder}>
+        <Ionicons name="images-outline" size={32} color={COLORS.primary} />
+        <Text style={styles.dropTitle}>Kies media uit je album</Text>
+        <Text style={styles.dropText}>Upload of neem meteen op in dit scherm.</Text>
+      </View>
+    );
+    const detailsPreviewNode = hasLiveVideoPreview ? (
+      <Video
+        ref={previewVideoRef}
+        source={{ uri: previewVideoUri }}
+        style={styles.selectedVideoPreview}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay
+        isMuted
+        isLooping={false}
+        onPlaybackStatusUpdate={onPreviewStatusUpdate}
+      />
+    ) : imageMedia?.uri ? (
+      <Image source={{ uri: imageMedia.uri }} style={styles.selectedVideoPreview} contentFit="cover" />
+    ) : previewThumbnail ? (
+      <Image source={{ uri: previewThumbnail }} style={styles.selectedVideoPreview} contentFit="cover" />
+    ) : (
+      <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
+        <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
+      </View>
+    );
+
+    const mediaActionRow = (
+      <View style={styles.dropOverlayRow}>
+        <Pressable style={styles.dropActionBtn} onPress={() => openActionWithPermission("library")}>
+          <Ionicons name="images-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.dropActionText}>Upload</Text>
+        </Pressable>
+        <Pressable style={styles.dropActionBtn} onPress={() => openActionWithPermission("camera")}>
+          <Ionicons name="camera-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.dropActionText}>Opnemen</Text>
+        </Pressable>
+      </View>
+    );
+    const hasEditableMedia = Boolean(video || imageMedia || editingItem);
+    const editorCard = hasEditableMedia ? (
+      <View style={styles.editorCard}>
+        <View style={styles.editorHeaderRow}>
+          <Ionicons name="color-wand-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.editorTitle}>Bewerken</Text>
+        </View>
+        <Text style={styles.editorHint}>Crop, filter en clip spelen live mee in de preview hierboven.</Text>
+
+        <Text style={styles.editorLabel}>Crop</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.editorChipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {CROP_OPTIONS.map((option) => {
+            const active = cropPreset === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                style={[styles.editorChip, active && styles.editorChipActive]}
+                onPress={() => setCropPreset(option.key)}
+              >
+                <Text style={[styles.editorChipText, active && styles.editorChipTextActive]}>{option.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <Text style={styles.editorLabel}>Filter</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.editorChipRow}
+          keyboardShouldPersistTaps="handled"
+        >
+          {FILTER_OPTIONS.map((option) => {
+            const active = filterPreset === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                style={[styles.editorChip, active && styles.editorChipActive]}
+                onPress={() => setFilterPreset(option.key)}
+              >
+                <Text style={[styles.editorChipText, active && styles.editorChipTextActive]}>{option.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    ) : null;
+
+    if (uploadStep === "select") {
+      return (
+        <View style={styles.uploadFlowScreen}>
+          <View style={styles.uploadFlowTopRow}>
+            <View>
+              <Text style={styles.uploadFlowTitle}>Nieuwe post</Text>
+              <Text style={styles.uploadFlowSubTitle}>Stap 1 van 2 - kies je media</Text>
+            </View>
+            <View style={styles.uploadFlowStepPill}>
+              <Text style={styles.uploadFlowStepText}>1/2</Text>
+            </View>
+          </View>
+
+          {!hasActiveServices ? (
+            <View style={styles.requirementCard}>
+              <View style={styles.requirementTitleRow}>
+                <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
+              </View>
+              <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
+              <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
+                <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <View style={[styles.dropZone, styles.fullScreenDropZone]}>
+            {previewNode}
+            {mediaActionRow}
+          </View>
+
+          {uploadMediaType === "video" ? (
+            <View style={styles.uploadHintRow}>
+              <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
+              <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
+            </View>
+          ) : null}
+
+          {uploadMediaType === "video" && videoLengthWarning ? (
+            <View style={styles.warningCard}>
+              <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
+              <Text style={styles.warningText}>{videoLengthWarning}</Text>
+            </View>
+          ) : null}
+
+          {uploadMediaType === "video" && video ? (
+            <View style={styles.trimCard}>
+              <View style={styles.trimTopRow}>
+                <View style={styles.trimTitleWrap}>
+                  <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
+                  <Text style={styles.trimTitle}>Clip inkorten</Text>
+                </View>
+                <Text style={styles.trimRangeText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
+              </View>
+              <Text style={styles.trimHint}>
+                Duur: {clipDurationSec.toFixed(1)}s van {videoDurationSec > 0 ? videoDurationSec.toFixed(1) : "--"}s
+              </Text>
+
+              <View style={styles.trimButtonRow}>
+                <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}>
+                  <Text style={styles.trimBtnText}>Start -0.5s</Text>
+                </Pressable>
+                <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(CLIP_STEP_SEC)}>
+                  <Text style={styles.trimBtnText}>Start +0.5s</Text>
+                </Pressable>
+              </View>
+              <View style={styles.trimButtonRow}>
+                <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}>
+                  <Text style={styles.trimBtnText}>Eind -0.5s</Text>
+                </Pressable>
+                <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}>
+                  <Text style={styles.trimBtnText}>Eind +0.5s</Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.trimPresetRow}>
+                {[5, 10, 15].map((preset) => (
+                  <Pressable key={preset} style={styles.trimPresetBtn} onPress={() => setClipByDuration(preset)}>
+                    <Text style={styles.trimPresetText}>{preset}s</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {hasVideoClipError ? (
+                <View style={styles.trimErrorCard}>
+                  <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
+                  <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
+          {editorCard}
+
+          {video || imageMedia ? (
+            <View style={styles.fileCard}>
+              <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
+              <Text style={styles.fileText} numberOfLines={1}>
+                {video?.fileName || imageMedia?.fileName}{" "}
+                {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setVideo(null);
+                  setImageMedia(null);
+                  setClipStartSec(0);
+                  setClipEndSec(MAX_VIDEO_SECONDS);
+                  setUploadStep("select");
+                }}
+              >
+                <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
+              </Pressable>
+            </View>
+          ) : null}
+
+          <Pressable
+            style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
+            onPress={() => setUploadStep("details")}
+            disabled={!hasSelectedMedia}
+          >
+            <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
+            <Text style={styles.nextStepText}>Volgende stap</Text>
+          </Pressable>
+        </View>
+      );
+    }
 
     return (
-      <ScrollView contentContainerStyle={styles.uploadContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View style={styles.heroCard}>
-          <View style={styles.heroTitleRow}>
-            <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.heroTitle}>Creator Upload Studio</Text>
+      <ScrollView
+        contentContainerStyle={styles.uploadDetailsContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+      >
+        <View style={styles.uploadFlowTopRow}>
+          <View>
+            <Text style={styles.uploadFlowTitle}>Post details</Text>
+            <Text style={styles.uploadFlowSubTitle}>Stap 2 van 2 - beschrijving en publiceren</Text>
           </View>
-          <Text style={styles.heroText}>
-            {uploadStep === "select"
-              ? "Stap 1: kies je media en controleer de lengte (bij video)."
-              : "Stap 2: voeg titel, caption, tags en zichtbaarheid toe."}
-          </Text>
-
-          <View style={styles.heroStatsRow}>
-            <View style={styles.heroStatCard}>
-              <Text style={styles.heroStatValue}>{items.length}</Text>
-              <Text style={styles.heroStatLabel}>Posts</Text>
-            </View>
-            <View style={styles.heroStatCard}>
-              <Text style={styles.heroStatValue}>{liveCount}</Text>
-              <Text style={styles.heroStatLabel}>Live</Text>
-            </View>
-            <View style={styles.heroStatCard}>
-              <Text style={styles.heroStatValue}>{totalLikes}</Text>
-              <Text style={styles.heroStatLabel}>Likes</Text>
-            </View>
+          <View style={styles.uploadFlowStepPill}>
+            <Text style={styles.uploadFlowStepText}>2/2</Text>
           </View>
         </View>
+
+        <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
+          <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
+          <Text style={styles.backToStepText}>Terug naar media</Text>
+        </Pressable>
 
         {!hasActiveServices ? (
           <View style={styles.requirementCard}>
@@ -560,312 +979,139 @@ export default function CompanyStudioScreen() {
           </View>
         ) : null}
 
-        <View style={styles.stepperRow}>
-          <Pressable
-            style={[styles.stepperChip, uploadStep === "select" && styles.stepperChipActive]}
-            onPress={() => setUploadStep("select")}
-          >
-            <Text style={[styles.stepperChipText, uploadStep === "select" && styles.stepperChipTextActive]}>
-              1. Media kiezen
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.stepperChip,
-              uploadStep === "details" && styles.stepperChipActive,
-              !hasSelectedMedia && styles.disabled,
-            ]}
-            onPress={() => {
-              if (!hasSelectedMedia) return;
-              setUploadStep("details");
-            }}
-            disabled={!hasSelectedMedia}
-          >
-            <Text style={[styles.stepperChipText, uploadStep === "details" && styles.stepperChipTextActive]}>
-              2. Details
-            </Text>
-          </Pressable>
+        <View style={styles.uploadDetailsMediaCard}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="film-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.sectionTitle}>Gekozen media</Text>
+          </View>
+          <View style={styles.selectedVideoCard}>
+            {detailsPreviewNode}
+            {mediaActionRow}
+            {uploadMediaType === "video" && (video || editingItem?.mediaType === "video") ? (
+              <View style={styles.selectedClipPill}>
+                <Ionicons name="cut-outline" size={13} color={COLORS.primary} />
+                <Text style={styles.selectedClipText}>
+                  Clip: {formatClipRange(clipStartSec, clipEndSec)} ({clipDurationSec.toFixed(1)}s)
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.selectedEditRow}>
+              <View style={styles.selectedEditPill}>
+                <Ionicons name="resize-outline" size={13} color={COLORS.primary} />
+                <Text style={styles.selectedEditText}>Crop: {cropPreset}</Text>
+              </View>
+              <View style={styles.selectedEditPill}>
+                <Ionicons name="color-filter-outline" size={13} color={COLORS.primary} />
+                <Text style={styles.selectedEditText}>Filter: {filterPreset}</Text>
+              </View>
+            </View>
+          </View>
+          {editorCard}
         </View>
 
-        {uploadStep === "select" ? (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="cloud-upload-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.sectionTitle}>Stap 1 - media kiezen</Text>
-            </View>
-
-            <View style={styles.mediaTypeRow}>
-              <Pressable
-                style={[styles.mediaTypeBtn, uploadMediaType === "video" && styles.mediaTypeBtnActive]}
-                onPress={() => switchUploadMediaType("video")}
-              >
-                <Ionicons name="videocam-outline" size={14} color={uploadMediaType === "video" ? "#fff" : COLORS.primary} />
-                <Text style={[styles.mediaTypeText, uploadMediaType === "video" && styles.mediaTypeTextActive]}>Video</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.mediaTypeBtn, uploadMediaType === "image" && styles.mediaTypeBtnActive]}
-                onPress={() => switchUploadMediaType("image")}
-              >
-                <Ionicons name="image-outline" size={14} color={uploadMediaType === "image" ? "#fff" : COLORS.primary} />
-                <Text style={[styles.mediaTypeText, uploadMediaType === "image" && styles.mediaTypeTextActive]}>Foto</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.dropZone}>
-              {video?.uri ? (
-                <Video source={{ uri: video.uri }} style={styles.dropPreview} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted />
-              ) : imageMedia?.uri ? (
-                <Image source={{ uri: imageMedia.uri }} style={styles.dropPreview} contentFit="cover" />
-              ) : previewThumbnail ? (
-                <Image source={{ uri: previewThumbnail }} style={styles.dropPreview} contentFit="cover" />
-              ) : (
-                <View style={styles.dropPlaceholder}>
-                  <Ionicons name={uploadMediaType === "video" ? "videocam-outline" : "image-outline"} size={28} color={COLORS.primary} />
-                  <Text style={styles.dropTitle}>
-                    {uploadMediaType === "video" ? "Kies eerst een video" : "Kies eerst een foto"}
-                  </Text>
-                  <Text style={styles.dropText}>Daarna ga je verder naar caption, tags en zichtbaarheid.</Text>
-                </View>
-              )}
-
-              <View style={styles.dropOverlayRow}>
-                <Pressable
-                  style={styles.dropActionBtn}
-                  onPress={() =>
-                    (uploadMediaType === "video" ? selectVideo("gallery") : selectImage("gallery")).catch(() => null)
-                  }
-                >
-                  <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-                  <Text style={styles.dropActionText}>
-                    {uploadMediaType === "video" ? "Video kiezen" : "Foto kiezen"}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={styles.dropActionBtn}
-                  onPress={() =>
-                    (uploadMediaType === "video" ? selectVideo("camera") : selectImage("camera")).catch(() => null)
-                  }
-                >
-                  <Ionicons
-                    name={uploadMediaType === "video" ? "videocam-outline" : "camera-outline"}
-                    size={14}
-                    color={COLORS.primary}
-                  />
-                  <Text style={styles.dropActionText}>
-                    {uploadMediaType === "video" ? "Opnemen" : "Foto maken"}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-
-            {uploadMediaType === "video" ? (
-              <View style={styles.uploadHintRow}>
-                <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
-                <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
-              </View>
-            ) : null}
-
-            {uploadMediaType === "video" && videoLengthWarning ? (
-              <View style={styles.warningCard}>
-                <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
-                <Text style={styles.warningText}>{videoLengthWarning}</Text>
-              </View>
-            ) : null}
-
-            {video || imageMedia ? (
-              <View style={styles.fileCard}>
-                <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
-                <Text style={styles.fileText} numberOfLines={1}>
-                  {video?.fileName || imageMedia?.fileName}{" "}
-                  {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
-                </Text>
-                <Pressable
-                  onPress={() => {
-                    setVideo(null);
-                    setImageMedia(null);
-                    setUploadStep("select");
-                  }}
-                >
-                  <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
-                </Pressable>
-              </View>
-            ) : null}
-
-            <Pressable
-              style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
-              onPress={() => setUploadStep("details")}
-              disabled={!hasSelectedMedia}
-            >
-              <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
-              <Text style={styles.nextStepText}>Verder</Text>
-            </Pressable>
+        <View style={styles.uploadDetailsFormCard}>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Post titel</Text>
+            <TextInput
+              value={title}
+              onChangeText={setTitle}
+              placeholder="Bijv. Fresh balayage transformation"
+              placeholderTextColor={COLORS.placeholder}
+              style={styles.input}
+            />
           </View>
-        ) : (
-          <>
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="film-outline" size={16} color={COLORS.primary} />
-                <Text style={styles.sectionTitle}>Gekozen media</Text>
-              </View>
 
-              <View style={styles.selectedVideoCard}>
-                {video?.uri ? (
-                  <Video source={{ uri: video.uri }} style={styles.selectedVideoPreview} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted />
-                ) : imageMedia?.uri ? (
-                  <Image source={{ uri: imageMedia.uri }} style={styles.selectedVideoPreview} contentFit="cover" />
-                ) : previewThumbnail ? (
-                  <Image source={{ uri: previewThumbnail }} style={styles.selectedVideoPreview} contentFit="cover" />
-                ) : (
-                  <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
-                    <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
-                  </View>
-                )}
-                <View style={styles.selectedVideoActions}>
-                  <Pressable
-                    style={styles.dropActionBtn}
-                    onPress={() =>
-                      (uploadMediaType === "video" ? selectVideo("gallery") : selectImage("gallery")).catch(() => null)
-                    }
-                  >
-                    <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-                    <Text style={styles.dropActionText}>
-                      {uploadMediaType === "video" ? "Andere video" : "Andere foto"}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.dropActionBtn}
-                    onPress={() =>
-                      (uploadMediaType === "video" ? selectVideo("camera") : selectImage("camera")).catch(() => null)
-                    }
-                  >
-                    <Ionicons
-                      name={uploadMediaType === "video" ? "videocam-outline" : "camera-outline"}
-                      size={14}
-                      color={COLORS.primary}
-                    />
-                    <Text style={styles.dropActionText}>
-                      {uploadMediaType === "video" ? "Opnemen" : "Foto maken"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Beschrijving</Text>
+            <TextInput
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Vertel kort wat je hebt gedaan"
+              placeholderTextColor={COLORS.placeholder}
+              style={[styles.input, styles.textarea]}
+              multiline
+            />
+          </View>
 
-            <View style={styles.sectionCard}>
-              <View style={styles.sectionHeader}>
-                <Ionicons name="create-outline" size={16} color={COLORS.primary} />
-                <Text style={styles.sectionTitle}>Stap 2 - post details</Text>
-              </View>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Categorie</Text>
+            <CategoryChips items={[...CATEGORIES]} active={category} onChange={setCategory} iconMap={categoryIcons} />
+          </View>
 
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Post titel</Text>
-                <TextInput
-                  value={title}
-                  onChangeText={setTitle}
-                  placeholder="Bijv. Fresh balayage transformation"
-                  placeholderTextColor={COLORS.placeholder}
-                  style={styles.input}
-                />
-              </View>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Tags</Text>
+            <TextInput
+              value={hashtagsInput}
+              onChangeText={setHashtagsInput}
+              placeholder="#balayage #nails #lashlift"
+              placeholderTextColor={COLORS.placeholder}
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.input}
+            />
+            <Text style={styles.fieldHint}>
+              {hashtags.length}/{MAX_HASHTAGS} tags
+            </Text>
+          </View>
 
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Beschrijving</Text>
-                <TextInput
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder="Vertel kort wat je hebt gedaan"
-                  placeholderTextColor={COLORS.placeholder}
-                  style={[styles.input, styles.textarea]}
-                  multiline
-                />
-              </View>
-
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Categorie</Text>
-                <CategoryChips items={[...CATEGORIES]} active={category} onChange={setCategory} iconMap={categoryIcons} />
-              </View>
-
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Tags</Text>
-                <TextInput
-                  value={hashtagsInput}
-                  onChangeText={setHashtagsInput}
-                  placeholder="#balayage #nails #lashlift"
-                  placeholderTextColor={COLORS.placeholder}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={styles.input}
-                />
-                <Text style={styles.fieldHint}>
-                  {hashtags.length}/{MAX_HASHTAGS} tags
-                </Text>
-              </View>
-
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Service koppelen (optioneel)</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
-                  <Pressable
-                    style={[styles.serviceChip, !selectedServiceId && styles.serviceChipActive]}
-                    onPress={() => setSelectedServiceId("")}
-                  >
-                    <Text style={[styles.serviceChipText, !selectedServiceId && styles.serviceChipTextActive]}>Geen koppeling</Text>
-                  </Pressable>
-                  {activeServices.map((service) => {
-                    const active = selectedServiceId === service.id;
-                    return (
-                      <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
-                        <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-
-              <View style={styles.fieldWrap}>
-                <Text style={styles.fieldLabel}>Zichtbaarheid</Text>
-                <View style={styles.visibilityRow}>
-                  <Pressable
-                    style={[styles.visibilityBtn, visibility === "public" && styles.visibilityBtnActive]}
-                    onPress={() => setVisibility("public")}
-                  >
-                    <Ionicons name="globe-outline" size={14} color={visibility === "public" ? "#fff" : COLORS.primary} />
-                    <Text style={[styles.visibilityText, visibility === "public" && styles.visibilityTextActive]}>Publiek</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.visibilityBtn, visibility === "clients" && styles.visibilityBtnActive]}
-                    onPress={() => setVisibility("clients")}
-                  >
-                    <Ionicons name="people-outline" size={14} color={visibility === "clients" ? "#fff" : COLORS.primary} />
-                    <Text style={[styles.visibilityText, visibility === "clients" && styles.visibilityTextActive]}>Alleen klanten</Text>
-                  </Pressable>
-                </View>
-              </View>
-
-              <Pressable style={[styles.submitBtn, !canSubmit && styles.disabled]} onPress={onSubmit} disabled={!canSubmit}>
-                {uploading ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="rocket-outline" size={16} color="#fff" />}
-                <Text style={styles.submitText}>{uploading ? "Bezig met uploaden..." : submitLabel}</Text>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Service koppelen (optioneel)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
+              <Pressable
+                style={[styles.serviceChip, !selectedServiceId && styles.serviceChipActive]}
+                onPress={() => setSelectedServiceId("")}
+              >
+                <Text style={[styles.serviceChipText, !selectedServiceId && styles.serviceChipTextActive]}>Geen koppeling</Text>
               </Pressable>
+              {activeServices.map((service) => {
+                const active = selectedServiceId === service.id;
+                return (
+                  <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
+                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
 
-              <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
-                <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.backToStepText}>Terug naar media kiezen</Text>
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Zichtbaarheid</Text>
+            <View style={styles.visibilityRow}>
+              <Pressable
+                style={[styles.visibilityBtn, visibility === "public" && styles.visibilityBtnActive]}
+                onPress={() => setVisibility("public")}
+              >
+                <Ionicons name="globe-outline" size={14} color={visibility === "public" ? "#fff" : COLORS.primary} />
+                <Text style={[styles.visibilityText, visibility === "public" && styles.visibilityTextActive]}>Publiek</Text>
               </Pressable>
-
-              {editingPostId ? (
-                <View style={styles.editActionsRow}>
-                  <Pressable style={styles.ghostBtn} onPress={resetForm}>
-                    <Ionicons name="close-outline" size={14} color={COLORS.primary} />
-                    <Text style={styles.ghostBtnText}>Annuleer bewerken</Text>
-                  </Pressable>
-                  <Pressable style={styles.deleteGhostBtn} onPress={() => onDelete(editingPostId)}>
-                    <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
-                    <Text style={styles.deleteGhostText}>Verwijder</Text>
-                  </Pressable>
-                </View>
-              ) : null}
+              <Pressable
+                style={[styles.visibilityBtn, visibility === "clients" && styles.visibilityBtnActive]}
+                onPress={() => setVisibility("clients")}
+              >
+                <Ionicons name="people-outline" size={14} color={visibility === "clients" ? "#fff" : COLORS.primary} />
+                <Text style={[styles.visibilityText, visibility === "clients" && styles.visibilityTextActive]}>Alleen klanten</Text>
+              </Pressable>
             </View>
-          </>
-        )}
+          </View>
+
+          <Pressable style={[styles.submitBtn, !canSubmit && styles.disabled]} onPress={onSubmit} disabled={!canSubmit}>
+            {uploading ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="rocket-outline" size={16} color="#fff" />}
+            <Text style={styles.submitText}>{uploading ? "Bezig met uploaden..." : submitLabel}</Text>
+          </Pressable>
+
+          {editingPostId ? (
+            <View style={styles.editActionsRow}>
+              <Pressable style={styles.ghostBtn} onPress={resetForm}>
+                <Ionicons name="close-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.ghostBtnText}>Annuleer bewerken</Text>
+              </Pressable>
+              <Pressable style={styles.deleteGhostBtn} onPress={() => onDelete(editingPostId)}>
+                <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                <Text style={styles.deleteGhostText}>Verwijder</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
     );
   }
@@ -988,24 +1234,96 @@ export default function CompanyStudioScreen() {
         </Pressable>
       </View>
 
-      <Animated.View
-        style={[
-          styles.tabContent,
-          {
-            opacity: tabOpacity,
-            transform: [
-              {
-                translateY: tabOpacity.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [8, 0],
-                }),
-              },
-            ],
-          },
-        ]}
+      <KeyboardAvoidingView
+        style={styles.tabContentWrap}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={24}
       >
-        {studioTab === "upload" ? renderUploadTab() : renderVideosTab()}
-      </Animated.View>
+        <Animated.View
+          style={[
+            styles.tabContent,
+            {
+              opacity: tabOpacity,
+              transform: [
+                {
+                  translateY: tabOpacity.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {studioTab === "upload" ? renderUploadTab() : renderVideosTab()}
+        </Animated.View>
+      </KeyboardAvoidingView>
+
+      <MediaLibraryPickerModal
+        visible={libraryPickerVisible}
+        onClose={() => setLibraryPickerVisible(false)}
+        onPick={(picked: PickedLibraryMedia) => {
+          setLibraryPickerVisible(false);
+          applyPickedMedia(picked, picked.kind);
+        }}
+      />
+
+      <InAppCaptureModal
+        visible={captureVisible}
+        onClose={() => setCaptureVisible(false)}
+        onCaptured={(captured: CapturedMedia) => {
+          setCaptureVisible(false);
+          applyPickedMedia(captured, captured.kind === "video" ? "video" : "image");
+        }}
+      />
+
+      <Modal
+        visible={Boolean(pendingMediaAction)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPendingMediaAction(null)}
+      >
+        <View style={styles.permissionModalOverlay}>
+          <View style={styles.permissionModalCard}>
+            <View style={styles.permissionModalTop}>
+              <Ionicons
+                name={
+                  pendingMediaAction === "library" ? "images-outline" : "camera-outline"
+                }
+                size={18}
+                color={COLORS.primary}
+              />
+              <Text style={styles.permissionModalTitle}>Toegang voor creator upload</Text>
+            </View>
+            <Text style={styles.permissionModalText}>
+              {pendingMediaAction === "library"
+                ? "Geef galerij-toegang om foto&apos;s en video&apos;s te kiezen en te bewerken."
+                : "Geef camera-toegang om direct video&apos;s of foto&apos;s op te nemen."}
+            </Text>
+
+            <View style={styles.permissionModalActions}>
+              <Pressable style={styles.permissionPrimaryBtn} onPress={() => onGrantPendingPermission().catch(() => null)}>
+                <Ionicons name="checkmark-circle-outline" size={15} color="#fff" />
+                <Text style={styles.permissionPrimaryText}>Toegang toestaan</Text>
+              </Pressable>
+              <Pressable
+                style={styles.permissionGhostBtn}
+                onPress={() => {
+                  Linking.openSettings().catch(() => null);
+                  setPendingMediaAction(null);
+                }}
+              >
+                <Ionicons name="settings-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.permissionGhostText}>Open instellingen</Text>
+              </Pressable>
+              <Pressable style={styles.permissionGhostBtn} onPress={() => setPendingMediaAction(null)}>
+                <Ionicons name="close-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.permissionGhostText}>Nu niet</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={Boolean(detailItem)} transparent animationType="fade" onRequestClose={() => setDetailPostId(null)}>
         <View style={styles.modalOverlay}>
@@ -1062,6 +1380,28 @@ export default function CompanyStudioScreen() {
                     <Ionicons name="calendar-outline" size={14} color={COLORS.primary} />
                     <Text style={styles.modalStatValue}>{formatDate(detailItem.createdAtMs)}</Text>
                     <Text style={styles.modalStatLabel}>Datum</Text>
+                  </View>
+                  {detailItem.mediaType === "video" ? (
+                    <View style={styles.modalStatItem}>
+                      <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
+                      <Text style={styles.modalStatValue}>
+                        {formatClipRange(
+                          Number(detailItem.clipStartSec ?? 0) || 0,
+                          Number(detailItem.clipEndSec ?? detailItem.videoDurationSec ?? 0) || 0
+                        )}
+                      </Text>
+                      <Text style={styles.modalStatLabel}>Clip</Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.modalStatItem}>
+                    <Ionicons name="resize-outline" size={14} color={COLORS.primary} />
+                    <Text style={styles.modalStatValue}>{detailItem.cropPreset ?? "original"}</Text>
+                    <Text style={styles.modalStatLabel}>Crop</Text>
+                  </View>
+                  <View style={styles.modalStatItem}>
+                    <Ionicons name="color-filter-outline" size={14} color={COLORS.primary} />
+                    <Text style={styles.modalStatValue}>{detailItem.filterPreset ?? "none"}</Text>
+                    <Text style={styles.modalStatLabel}>Filter</Text>
                   </View>
                 </View>
 
@@ -1173,8 +1513,50 @@ const styles = StyleSheet.create({
   topTabTextActive: {
     color: "#fff",
   },
+  tabContentWrap: {
+    flex: 1,
+  },
   tabContent: {
     flex: 1,
+  },
+  uploadFlowScreen: {
+    flex: 1,
+    gap: 12,
+    paddingBottom: 8,
+  },
+  uploadFlowTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingTop: 2,
+  },
+  uploadFlowTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  uploadFlowSubTitle: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  uploadFlowStepPill: {
+    minWidth: 52,
+    minHeight: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+  uploadFlowStepText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "900",
   },
   stepperRow: {
     flexDirection: "row",
@@ -1203,43 +1585,19 @@ const styles = StyleSheet.create({
   stepperChipTextActive: {
     color: COLORS.primary,
   },
-  mediaTypeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  mediaTypeBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  mediaTypeBtnActive: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary,
-  },
-  mediaTypeText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  mediaTypeTextActive: {
-    color: "#fff",
-  },
   uploadContent: {
     gap: 12,
     paddingBottom: 28,
   },
+  uploadDetailsContent: {
+    gap: 12,
+    paddingBottom: 52,
+  },
   heroCard: {
-    backgroundColor: COLORS.card,
+    backgroundColor: "#101319",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: "#2b3142",
     padding: 14,
     gap: 10,
   },
@@ -1249,12 +1607,12 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   heroTitle: {
-    color: COLORS.text,
+    color: "#f8fbff",
     fontSize: 16,
     fontWeight: "900",
   },
   heroText: {
-    color: COLORS.muted,
+    color: "#ccd5e8",
     fontSize: 13,
     fontWeight: "600",
     lineHeight: 20,
@@ -1267,20 +1625,20 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: "#2e3648",
+    backgroundColor: "#1a2130",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 9,
     gap: 2,
   },
   heroStatValue: {
-    color: COLORS.text,
+    color: "#f8fbff",
     fontSize: 16,
     fontWeight: "900",
   },
   heroStatLabel: {
-    color: COLORS.muted,
+    color: "#aeb8cd",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -1324,6 +1682,46 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 12,
   },
+  permissionGrid: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  permissionCard: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 10,
+    gap: 4,
+  },
+  permissionCardOk: {
+    borderColor: "#b8e4c3",
+    backgroundColor: "#ecfaf0",
+  },
+  permissionCardWarn: {
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+  },
+  permissionCardTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  permissionCardTitle: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  permissionCardState: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  permissionCardText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "600",
+  },
   sectionCard: {
     backgroundColor: COLORS.card,
     borderRadius: 18,
@@ -1331,6 +1729,22 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     padding: 13,
     gap: 11,
+  },
+  uploadDetailsMediaCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 13,
+    gap: 11,
+  },
+  uploadDetailsFormCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    gap: 15,
   },
   sectionHeader: {
     flexDirection: "row",
@@ -1345,16 +1759,19 @@ const styles = StyleSheet.create({
   dropZone: {
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: "#f0bfd7",
-    borderStyle: "dashed",
-    backgroundColor: "#fff7fb",
-    minHeight: 236,
+    borderColor: "#273149",
+    backgroundColor: "#0f1525",
+    minHeight: 262,
     overflow: "hidden",
     justifyContent: "space-between",
   },
+  fullScreenDropZone: {
+    flex: 1,
+    minHeight: 320,
+  },
   dropPreview: {
     width: "100%",
-    height: 180,
+    height: 206,
   },
   dropPlaceholder: {
     flex: 1,
@@ -1365,12 +1782,12 @@ const styles = StyleSheet.create({
     minHeight: 180,
   },
   dropTitle: {
-    color: COLORS.text,
+    color: "#f8fbff",
     fontSize: 15,
     fontWeight: "800",
   },
   dropText: {
-    color: COLORS.muted,
+    color: "#c2cde3",
     textAlign: "center",
     fontSize: 12,
     lineHeight: 18,
@@ -1386,8 +1803,8 @@ const styles = StyleSheet.create({
     minHeight: 40,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#fff",
+    borderColor: "#2b354f",
+    backgroundColor: "#171f32",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -1407,6 +1824,150 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 11,
     fontWeight: "700",
+  },
+  trimCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d9e0f4",
+    backgroundColor: "#f3f6ff",
+    padding: 10,
+    gap: 8,
+  },
+  trimTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  trimTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  trimTitle: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  trimRangeText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  trimHint: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  trimButtonRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  trimBtn: {
+    flex: 1,
+    minHeight: 34,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#cfd9f5",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimBtnText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  trimPresetRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  trimPresetBtn: {
+    minHeight: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#cfd9f5",
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimPresetText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  trimErrorCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#f3c7d6",
+    backgroundColor: "#fff1f6",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  trimErrorText: {
+    color: COLORS.danger,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  editorCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    padding: 10,
+    gap: 8,
+  },
+  editorHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  editorTitle: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  editorHint: {
+    color: COLORS.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "600",
+  },
+  editorLabel: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  editorChipRow: {
+    gap: 8,
+  },
+  editorChip: {
+    minHeight: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editorChipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
+  editorChipText: {
+    color: COLORS.text,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  editorChipTextActive: {
+    color: COLORS.primary,
+    fontWeight: "900",
   },
   warningCard: {
     flexDirection: "row",
@@ -1473,6 +2034,44 @@ const styles = StyleSheet.create({
   selectedVideoActions: {
     flexDirection: "row",
     gap: 8,
+  },
+  selectedClipPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  selectedClipText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  selectedEditRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  selectedEditPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  selectedEditText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
   },
   fieldWrap: {
     gap: 6,
@@ -1766,6 +2365,72 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontWeight: "700",
     marginTop: 16,
+  },
+  permissionModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  permissionModalCard: {
+    width: "100%",
+    maxWidth: 440,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    padding: 14,
+    gap: 10,
+  },
+  permissionModalTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  permissionModalTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  permissionModalText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: "600",
+  },
+  permissionModalActions: {
+    gap: 8,
+  },
+  permissionPrimaryBtn: {
+    minHeight: 44,
+    borderRadius: 11,
+    backgroundColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  permissionPrimaryText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  permissionGhostBtn: {
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  permissionGhostText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "800",
   },
   modalOverlay: {
     flex: 1,

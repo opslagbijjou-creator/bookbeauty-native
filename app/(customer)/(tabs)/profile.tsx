@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { doc, getDoc } from "firebase/firestore";
 import { getUserRole, logout } from "../../../lib/authRepo";
 import { auth, db } from "../../../lib/firebase";
+import { subscribeMyCustomerUnreadNotificationsCount } from "../../../lib/notificationRepo";
 import { getMyFollowingCount, getMyLikesGivenCount, getMyRatingsGivenCount } from "../../../lib/socialRepo";
 import { CATEGORIES, COLORS } from "../../../lib/ui";
 
@@ -36,6 +37,7 @@ export default function CustomerProfileScreen() {
     ratingsGiven: 0,
   });
   const [favoriteCategories, setFavoriteCategories] = useState<string[]>(["Nagels", "Wimpers"]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   const displayName = useMemo(() => {
     if (!user?.email) return "Beauty Lover";
@@ -90,6 +92,19 @@ export default function CustomerProfileScreen() {
     };
   }, [user?.uid]);
 
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) {
+      setUnreadNotifications(0);
+      return;
+    }
+    return subscribeMyCustomerUnreadNotificationsCount(
+      uid,
+      (count) => setUnreadNotifications(count),
+      () => setUnreadNotifications(0)
+    );
+  }, [user?.uid]);
+
   function toggleCategory(category: string) {
     setFavoriteCategories((prev) =>
       prev.includes(category) ? prev.filter((x) => x !== category) : [...prev, category]
@@ -114,8 +129,13 @@ export default function CustomerProfileScreen() {
               <Ionicons name="person-circle-outline" size={17} color="#fff" />
               <Text style={styles.heroTitle}>Jouw profiel</Text>
             </View>
-            <Pressable style={styles.settingsBtn}>
-              <Ionicons name="settings-outline" size={16} color="#fff" />
+            <Pressable style={styles.settingsBtn} onPress={() => router.push("/(customer)/notifications" as never)}>
+              <Ionicons name="notifications-outline" size={16} color="#fff" />
+              {unreadNotifications ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{unreadNotifications > 99 ? "99+" : unreadNotifications}</Text>
+                </View>
+              ) : null}
             </Pressable>
           </View>
 
@@ -176,6 +196,20 @@ export default function CustomerProfileScreen() {
               <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
               <Text style={styles.quickText}>Bookings</Text>
             </Pressable>
+            <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/notifications" as never)}>
+              <Ionicons name="notifications-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.quickText}>Meldingen {unreadNotifications ? `(${unreadNotifications})` : ""}</Text>
+            </Pressable>
+            <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/support" as never)}>
+              <Ionicons name="help-circle-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.quickText}>Vragen aan team</Text>
+            </Pressable>
+            {role === "influencer" ? (
+              <Pressable style={styles.quickBtn} onPress={() => router.push("/(customer)/influencer/studio" as never)}>
+                <Ionicons name="megaphone-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.quickText}>Influencer studio</Text>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -280,6 +314,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.14)",
+    position: "relative",
+  },
+  badge: {
+    position: "absolute",
+    top: -5,
+    right: -5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "rgba(239,78,130,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 3,
+  },
+  badgeText: {
+    color: COLORS.primary,
+    fontSize: 9,
+    fontWeight: "900",
   },
   heroBottom: {
     flexDirection: "row",
@@ -383,10 +437,11 @@ const styles = StyleSheet.create({
   },
   quickGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   quickBtn: {
-    flex: 1,
+    width: "48%",
     alignItems: "center",
     justifyContent: "center",
     gap: 4,

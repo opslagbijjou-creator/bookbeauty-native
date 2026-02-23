@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -9,6 +9,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CategoryChips from "../../../components/CategoryChips";
 import { getUserRole, logout } from "../../../lib/authRepo";
+import { CompanyBookingInsights, fetchCompanyBookingInsights } from "../../../lib/bookingRepo";
 import { ensureCompanyDoc } from "../../../lib/companyActions";
 import { fetchCompanyById } from "../../../lib/companyRepo";
 import { auth, db } from "../../../lib/firebase";
@@ -61,6 +62,10 @@ export default function CompanyHomeScreen() {
   const [rating, setRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
   const [ratingMinReviews, setRatingMinReviews] = useState(10);
+  const [bookingInsights, setBookingInsights] = useState<CompanyBookingInsights>({
+    totalBookings: 0,
+    topServices: [],
+  });
   const [unreadCount, setUnreadCount] = useState(0);
   const [employees, setEmployees] = useState<CompanyStaffMember[]>([]);
   const [employeeEmail, setEmployeeEmail] = useState("");
@@ -120,10 +125,11 @@ export default function CompanyHomeScreen() {
       .then(async () => {
         const publicSnap = await getDoc(doc(db, "companies_public", companyId));
         const privateSnap = await getDoc(doc(db, "companies", companyId));
-        const [followersCount, likesTotal, ratingData] = await Promise.all([
+        const [followersCount, likesTotal, ratingData, bookingInsightsData] = await Promise.all([
           getCompanyFollowersCount(companyId),
           getCompanyTotalLikes(companyId),
           getCompanyProfileRating(companyId),
+          fetchCompanyBookingInsights(companyId),
         ]);
 
         if (!mounted) return;
@@ -155,11 +161,24 @@ export default function CompanyHomeScreen() {
         setRating(ratingData.avg);
         setRatingCount(ratingData.count);
         setRatingMinReviews(ratingData.minReviewCount);
+        setBookingInsights(bookingInsightsData);
         await ensureOwnerBookableStaff(companyId, publicSnap.exists() ? String(publicSnap.data().name ?? "Eigenaar") : "Eigenaar");
         if (uid && nextOwnerId && uid === nextOwnerId) {
           const teamRows = await fetchCompanyEmployees(companyId);
           if (!mounted) return;
           setEmployees(teamRows);
+        }
+
+        if (uid && uid === companyId) {
+          setDoc(
+            doc(db, "companies_public", companyId),
+            {
+              bookingCountTotal: bookingInsightsData.totalBookings,
+              bookingTopServices: bookingInsightsData.topServices,
+              bookingStatsUpdatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          ).catch(() => null);
         }
       })
       .catch((error: any) => {
@@ -339,65 +358,88 @@ export default function CompanyHomeScreen() {
   if (isEmployee) {
     return (
       <SafeAreaView style={styles.safeArea} edges={["top"]}>
-        <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.titleBar}>
-            <View style={styles.titleRow}>
-              <Ionicons name="person-circle-outline" size={20} color={COLORS.primary} />
-              <Text style={styles.title}>Medewerker account</Text>
-            </View>
-          </View>
-
-          <LinearGradient colors={["#4f8dff", "#2f68df"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
-            <View style={styles.heroTopRow}>
-              <View style={styles.logoWrap}>
-                <Ionicons name="person-outline" size={24} color="rgba(255,255,255,0.95)" />
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={24}
+        >
+          <ScrollView
+            style={styles.screen}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          >
+            <View style={styles.titleBar}>
+              <View style={styles.titleRow}>
+                <Ionicons name="person-circle-outline" size={20} color={COLORS.primary} />
+                <Text style={styles.title}>Medewerker account</Text>
               </View>
-              <View style={styles.heroInfo}>
-                <Text style={styles.heroTitle}>{auth.currentUser?.email?.split("@")[0] || "Medewerker"}</Text>
-                <Text style={styles.heroSub}>{companyLabel || "Salon"}</Text>
-              </View>
             </View>
-            <Text style={styles.heroBio}>Je ziet alleen je eigen planning en accountgegevens.</Text>
-          </LinearGradient>
 
-          <View style={styles.card}>
-            <Text style={styles.label}>E-mail</Text>
-            <Text style={styles.readonlyText}>{auth.currentUser?.email || "-"}</Text>
+            <LinearGradient colors={["#4f8dff", "#2f68df"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
+              <View style={styles.heroTopRow}>
+                <View style={styles.logoWrap}>
+                  <Ionicons name="person-outline" size={24} color="rgba(255,255,255,0.95)" />
+                </View>
+                <View style={styles.heroInfo}>
+                  <Text style={styles.heroTitle}>{auth.currentUser?.email?.split("@")[0] || "Medewerker"}</Text>
+                  <Text style={styles.heroSub}>{companyLabel || "Salon"}</Text>
+                </View>
+              </View>
+              <Text style={styles.heroBio}>Je ziet alleen je eigen planning en accountgegevens.</Text>
+            </LinearGradient>
 
-            <Pressable style={styles.primaryBtn} onPress={() => router.push("/(company)/(tabs)/bookings" as never)}>
-              <Ionicons name="calendar-outline" size={14} color="#fff" />
-              <Text style={styles.primaryBtnText}>Mijn planning</Text>
-            </Pressable>
+            <View style={styles.card}>
+              <Text style={styles.label}>E-mail</Text>
+              <Text style={styles.readonlyText}>{auth.currentUser?.email || "-"}</Text>
 
-            <Pressable style={styles.secondaryBtn} onPress={onLogout}>
-              <Ionicons name="log-out-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.secondaryBtnText}>Uitloggen</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
+              <Pressable style={styles.primaryBtn} onPress={() => router.push("/(company)/(tabs)/bookings" as never)}>
+                <Ionicons name="calendar-outline" size={14} color="#fff" />
+                <Text style={styles.primaryBtnText}>Mijn planning</Text>
+              </Pressable>
+
+              <Pressable style={styles.secondaryBtn} onPress={onLogout}>
+                <Ionicons name="log-out-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.secondaryBtnText}>Uitloggen</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.titleBar}>
-          <View style={styles.titleRow}>
-            <Ionicons name="business-outline" size={20} color={COLORS.primary} />
-            <Text style={styles.title}>Bedrijfsprofiel</Text>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={24}
+      >
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={styles.titleBar}>
+            <View style={styles.titleRow}>
+              <Ionicons name="business-outline" size={20} color={COLORS.primary} />
+              <Text style={styles.title}>Bedrijfsprofiel</Text>
+            </View>
+            <Pressable style={styles.bellBtn} onPress={() => router.push("/(company)/notifications" as never)}>
+              <Ionicons name="notifications-outline" size={18} color={COLORS.primary} />
+              {unreadCount ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
+                </View>
+              ) : null}
+            </Pressable>
           </View>
-          <Pressable style={styles.bellBtn} onPress={() => router.push("/(company)/notifications" as never)}>
-            <Ionicons name="notifications-outline" size={18} color={COLORS.primary} />
-            {unreadCount ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </View>
 
-        <LinearGradient colors={["#f05a9f", "#d83e88"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
+        <LinearGradient colors={["#101010", "#1b1b1b", "#3b0f1e"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <View style={styles.logoWrap}>
               {logoUrl ? (
@@ -423,6 +465,10 @@ export default function CompanyHomeScreen() {
                   <Text style={styles.statText}>
                     {profileRatingText} {profileRatingSuffix}
                   </Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Ionicons name="calendar-outline" size={12} color="#fff" />
+                  <Text style={styles.statText}>{bookingInsights.totalBookings} geboekt</Text>
                 </View>
               </View>
             </View>
@@ -465,6 +511,10 @@ export default function CompanyHomeScreen() {
           <Pressable style={styles.quickBtn} onPress={() => router.push("/(company)/notifications" as never)}>
             <Ionicons name="notifications-outline" size={16} color={COLORS.primary} />
             <Text style={styles.quickText}>Meldingen {unreadCount ? `(${unreadCount})` : ""}</Text>
+          </Pressable>
+          <Pressable style={styles.quickBtn} onPress={() => router.push("/(company)/support" as never)}>
+            <Ionicons name="help-circle-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.quickText}>Vragen aan team</Text>
           </Pressable>
           {companyId ? (
             <Pressable style={styles.quickBtn} onPress={() => router.push(`/(customer)/company/${companyId}` as never)}>
@@ -609,7 +659,8 @@ export default function CompanyHomeScreen() {
             <Text style={styles.secondaryBtnText}>Uitloggen</Text>
           </Pressable>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -618,6 +669,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.bg,
+  },
+  flex: {
+    flex: 1,
   },
   screen: {
     flex: 1,

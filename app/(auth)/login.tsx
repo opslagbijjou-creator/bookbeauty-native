@@ -1,5 +1,15 @@
 import React, { useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -28,6 +38,8 @@ export default function LoginScreen() {
         router.replace("/(company)/(tabs)/bookings" as never);
       } else if (role === "admin") {
         router.replace("/(admin)/(tabs)" as never);
+      } else if (role === "influencer") {
+        router.replace("/(customer)/(tabs)/profile" as never);
       } else {
         router.replace("/(customer)/(tabs)" as never);
       }
@@ -45,56 +57,68 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
-      <View style={styles.card}>
-        <View style={styles.logoWrap}>
-          <Image source={require("../../assets/logo/logo.png")} style={styles.logo} contentFit="contain" />
-        </View>
-        <Text style={styles.title}>BookBeauty</Text>
-        <Text style={styles.subtitle}>Log in op je account</Text>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={24}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={styles.card}>
+            <View style={styles.logoWrap}>
+              <Image source={require("../../assets/logo/logo.png")} style={styles.logo} contentFit="contain" />
+            </View>
+            <Text style={styles.title}>BookBeauty</Text>
+            <Text style={styles.subtitle}>Log in op je account</Text>
 
-        <TextInput
-          value={email}
-          onChangeText={setEmail}
-          placeholder="E-mail"
-          placeholderTextColor={COLORS.placeholder}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          style={styles.input}
-        />
-        <TextInput
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Wachtwoord"
-          placeholderTextColor={COLORS.placeholder}
-          secureTextEntry
-          style={styles.input}
-        />
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="E-mail"
+              placeholderTextColor={COLORS.placeholder}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              style={styles.input}
+            />
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Wachtwoord"
+              placeholderTextColor={COLORS.placeholder}
+              secureTextEntry
+              style={styles.input}
+            />
 
-        <Pressable onPress={onLogin} style={[styles.btn, (!canSubmit || loading) && styles.disabled]}>
-          <Text style={styles.btnText}>{loading ? "Bezig..." : "Inloggen"}</Text>
-        </Pressable>
+            <Pressable onPress={onLogin} style={[styles.btn, (!canSubmit || loading) && styles.disabled]}>
+              <Text style={styles.btnText}>{loading ? "Bezig..." : "Inloggen"}</Text>
+            </Pressable>
 
-        <Pressable onPress={() => router.push("/(auth)/register" as never)}>
-          <Text style={styles.link}>Nog geen account? Registreren</Text>
-        </Pressable>
+            <Pressable onPress={() => router.push("/(auth)/register" as never)}>
+              <Text style={styles.link}>Nog geen account? Registreren</Text>
+            </Pressable>
 
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>of ga verder met</Text>
-          <View style={styles.dividerLine} />
-        </View>
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>of ga verder met</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
-        <View style={styles.socialRow}>
-          <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("apple")}>
-            <Ionicons name="logo-apple" size={16} color={COLORS.text} />
-            <Text style={styles.socialBtnText}>Apple</Text>
-          </Pressable>
-          <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("google")}>
-            <Ionicons name="logo-google" size={16} color={COLORS.text} />
-            <Text style={styles.socialBtnText}>Google</Text>
-          </Pressable>
-        </View>
-      </View>
+            <View style={styles.socialRow}>
+              <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("apple")}>
+                <Ionicons name="logo-apple" size={16} color={COLORS.text} />
+                <Text style={styles.socialBtnText}>Apple</Text>
+              </Pressable>
+              <Pressable style={styles.socialBtn} onPress={() => onSocialLogin("google")}>
+                <Ionicons name="logo-google" size={16} color={COLORS.text} />
+                <Text style={styles.socialBtnText}>Google</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -103,9 +127,12 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COLORS.bg,
+    padding: 20,
+  },
+  scrollContent: {
+    flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: 20,
   },
   card: {
     width: "100%",

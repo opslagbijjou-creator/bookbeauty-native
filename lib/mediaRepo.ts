@@ -1,4 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
+import { Camera } from "expo-camera";
+import * as MediaLibrary from "expo-media-library";
 import { uploadToCloudinary } from "./uploadToCloudinary";
 
 export type PickedMedia = {
@@ -10,9 +12,17 @@ export type PickedMedia = {
 
 type PickVideoFromLibraryOptions = {
   allowEditing?: boolean;
+  maxDurationMs?: number;
 };
 
 const MAX_VIDEO_DURATION_MS = 15_000;
+type PermissionState = "granted" | "denied" | "undetermined";
+
+function toPermissionState(status: string): PermissionState {
+  if (status === "granted") return "granted";
+  if (status === "denied") return "denied";
+  return "undetermined";
+}
 
 function friendlyUploadError(error: unknown): Error {
   if (error instanceof Error) {
@@ -42,17 +52,37 @@ function filenameFromUri(uri: string, fallback = "upload"): string {
 }
 
 async function ensureLibraryPermission(): Promise<void> {
-  const status = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!status.granted) {
+  const granted = await requestMediaLibraryPermission();
+  if (!granted) {
     throw new Error("Geef toegang tot je galerij om media te kiezen.");
   }
 }
 
 async function ensureCameraPermission(): Promise<void> {
-  const status = await ImagePicker.requestCameraPermissionsAsync();
-  if (!status.granted) {
+  const granted = await requestCameraPermission();
+  if (!granted) {
     throw new Error("Geef toegang tot je camera om media te maken.");
   }
+}
+
+export async function getMediaLibraryPermissionState(): Promise<PermissionState> {
+  const status = await MediaLibrary.getPermissionsAsync();
+  return toPermissionState(status.status);
+}
+
+export async function getCameraPermissionState(): Promise<PermissionState> {
+  const status = await Camera.getCameraPermissionsAsync();
+  return toPermissionState(status.status);
+}
+
+export async function requestMediaLibraryPermission(): Promise<boolean> {
+  const status = await MediaLibrary.requestPermissionsAsync();
+  return status.granted;
+}
+
+export async function requestCameraPermission(): Promise<boolean> {
+  const status = await Camera.requestCameraPermissionsAsync();
+  return status.granted;
 }
 
 export async function pickImageFromLibrary(): Promise<PickedMedia | null> {
@@ -107,7 +137,11 @@ export async function pickVideoFromLibrary(options?: PickVideoFromLibraryOptions
   if (result.canceled || !result.assets?.[0]) return null;
 
   const asset = result.assets[0];
-  if (typeof asset.duration === "number" && asset.duration > MAX_VIDEO_DURATION_MS) {
+  const maxDurationMs =
+    typeof options?.maxDurationMs === "number" && Number.isFinite(options.maxDurationMs)
+      ? Math.max(0, options.maxDurationMs)
+      : MAX_VIDEO_DURATION_MS;
+  if (maxDurationMs > 0 && typeof asset.duration === "number" && asset.duration > maxDurationMs) {
     throw new Error("Video mag maximaal 15 seconden zijn.");
   }
 

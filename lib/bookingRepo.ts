@@ -18,9 +18,19 @@ import {
   type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
+import { getUserRole } from "./authRepo";
 import { fetchCompanyById } from "./companyRepo";
-import { notifyCompanyOnBookingRequest } from "./notificationRepo";
+import {
+  notifyCompanyOnBookingRequest,
+  notifyCompanyOnBookingCancelledByCustomer,
+  notifyCompanyOnBookingProposalDecisionByCustomer,
+  notifyCompanyOnRescheduleRequestByCustomer,
+  notifyCustomerOnBookingCreated,
+  notifyCustomerOnBookingProposalByCompany,
+  notifyCustomerOnBookingStatusByCompany,
+  notifyCustomerOnRescheduleDecisionByCompany,
+} from "./notificationRepo";
 
 export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type BookingStatus =
@@ -123,6 +133,11 @@ export type Booking = {
   note?: string;
   cancellationFeePercent: number;
   cancellationFeeAmount: number;
+  referralPostId?: string;
+  referralInfluencerId?: string;
+  referralInfluencerName?: string;
+  referralCommissionPercent?: number;
+  referralCommissionAmount?: number;
   lockIds: string[];
   lockSeat?: number;
   createdAtMs: number;
@@ -140,6 +155,7 @@ export type CreateBookingPayload = {
   customerEmail?: string;
   note?: string;
   startAtMs: number;
+  referralPostId?: string;
 };
 
 export type BookingBlockPayload = {
@@ -157,12 +173,32 @@ export type BookingQueryFilter = {
   staffId?: string;
 };
 
+export type CompanyTopBookedService = {
+  serviceId: string;
+  serviceName: string;
+  count: number;
+};
+
+export type CompanyBookingInsights = {
+  totalBookings: number;
+  topServices: CompanyTopBookedService[];
+};
+
+export type InfluencerCommissionSummary = {
+  totalBookings: number;
+  confirmedBookings: number;
+  estimatedCommissionTotal: number;
+  confirmedCommissionTotal: number;
+  pendingCommissionTotal: number;
+};
+
 const DEFAULT_RANGE = { start: "09:00", end: "18:00" } as const;
 const VALID_INTERVALS = [10, 15, 20, 30, 45, 60];
 const SLOT_LOCK_STEP_MIN = 5;
 const FREE_CANCELLATION_HOURS = 24;
 const LATE_CANCEL_FEE_PERCENT = 15;
 const SAME_DAY_RESCHEDULE_LIMIT = 1;
+const DEFAULT_INFLUENCER_COMMISSION_PERCENT = 5;
 
 function toMillis(value: unknown): number {
   const v = value as Timestamp | Date | { toMillis?: () => number } | undefined;
@@ -356,6 +392,19 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
   const proposalByRaw = String(data.proposalBy ?? "");
   const proposalBy: BookingProposalBy | undefined =
     proposalByRaw === "company" || proposalByRaw === "customer" ? proposalByRaw : undefined;
+  const referralPostId = typeof data.referralPostId === "string" ? data.referralPostId.trim() : "";
+  const referralInfluencerId =
+    typeof data.referralInfluencerId === "string" ? data.referralInfluencerId.trim() : "";
+  const referralInfluencerName =
+    typeof data.referralInfluencerName === "string" ? data.referralInfluencerName.trim() : "";
+  const referralCommissionPercentRaw = Number(data.referralCommissionPercent ?? 0);
+  const referralCommissionPercent = Number.isFinite(referralCommissionPercentRaw)
+    ? Math.max(0, referralCommissionPercentRaw)
+    : 0;
+  const referralCommissionAmountRaw = Number(data.referralCommissionAmount ?? 0);
+  const referralCommissionAmount = Number.isFinite(referralCommissionAmountRaw)
+    ? Math.max(0, referralCommissionAmountRaw)
+    : 0;
 
   return {
     id,
@@ -397,6 +446,11 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
     note: typeof data.note === "string" ? data.note : undefined,
     cancellationFeePercent: normalizeNonNegativeInt(data.cancellationFeePercent, 0),
     cancellationFeeAmount: Number(data.cancellationFeeAmount ?? 0),
+    referralPostId: referralPostId || undefined,
+    referralInfluencerId: referralInfluencerId || undefined,
+    referralInfluencerName: referralInfluencerName || undefined,
+    referralCommissionPercent: referralCommissionPercent || undefined,
+    referralCommissionAmount: referralCommissionAmount || undefined,
     lockIds: toStringArray(data.lockIds),
     lockSeat: typeof data.lockSeat === "number" ? data.lockSeat : undefined,
     createdAtMs: toMillis(data.createdAt),
@@ -612,6 +666,23 @@ function isPermissionDeniedError(error: unknown): boolean {
   return code.includes("permission-denied") || message.includes("missing or insufficient permissions");
 }
 
+function isMissingIndexError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "");
+  const message = String((error as { message?: string })?.message ?? "").toLowerCase();
+  return code.includes("failed-precondition") && message.includes("index");
+}
+
+function filterDayLocks(locks: SlotLock[], bookingDate: string, staffId?: string): SlotLock[] {
+  const selectedStaffId = staffId?.trim() ?? "";
+  return locks.filter(
+    (row) =>
+      row.bookingDate === bookingDate &&
+      row.slotKey.length > 0 &&
+      row.seat >= 0 &&
+      (!selectedStaffId || row.staffId === selectedStaffId)
+  );
+}
+
 async function fetchCompanyBookingsRaw(companyId: string): Promise<Booking[]> {
   const q = query(collection(db, "bookings"), where("companyId", "==", companyId));
   const snap = await getDocs(q);
@@ -634,21 +705,39 @@ async function fetchCompanyBlocksRaw(companyId: string): Promise<BookingBlock[]>
 
 async function fetchDayLocksRaw(companyId: string, bookingDate: string, staffId?: string): Promise<SlotLock[]> {
   try {
-    const locksQuery = query(collection(db, "booking_slot_locks"), where("companyId", "==", companyId));
-    const snap = await getDocs(locksQuery);
-    return snap.docs
-      .map((row) => toSlotLock(row.id, row.data()))
-      .filter(
-        (row) =>
-          row.bookingDate === bookingDate &&
-          row.slotKey.length > 0 &&
-          row.seat >= 0 &&
-          (!staffId || row.staffId === staffId)
-      );
+    const dayLocksQuery = query(
+      collection(db, "booking_slot_locks"),
+      where("companyId", "==", companyId),
+      where("bookingDate", "==", bookingDate)
+    );
+    const snap = await getDocs(dayLocksQuery);
+    return filterDayLocks(
+      snap.docs.map((row) => toSlotLock(row.id, row.data())),
+      bookingDate,
+      staffId
+    );
   } catch (error) {
     if (isPermissionDeniedError(error)) {
       console.warn("[bookingRepo/fetchDayLocksRaw] permission denied, fallback without locks", error);
       return [];
+    }
+    if (isMissingIndexError(error)) {
+      console.warn("[bookingRepo/fetchDayLocksRaw] missing index for day locks query, using fallback", error);
+      try {
+        const fallbackQuery = query(collection(db, "booking_slot_locks"), where("companyId", "==", companyId));
+        const snap = await getDocs(fallbackQuery);
+        return filterDayLocks(
+          snap.docs.map((row) => toSlotLock(row.id, row.data())),
+          bookingDate,
+          staffId
+        );
+      } catch (fallbackError) {
+        if (isPermissionDeniedError(fallbackError)) {
+          console.warn("[bookingRepo/fetchDayLocksRaw] permission denied during fallback, using empty locks", fallbackError);
+          return [];
+        }
+        throw fallbackError;
+      }
     }
     throw error;
   }
@@ -794,11 +883,96 @@ export async function fetchCompanyBookings(companyId: string, filter?: BookingQu
   return sortBookingsByStartAsc(normalizeBookingRows(filterBookings(rows, filter)));
 }
 
+export async function fetchCompanyBookingInsights(companyId: string, top = 3): Promise<CompanyBookingInsights> {
+  const safeTop = Math.max(1, Math.min(8, Math.floor(top)));
+  const rows = await fetchCompanyBookingsRaw(companyId);
+  const counters = new Map<string, CompanyTopBookedService>();
+  let totalBookings = 0;
+
+  rows.forEach((row) => {
+    // "declined" is not a successful booking, so we skip it in profile stats.
+    if (row.status === "declined") return;
+    totalBookings += 1;
+
+    const serviceId = row.serviceId?.trim() ?? "";
+    const serviceName = row.serviceName?.trim() || "Onbekende dienst";
+    const key = serviceId ? `id:${serviceId}` : `name:${serviceName.toLowerCase()}`;
+    const current = counters.get(key);
+    if (current) {
+      current.count += 1;
+      return;
+    }
+    counters.set(key, {
+      serviceId,
+      serviceName,
+      count: 1,
+    });
+  });
+
+  const topServices = [...counters.values()]
+    .sort((a, b) => b.count - a.count || a.serviceName.localeCompare(b.serviceName, "nl-NL"))
+    .slice(0, safeTop);
+
+  return {
+    totalBookings,
+    topServices,
+  };
+}
+
 export async function fetchCustomerBookings(customerId: string): Promise<Booking[]> {
   const q = query(collection(db, "bookings"), where("customerId", "==", customerId));
   const snap = await getDocs(q);
   const rows = snap.docs.map((row) => toBooking(row.id, row.data()));
   return sortBookingsByCreatedDesc(normalizeBookingRows(rows));
+}
+
+export async function fetchInfluencerCommissionSummary(influencerId: string): Promise<InfluencerCommissionSummary> {
+  const cleanInfluencerId = influencerId.trim();
+  if (!cleanInfluencerId) {
+    return {
+      totalBookings: 0,
+      confirmedBookings: 0,
+      estimatedCommissionTotal: 0,
+      confirmedCommissionTotal: 0,
+      pendingCommissionTotal: 0,
+    };
+  }
+
+  const q = query(collection(db, "bookings"), where("referralInfluencerId", "==", cleanInfluencerId));
+  const snap = await getDocs(q);
+  const rows = snap.docs.map((row) => toBooking(row.id, row.data()));
+
+  let confirmedBookings = 0;
+  let estimatedCommissionTotal = 0;
+  let confirmedCommissionTotal = 0;
+  let pendingCommissionTotal = 0;
+
+  rows.forEach((row) => {
+    const amount = Number(row.referralCommissionAmount ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+
+    estimatedCommissionTotal += amount;
+    if (row.status === "confirmed") {
+      confirmedBookings += 1;
+      confirmedCommissionTotal += amount;
+      return;
+    }
+    if (
+      row.status === "pending" ||
+      row.status === "proposed_by_company" ||
+      row.status === "pending_reschedule_approval"
+    ) {
+      pendingCommissionTotal += amount;
+    }
+  });
+
+  return {
+    totalBookings: rows.length,
+    confirmedBookings,
+    estimatedCommissionTotal: Number(estimatedCommissionTotal.toFixed(2)),
+    confirmedCommissionTotal: Number(confirmedCommissionTotal.toFixed(2)),
+    pendingCommissionTotal: Number(pendingCommissionTotal.toFixed(2)),
+  };
 }
 
 export async function fetchEmployeeBookings(employeeId: string, filter?: BookingQueryFilter): Promise<Booking[]> {
@@ -979,6 +1153,17 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
   if (!payload.companyId || !payload.serviceId || !payload.customerId) {
     throw new Error("Onvolledige boekingsgegevens.");
   }
+  const actorId = auth.currentUser?.uid ?? "";
+  if (!actorId) {
+    throw new Error("Log in om een afspraak te boeken.");
+  }
+  if (actorId !== payload.customerId) {
+    throw new Error("Je kunt alleen een afspraak voor je eigen account boeken.");
+  }
+  const actorRole = await getUserRole(actorId);
+  if (actorRole && actorRole !== "customer") {
+    throw new Error("Alleen klantaccounts kunnen een afspraak boeken.");
+  }
   if (payload.customerName.trim().length < 2) {
     throw new Error("Vul een geldige naam in.");
   }
@@ -1032,6 +1217,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
     const serviceBufferBeforeMin = normalizeNonNegativeInt(serviceData.bufferBeforeMin, 0);
     const serviceBufferAfterMin = normalizeNonNegativeInt(serviceData.bufferAfterMin, 0);
     const serviceCapacity = effectiveBookingCapacity(settings, serviceData);
+    const servicePrice = Number(serviceData.price ?? 0);
 
     const startAt = new Date(payload.startAtMs);
     const bookingDate = formatDateKey(startAt);
@@ -1090,6 +1276,54 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       throw new Error("Dit tijdslot is net bezet. Kies een ander moment.");
     }
 
+    let referralInfo: {
+      postId: string;
+      influencerId: string;
+      influencerName: string;
+      commissionPercent: number;
+      commissionAmount: number;
+    } | null = null;
+
+    const referralPostId = payload.referralPostId?.trim() || "";
+    if (referralPostId) {
+      const referralSnap = await transaction.get(doc(db, "feed_public", referralPostId));
+      if (referralSnap.exists()) {
+        const referralData = referralSnap.data() as Record<string, unknown>;
+        const referralCompanyId = String(referralData.companyId ?? "").trim();
+        const referralServiceId = String(referralData.serviceId ?? "").trim();
+        const referralInfluencerId = String(referralData.influencerId ?? "").trim();
+        const referralInfluencerName = String(referralData.influencerName ?? "").trim();
+        const referralCreatorRole = String(referralData.creatorRole ?? "").trim();
+        const referralIsActive = Boolean(referralData.isActive);
+        const rawCommissionPercent = Number(
+          referralData.influencerCommissionPercent ?? DEFAULT_INFLUENCER_COMMISSION_PERCENT
+        );
+        const commissionPercent = Number.isFinite(rawCommissionPercent)
+          ? Math.max(0, Math.min(30, rawCommissionPercent))
+          : DEFAULT_INFLUENCER_COMMISSION_PERCENT;
+        const serviceMatches = !referralServiceId || referralServiceId === payload.serviceId;
+
+        if (
+          referralIsActive &&
+          referralCreatorRole === "influencer" &&
+          referralCompanyId === payload.companyId &&
+          serviceMatches &&
+          referralInfluencerId &&
+          referralInfluencerId !== payload.customerId &&
+          commissionPercent > 0
+        ) {
+          const commissionAmount = Number(((servicePrice * commissionPercent) / 100).toFixed(2));
+          referralInfo = {
+            postId: referralPostId,
+            influencerId: referralInfluencerId,
+            influencerName: referralInfluencerName,
+            commissionPercent,
+            commissionAmount,
+          };
+        }
+      }
+    }
+
     const status: BookingStatus = settings.autoConfirm ? "confirmed" : "pending";
     const nowDate = new Date();
 
@@ -1120,7 +1354,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       serviceBufferBeforeMin,
       serviceBufferAfterMin,
       serviceCapacity,
-      servicePrice: Number(serviceData.price ?? 0),
+      servicePrice,
       bookingDate,
       startAt,
       endAt: new Date(endAtMs),
@@ -1145,6 +1379,11 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       note: payload.note?.trim() ?? "",
       cancellationFeePercent: 0,
       cancellationFeeAmount: 0,
+      referralPostId: referralInfo?.postId ?? "",
+      referralInfluencerId: referralInfo?.influencerId ?? "",
+      referralInfluencerName: referralInfo?.influencerName ?? "",
+      referralCommissionPercent: referralInfo?.commissionPercent ?? 0,
+      referralCommissionAmount: referralInfo?.commissionAmount ?? 0,
       lockIds,
       lockSeat: chosenSeat,
       createdAt: serverTimestamp(),
@@ -1154,6 +1393,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
     return {
       status,
       companyName: String(companyData.name ?? "Salon"),
+      serviceName: String(serviceData.name ?? "Dienst"),
     };
   });
 
@@ -1165,6 +1405,15 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
     serviceId: payload.serviceId,
     bookingId: bookingRef.id,
     isAutoConfirmed: result.status === "confirmed",
+  }).catch(() => null);
+  notifyCustomerOnBookingCreated({
+    customerId: payload.customerId,
+    companyId: payload.companyId,
+    companyName: result.companyName,
+    serviceId: payload.serviceId,
+    serviceName: result.serviceName,
+    bookingId: bookingRef.id,
+    status: result.status === "confirmed" ? "confirmed" : "pending",
   }).catch(() => null);
 
   return {
@@ -1178,6 +1427,14 @@ export async function setBookingStatusByCompany(
   companyId: string,
   status: "confirmed" | "declined"
 ): Promise<void> {
+  let notifyPayload: {
+    customerId: string;
+    companyId: string;
+    companyName: string;
+    serviceId: string;
+    serviceName: string;
+  } | null = null;
+
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
@@ -1187,6 +1444,13 @@ export async function setBookingStatusByCompany(
     if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
 
     assertStatusTransition(row.status, status, "company");
+    notifyPayload = {
+      customerId: row.customerId,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
 
     if (status === "declined") {
       releaseSlotLocks(transaction, getBookingLockIds(row));
@@ -1204,6 +1468,31 @@ export async function setBookingStatusByCompany(
       updatedAt: serverTimestamp(),
     });
   });
+
+  const statusNotifyPayload = notifyPayload as
+    | {
+        customerId: string;
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null;
+  if (statusNotifyPayload) {
+    const actorId = auth.currentUser?.uid ?? companyId;
+    const actorRole = actorId === companyId ? "company" : "employee";
+    notifyCustomerOnBookingStatusByCompany({
+      customerId: statusNotifyPayload.customerId,
+      companyId: statusNotifyPayload.companyId,
+      companyName: statusNotifyPayload.companyName,
+      serviceId: statusNotifyPayload.serviceId,
+      serviceName: statusNotifyPayload.serviceName,
+      bookingId,
+      status,
+      actorId,
+      actorRole,
+    }).catch(() => null);
+  }
 }
 
 async function reserveLocksInTransaction(
@@ -1328,6 +1617,18 @@ export async function proposeBookingTimeByCompany(params: {
     companyConfirmedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  notifyCustomerOnBookingProposalByCompany({
+    customerId: row.customerId,
+    companyId: row.companyId,
+    companyName: row.companyName,
+    serviceId: row.serviceId,
+    serviceName: row.serviceName,
+    bookingId,
+    proposedStartAtMs: window.startAtMs,
+    actorId: auth.currentUser?.uid ?? companyId,
+    actorRole: (auth.currentUser?.uid ?? companyId) === companyId ? "company" : "employee",
+  }).catch(() => null);
 }
 
 export async function proposeNextBookingTimeByCompany(
@@ -1355,6 +1656,14 @@ export async function proposeNextBookingTimeByCompany(
 }
 
 export async function acceptCompanyProposalByCustomer(bookingId: string, customerId: string): Promise<void> {
+  let notifyPayload: {
+    companyId: string;
+    customerId: string;
+    customerName: string;
+    serviceId: string;
+    serviceName: string;
+  } | null = null;
+
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
@@ -1365,6 +1674,13 @@ export async function acceptCompanyProposalByCustomer(bookingId: string, custome
     if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
       throw new Error("Er is geen voorstel van het bedrijf om te bevestigen.");
     }
+    notifyPayload = {
+      companyId: row.companyId,
+      customerId: row.customerId,
+      customerName: row.customerName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
 
     const proposedStartAtMs = row.proposedStartAtMs || 0;
     const proposedEndAtMs = row.proposedEndAtMs || 0;
@@ -1405,9 +1721,38 @@ export async function acceptCompanyProposalByCustomer(bookingId: string, custome
       updatedAt: serverTimestamp(),
     });
   });
+
+  const proposalAcceptedNotifyPayload = notifyPayload as
+    | {
+        companyId: string;
+        customerId: string;
+        customerName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null;
+  if (proposalAcceptedNotifyPayload) {
+    notifyCompanyOnBookingProposalDecisionByCustomer({
+      companyId: proposalAcceptedNotifyPayload.companyId,
+      customerId: proposalAcceptedNotifyPayload.customerId,
+      customerName: proposalAcceptedNotifyPayload.customerName,
+      serviceId: proposalAcceptedNotifyPayload.serviceId,
+      serviceName: proposalAcceptedNotifyPayload.serviceName,
+      bookingId,
+      decision: "accepted",
+    }).catch(() => null);
+  }
 }
 
 export async function declineCompanyProposalByCustomer(bookingId: string, customerId: string): Promise<void> {
+  let notifyPayload: {
+    companyId: string;
+    customerId: string;
+    customerName: string;
+    serviceId: string;
+    serviceName: string;
+  } | null = null;
+
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
@@ -1418,6 +1763,13 @@ export async function declineCompanyProposalByCustomer(bookingId: string, custom
     if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
       throw new Error("Er is geen voorstel om te weigeren.");
     }
+    notifyPayload = {
+      companyId: row.companyId,
+      customerId: row.customerId,
+      customerName: row.customerName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
 
     releaseSlotLocks(transaction, getBookingLockIds(row));
     transaction.update(ref, {
@@ -1426,6 +1778,27 @@ export async function declineCompanyProposalByCustomer(bookingId: string, custom
       updatedAt: serverTimestamp(),
     });
   });
+
+  const proposalDeclinedNotifyPayload = notifyPayload as
+    | {
+        companyId: string;
+        customerId: string;
+        customerName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null;
+  if (proposalDeclinedNotifyPayload) {
+    notifyCompanyOnBookingProposalDecisionByCustomer({
+      companyId: proposalDeclinedNotifyPayload.companyId,
+      customerId: proposalDeclinedNotifyPayload.customerId,
+      customerName: proposalDeclinedNotifyPayload.customerName,
+      serviceId: proposalDeclinedNotifyPayload.serviceId,
+      serviceName: proposalDeclinedNotifyPayload.serviceName,
+      bookingId,
+      decision: "declined",
+    }).catch(() => null);
+  }
 }
 
 export async function requestSameDayRescheduleByCustomer(
@@ -1478,6 +1851,15 @@ export async function requestSameDayRescheduleByCustomer(
     proposedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  notifyCompanyOnRescheduleRequestByCustomer({
+    companyId: row.companyId,
+    customerId: row.customerId,
+    customerName: row.customerName,
+    serviceId: row.serviceId,
+    serviceName: row.serviceName,
+    bookingId,
+    proposedStartAtMs: window.startAtMs,
+  }).catch(() => null);
 
   return {
     proposedStartAtMs: window.startAtMs,
@@ -1489,6 +1871,14 @@ export async function respondToCustomerRescheduleByCompany(
   companyId: string,
   decision: "approved" | "declined"
 ): Promise<void> {
+  let notifyPayload: {
+    customerId: string;
+    companyId: string;
+    companyName: string;
+    serviceId: string;
+    serviceName: string;
+  } | null = null;
+
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
@@ -1499,6 +1889,13 @@ export async function respondToCustomerRescheduleByCompany(
     if (row.status !== "pending_reschedule_approval" || row.proposalBy !== "customer") {
       throw new Error("Er staat geen verplaatsingsaanvraag open.");
     }
+    notifyPayload = {
+      customerId: row.customerId,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
 
     if (decision === "declined") {
       transaction.update(ref, {
@@ -1549,6 +1946,31 @@ export async function respondToCustomerRescheduleByCompany(
       updatedAt: serverTimestamp(),
     });
   });
+
+  const rescheduleNotifyPayload = notifyPayload as
+    | {
+        customerId: string;
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null;
+  if (rescheduleNotifyPayload) {
+    const actorId = auth.currentUser?.uid ?? companyId;
+    const actorRole = actorId === companyId ? "company" : "employee";
+    notifyCustomerOnRescheduleDecisionByCompany({
+      customerId: rescheduleNotifyPayload.customerId,
+      companyId: rescheduleNotifyPayload.companyId,
+      companyName: rescheduleNotifyPayload.companyName,
+      serviceId: rescheduleNotifyPayload.serviceId,
+      serviceName: rescheduleNotifyPayload.serviceName,
+      bookingId,
+      decision,
+      actorId,
+      actorRole,
+    }).catch(() => null);
+  }
 }
 
 export async function cancelBookingByCustomer(
@@ -1557,6 +1979,14 @@ export async function cancelBookingByCustomer(
 ): Promise<{ feePercent: number; feeAmount: number }> {
   const nowMs = Date.now();
   let feeResult = { feePercent: 0, feeAmount: 0 };
+  let notifyPayload: {
+    companyId: string;
+    customerId: string;
+    customerName: string;
+    serviceId: string;
+    serviceName: string;
+    feePercent: number;
+  } | null = null;
 
   await runTransaction(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
@@ -1576,6 +2006,14 @@ export async function cancelBookingByCustomer(
       feePercent: computed.percent,
       feeAmount: computed.amount,
     };
+    notifyPayload = {
+      companyId: row.companyId,
+      customerId: row.customerId,
+      customerName: row.customerName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+      feePercent: computed.percent,
+    };
 
     transaction.update(ref, {
       status: nextStatus,
@@ -1585,6 +2023,27 @@ export async function cancelBookingByCustomer(
       updatedAt: serverTimestamp(),
     });
   });
+  const cancelNotifyPayload = notifyPayload as
+    | {
+        companyId: string;
+        customerId: string;
+        customerName: string;
+        serviceId: string;
+        serviceName: string;
+        feePercent: number;
+      }
+    | null;
+  if (cancelNotifyPayload) {
+    notifyCompanyOnBookingCancelledByCustomer({
+      companyId: cancelNotifyPayload.companyId,
+      customerId: cancelNotifyPayload.customerId,
+      customerName: cancelNotifyPayload.customerName,
+      serviceId: cancelNotifyPayload.serviceId,
+      serviceName: cancelNotifyPayload.serviceName,
+      bookingId,
+      feePercent: cancelNotifyPayload.feePercent,
+    }).catch(() => null);
+  }
 
   return feeResult;
 }

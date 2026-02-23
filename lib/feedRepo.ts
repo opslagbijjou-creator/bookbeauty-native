@@ -17,6 +17,12 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import {
+  normalizeMediaCropPreset,
+  normalizeMediaFilterPreset,
+  type MediaCropPreset,
+  type MediaFilterPreset,
+} from "./mediaEdit";
 import type { Category } from "./ui";
 
 export type FeedPost = {
@@ -37,7 +43,18 @@ export type FeedPost = {
   videoUrl: string;
   imageUrl: string;
   thumbnailUrl?: string;
+  sourceVideoUrl?: string;
+  sourceImageUrl?: string;
+  cropPreset?: MediaCropPreset;
+  filterPreset?: MediaFilterPreset;
+  clipStartSec?: number;
+  clipEndSec?: number;
+  videoDurationSec?: number;
   isActive: boolean;
+  creatorRole?: "company" | "influencer";
+  influencerId?: string;
+  influencerName?: string;
+  influencerCommissionPercent?: number;
   likeCount?: number;
   viewCount?: number;
   createdAtMs?: number;
@@ -66,10 +83,27 @@ export type AddFeedPostPayload = {
   videoUrl?: string;
   imageUrl?: string;
   thumbnailUrl?: string;
+  sourceVideoUrl?: string;
+  sourceImageUrl?: string;
+  cropPreset?: MediaCropPreset;
+  filterPreset?: MediaFilterPreset;
+  clipStartSec?: number;
+  clipEndSec?: number;
+  videoDurationSec?: number;
   serviceId?: string;
   serviceName?: string;
   isActive?: boolean;
   viewCount?: number;
+  creatorRole?: "company" | "influencer";
+  influencerId?: string;
+  influencerName?: string;
+  influencerCommissionPercent?: number;
+};
+
+export type AddInfluencerFeedPostInput = {
+  influencerId: string;
+  companyId: string;
+  payload: AddFeedPostPayload;
 };
 
 function normalizeHashtags(value: unknown): string[] {
@@ -93,6 +127,16 @@ function normalizeLinkedServiceId(value: unknown): string | undefined {
   return raw;
 }
 
+function normalizeOptionalNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, value);
+}
+
+function normalizeCommissionPercent(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(30, Number(value)));
+}
+
 function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
   const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
   const rawVideoUrl = String(data.videoUrl ?? "").trim();
@@ -101,6 +145,12 @@ function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
   const mediaType: "video" | "image" = rawMediaType ?? (rawImageUrl ? "image" : "video");
   const linkedServiceId = normalizeLinkedServiceId(data.serviceId);
   const linkedServiceName = linkedServiceId ? normalizeOptionalString(data.serviceName) : undefined;
+  const creatorRoleRaw = String(data.creatorRole ?? "");
+  const creatorRole: "company" | "influencer" =
+    creatorRoleRaw === "influencer" ? "influencer" : "company";
+  const influencerId = normalizeOptionalString(data.influencerId);
+  const influencerName = normalizeOptionalString(data.influencerName);
+  const influencerCommissionPercent = normalizeCommissionPercent(data.influencerCommissionPercent);
 
   return {
     id,
@@ -122,7 +172,18 @@ function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
     videoUrl: rawVideoUrl,
     imageUrl: rawImageUrl,
     thumbnailUrl: typeof data.thumbnailUrl === "string" ? data.thumbnailUrl : undefined,
+    sourceVideoUrl: normalizeOptionalString(data.sourceVideoUrl),
+    sourceImageUrl: normalizeOptionalString(data.sourceImageUrl),
+    cropPreset: normalizeMediaCropPreset(data.cropPreset),
+    filterPreset: normalizeMediaFilterPreset(data.filterPreset),
+    clipStartSec: normalizeOptionalNonNegativeNumber(data.clipStartSec),
+    clipEndSec: normalizeOptionalNonNegativeNumber(data.clipEndSec),
+    videoDurationSec: normalizeOptionalNonNegativeNumber(data.videoDurationSec),
     isActive: Boolean(data.isActive),
+    creatorRole,
+    influencerId,
+    influencerName,
+    influencerCommissionPercent,
     viewCount: Number(data.viewCount ?? 0) || 0,
     createdAtMs: typeof createdAt?.toMillis === "function" ? createdAt.toMillis() : 0,
   };
@@ -211,6 +272,27 @@ export async function fetchMyFeedPosts(companyId: string): Promise<FeedPost[]> {
   }
 }
 
+export async function fetchInfluencerFeedPosts(influencerId: string): Promise<FeedPost[]> {
+  const cleanInfluencerId = influencerId.trim();
+  if (!cleanInfluencerId) return [];
+
+  try {
+    const q = query(
+      collection(db, "feed_public"),
+      where("influencerId", "==", cleanInfluencerId),
+      orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => toFeedPost(d.id, d.data()));
+  } catch (error) {
+    if (!isIndexRequiredError(error)) throw error;
+
+    const fallbackQuery = query(collection(db, "feed_public"), where("influencerId", "==", cleanInfluencerId));
+    const snap = await getDocs(fallbackQuery);
+    return sortDescByCreatedAt(snap.docs.map((d) => toFeedPost(d.id, d.data())));
+  }
+}
+
 export async function fetchCompanyFeedPublic(companyId: string): Promise<FeedPost[]> {
   try {
     const q = query(
@@ -251,6 +333,10 @@ export async function addMyFeedPost(companyId: string, payload: AddFeedPostPaylo
   const mediaType: "video" | "image" = payload.mediaType === "image" ? "image" : "video";
   const videoUrl = String(payload.videoUrl ?? "").trim();
   const imageUrl = String(payload.imageUrl ?? "").trim();
+  const sourceVideoUrl = String(payload.sourceVideoUrl ?? videoUrl).trim();
+  const sourceImageUrl = String(payload.sourceImageUrl ?? imageUrl).trim();
+  const cropPreset = normalizeMediaCropPreset(payload.cropPreset);
+  const filterPreset = normalizeMediaFilterPreset(payload.filterPreset);
 
   if (mediaType === "video" && !videoUrl) {
     throw new Error("Video ontbreekt.");
@@ -278,6 +364,94 @@ export async function addMyFeedPost(companyId: string, payload: AddFeedPostPaylo
     videoUrl: mediaType === "video" ? videoUrl : "",
     imageUrl: mediaType === "image" ? imageUrl : "",
     thumbnailUrl: payload.thumbnailUrl ?? (mediaType === "image" ? imageUrl : ""),
+    sourceVideoUrl: mediaType === "video" ? sourceVideoUrl : "",
+    sourceImageUrl: mediaType === "image" ? sourceImageUrl : "",
+    cropPreset,
+    filterPreset,
+    clipStartSec: mediaType === "video" ? Math.max(0, Number(payload.clipStartSec ?? 0) || 0) : 0,
+    clipEndSec: mediaType === "video" ? Math.max(0, Number(payload.clipEndSec ?? 0) || 0) : 0,
+    videoDurationSec: mediaType === "video" ? Math.max(0, Number(payload.videoDurationSec ?? 0) || 0) : 0,
+    creatorRole: "company",
+    influencerId: "",
+    influencerName: "",
+    influencerCommissionPercent: 0,
+    isActive: payload.isActive ?? true,
+    viewCount: Number(payload.viewCount ?? 0) || 0,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function addInfluencerFeedPost(input: AddInfluencerFeedPostInput): Promise<void> {
+  const influencerId = input.influencerId.trim();
+  const companyId = input.companyId.trim();
+  const payload = input.payload;
+  if (!influencerId || !companyId) {
+    throw new Error("Onvolledige influencer upload gegevens.");
+  }
+
+  const linkedServiceId = String(payload.serviceId ?? "").trim();
+  if (!linkedServiceId) {
+    throw new Error("Koppel een dienst zodat boekingen via je video gemeten kunnen worden.");
+  }
+
+  const companySnap = await getDoc(doc(db, "companies_public", companyId));
+  if (!companySnap.exists()) {
+    throw new Error("Bedrijf niet gevonden.");
+  }
+
+  const serviceSnap = await getDoc(doc(db, "companies_public", companyId, "services_public", linkedServiceId));
+  if (!serviceSnap.exists() || !Boolean(serviceSnap.data()?.isActive)) {
+    throw new Error("Gekoppelde dienst is niet actief of niet gevonden.");
+  }
+
+  const mediaType: "video" | "image" = payload.mediaType === "image" ? "image" : "video";
+  const videoUrl = String(payload.videoUrl ?? "").trim();
+  const imageUrl = String(payload.imageUrl ?? "").trim();
+  const sourceVideoUrl = String(payload.sourceVideoUrl ?? videoUrl).trim();
+  const sourceImageUrl = String(payload.sourceImageUrl ?? imageUrl).trim();
+  const cropPreset = normalizeMediaCropPreset(payload.cropPreset);
+  const filterPreset = normalizeMediaFilterPreset(payload.filterPreset);
+  const influencerCommissionPercent =
+    normalizeCommissionPercent(payload.influencerCommissionPercent) ?? 5;
+
+  if (mediaType === "video" && !videoUrl) {
+    throw new Error("Video ontbreekt.");
+  }
+  if (mediaType === "image" && !imageUrl) {
+    throw new Error("Foto ontbreekt.");
+  }
+
+  const company = companySnap.data();
+
+  await addDoc(collection(db, "feed_public"), {
+    companyId,
+    companyName: String(company.name ?? "Onbekende salon"),
+    companyLogoUrl: typeof company.logoUrl === "string" ? company.logoUrl : "",
+    companyCity: typeof company.city === "string" ? company.city : "",
+    companyCategories: Array.isArray(company.categories) ? company.categories : [],
+    serviceId: linkedServiceId,
+    serviceName: String(payload.serviceName ?? serviceSnap.data()?.name ?? ""),
+    category: payload.category,
+    title: payload.title ?? "",
+    caption: payload.caption ?? "",
+    hashtags: normalizeHashtags(payload.hashtags),
+    visibility: payload.visibility ?? "public",
+    mediaType,
+    videoUrl: mediaType === "video" ? videoUrl : "",
+    imageUrl: mediaType === "image" ? imageUrl : "",
+    thumbnailUrl: payload.thumbnailUrl ?? (mediaType === "image" ? imageUrl : ""),
+    sourceVideoUrl: mediaType === "video" ? sourceVideoUrl : "",
+    sourceImageUrl: mediaType === "image" ? sourceImageUrl : "",
+    cropPreset,
+    filterPreset,
+    clipStartSec: mediaType === "video" ? Math.max(0, Number(payload.clipStartSec ?? 0) || 0) : 0,
+    clipEndSec: mediaType === "video" ? Math.max(0, Number(payload.clipEndSec ?? 0) || 0) : 0,
+    videoDurationSec: mediaType === "video" ? Math.max(0, Number(payload.videoDurationSec ?? 0) || 0) : 0,
+    creatorRole: "influencer",
+    influencerId,
+    influencerName: String(payload.influencerName ?? "").trim(),
+    influencerCommissionPercent,
     isActive: payload.isActive ?? true,
     viewCount: Number(payload.viewCount ?? 0) || 0,
     createdAt: serverTimestamp(),
@@ -297,6 +471,19 @@ export async function updateMyFeedPost(postId: string, patch: Partial<AddFeedPos
   if (typeof patch.videoUrl === "string") nextPatch.videoUrl = patch.videoUrl;
   if (typeof patch.imageUrl === "string") nextPatch.imageUrl = patch.imageUrl;
   if (typeof patch.thumbnailUrl === "string") nextPatch.thumbnailUrl = patch.thumbnailUrl;
+  if (typeof patch.sourceVideoUrl === "string") nextPatch.sourceVideoUrl = patch.sourceVideoUrl;
+  if (typeof patch.sourceImageUrl === "string") nextPatch.sourceImageUrl = patch.sourceImageUrl;
+  if (typeof patch.cropPreset === "string") nextPatch.cropPreset = normalizeMediaCropPreset(patch.cropPreset);
+  if (typeof patch.filterPreset === "string") nextPatch.filterPreset = normalizeMediaFilterPreset(patch.filterPreset);
+  if (typeof patch.clipStartSec === "number" && Number.isFinite(patch.clipStartSec)) {
+    nextPatch.clipStartSec = Math.max(0, patch.clipStartSec);
+  }
+  if (typeof patch.clipEndSec === "number" && Number.isFinite(patch.clipEndSec)) {
+    nextPatch.clipEndSec = Math.max(0, patch.clipEndSec);
+  }
+  if (typeof patch.videoDurationSec === "number" && Number.isFinite(patch.videoDurationSec)) {
+    nextPatch.videoDurationSec = Math.max(0, patch.videoDurationSec);
+  }
   if (typeof patch.serviceId === "string") nextPatch.serviceId = patch.serviceId;
   if (typeof patch.serviceName === "string") nextPatch.serviceName = patch.serviceName;
   if (typeof patch.isActive === "boolean") nextPatch.isActive = patch.isActive;

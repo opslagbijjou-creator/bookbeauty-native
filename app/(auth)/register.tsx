@@ -1,13 +1,23 @@
 import React, { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import CategoryChips from "../../components/CategoryChips";
-import { registerCompany, registerCustomer } from "../../lib/authRepo";
+import { registerCompany, registerCustomer, registerInfluencer } from "../../lib/authRepo";
 import { CATEGORIES, COLORS } from "../../lib/ui";
 
-type RolePick = "customer" | "company";
+type RolePick = "customer" | "company" | "influencer";
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -16,6 +26,7 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const [influencerName, setInfluencerName] = useState("");
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [bio, setBio] = useState("");
@@ -27,6 +38,9 @@ export default function RegisterScreen() {
 
   const canSubmit = useMemo(() => {
     if (role === "customer") return email.trim().length > 3 && password.length >= 6;
+    if (role === "influencer") {
+      return email.trim().length > 3 && password.length >= 6 && influencerName.trim().length >= 2;
+    }
     return (
       email.trim().length > 3 &&
       password.length >= 6 &&
@@ -34,7 +48,7 @@ export default function RegisterScreen() {
       city.trim().length >= 2 &&
       categories.length > 0
     );
-  }, [email, password, role, name, city, categories.length]);
+  }, [email, password, role, influencerName, name, city, categories.length]);
 
   function toggleCategory(value: string) {
     setCategories((prev) => (prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value]));
@@ -48,6 +62,13 @@ export default function RegisterScreen() {
       if (role === "customer") {
         await registerCustomer(email, password);
         router.replace("/(customer)/(tabs)" as never);
+      } else if (role === "influencer") {
+        await registerInfluencer({
+          email,
+          password,
+          name: influencerName.trim(),
+        });
+        router.replace("/(customer)/(tabs)/profile" as never);
       } else {
         await registerCompany({
           email,
@@ -70,8 +91,18 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={["top"]}>
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-        <View style={styles.card}>
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={24}
+      >
+        <ScrollView
+          style={styles.screen}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          <View style={styles.card}>
           <View style={styles.titleRow}>
             <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
             <Text style={styles.title}>Account aanmaken</Text>
@@ -89,6 +120,12 @@ export default function RegisterScreen() {
               onPress={() => setRole("company")}
             >
               <Text style={[styles.roleText, role === "company" && styles.roleTextActive]}>Bedrijf</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.roleBtn, role === "influencer" && styles.roleBtnActive]}
+              onPress={() => setRole("influencer")}
+            >
+              <Text style={[styles.roleText, role === "influencer" && styles.roleTextActive]}>Influencer</Text>
             </Pressable>
           </View>
 
@@ -109,6 +146,18 @@ export default function RegisterScreen() {
             secureTextEntry
             style={styles.input}
           />
+
+          {role === "influencer" ? (
+            <View style={styles.companyFields}>
+              <TextInput
+                value={influencerName}
+                onChangeText={setInfluencerName}
+                placeholder="Jouw creator naam"
+                placeholderTextColor={COLORS.placeholder}
+                style={styles.input}
+              />
+            </View>
+          ) : null}
 
           {role === "company" ? (
             <View style={styles.companyFields}>
@@ -159,8 +208,9 @@ export default function RegisterScreen() {
           <Pressable onPress={() => router.replace("/(auth)/login" as never)}>
             <Text style={styles.link}>Al een account? Inloggen</Text>
           </Pressable>
-        </View>
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

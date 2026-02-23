@@ -9,6 +9,8 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { createCompany } from "./companyActions";
 import { AppRole, isValidRole } from "./roles";
+import { ensureBookBeautyAutoFollow } from "./platformRepo";
+import { isRootAdminIdentity } from "./adminAccess";
 
 export type RegisterCompanyInput = {
   email: string;
@@ -19,6 +21,12 @@ export type RegisterCompanyInput = {
   bio?: string;
   kvk?: string;
   phone?: string;
+};
+
+export type RegisterInfluencerInput = {
+  email: string;
+  password: string;
+  name?: string;
 };
 
 function toEmailKey(email: string): string {
@@ -53,10 +61,54 @@ async function ensureUserDocForLogin(user: User): Promise<void> {
   const uid = user.uid;
   const email = (user.email ?? "").trim();
   if (!uid || !email) return;
+  const isRootAdmin = isRootAdminIdentity({ uid, email });
 
   const userRef = doc(db, "users", uid);
   const userSnap = await getDoc(userRef);
-  if (userSnap.exists()) return;
+  if (userSnap.exists()) {
+    const existing = userSnap.data() as Record<string, unknown>;
+    const existingRole = isRootAdmin ? "admin" : isValidRole(existing.role) ? existing.role : "customer";
+    if (isRootAdmin && existing.role !== "admin") {
+      await setDoc(
+        userRef,
+        {
+          role: "admin",
+          email,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      await upsertUserLookup({
+        uid,
+        email,
+        role: "admin",
+        name: "BookBeauty Admin",
+      });
+    }
+    await ensureBookBeautyAutoFollow(uid, existingRole).catch(() => null);
+    return;
+  }
+
+  if (isRootAdmin) {
+    await setDoc(
+      userRef,
+      {
+        role: "admin",
+        email,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    await upsertUserLookup({
+      uid,
+      email,
+      role: "admin",
+      name: "BookBeauty Admin",
+    });
+    await ensureBookBeautyAutoFollow(uid, "admin").catch(() => null);
+    return;
+  }
 
   const key = toEmailKey(email);
   let lookupData: Record<string, unknown> | null = null;
@@ -98,6 +150,8 @@ async function ensureUserDocForLogin(user: User): Promise<void> {
     },
     { merge: true }
   );
+
+  await ensureBookBeautyAutoFollow(uid, role).catch(() => null);
 }
 
 export async function login(email: string, password: string): Promise<User> {
@@ -110,10 +164,12 @@ export async function login(email: string, password: string): Promise<User> {
 export async function registerCustomer(email: string, password: string): Promise<User> {
   const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
   const cleanEmail = cred.user.email ?? email.trim();
+  const rootAdmin = isRootAdminIdentity({ uid: cred.user.uid, email: cleanEmail });
   const fallbackName = cleanEmail.split("@")[0] ?? "Klant";
+  const role: AppRole = rootAdmin ? "admin" : "customer";
 
   await setDoc(doc(db, "users", cred.user.uid), {
-    role: "customer",
+    role,
     email: cleanEmail,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -122,9 +178,11 @@ export async function registerCustomer(email: string, password: string): Promise
   await upsertUserLookup({
     uid: cred.user.uid,
     email: cleanEmail,
-    role: "customer",
-    name: fallbackName,
+    role,
+    name: rootAdmin ? "BookBeauty Admin" : fallbackName,
   });
+
+  await ensureBookBeautyAutoFollow(cred.user.uid, role).catch(() => null);
 
   return cred.user;
 }
@@ -158,6 +216,33 @@ export async function registerCompany(input: RegisterCompanyInput): Promise<User
     email: input.email,
   });
 
+  await ensureBookBeautyAutoFollow(cred.user.uid, "company").catch(() => null);
+
+  return cred.user;
+}
+
+export async function registerInfluencer(input: RegisterInfluencerInput): Promise<User> {
+  const cred = await createUserWithEmailAndPassword(auth, input.email.trim(), input.password);
+  const cleanEmail = cred.user.email ?? input.email.trim();
+  const cleanName = input.name?.trim() || cleanEmail.split("@")[0] || "Influencer";
+
+  await setDoc(doc(db, "users", cred.user.uid), {
+    role: "influencer",
+    email: cleanEmail,
+    displayName: cleanName,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await upsertUserLookup({
+    uid: cred.user.uid,
+    email: cleanEmail,
+    role: "influencer",
+    name: cleanName,
+  });
+
+  await ensureBookBeautyAutoFollow(cred.user.uid, "influencer").catch(() => null);
+
   return cred.user;
 }
 
@@ -182,6 +267,11 @@ export async function getUserRole(uid: string): Promise<AppRole | null> {
   if (!uid) return null;
 
   try {
+    const current = auth.currentUser;
+    if (current?.uid === uid && isRootAdminIdentity({ uid: current.uid, email: current.email })) {
+      return "admin";
+    }
+
     if (auth.currentUser?.uid === uid) {
       await auth.currentUser.getIdToken();
     }

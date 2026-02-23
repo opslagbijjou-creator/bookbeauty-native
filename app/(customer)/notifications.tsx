@@ -4,20 +4,21 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  CompanyNotification,
-  markAllNotificationsRead,
-  markNotificationRead,
-  subscribeMyCompanyNotifications,
+  CustomerNotification,
+  markAllCustomerNotificationsRead,
+  markCustomerNotificationRead,
+  subscribeMyCustomerNotifications,
 } from "../../lib/notificationRepo";
 import { auth } from "../../lib/firebase";
 import { COLORS } from "../../lib/ui";
 
-function typeIcon(type: CompanyNotification["type"]): keyof typeof Ionicons.glyphMap {
-  if (type.startsWith("booking_")) return "calendar-outline";
-  if (type === "new_follower") return "people-outline";
-  if (type === "service_rating" || type === "company_rating") return "star-outline";
-  if (type === "comment_like") return "chatbubble-outline";
-  return "heart-outline";
+function typeIcon(type: CustomerNotification["type"]): keyof typeof Ionicons.glyphMap {
+  if (type === "booking_confirmed") return "checkmark-circle-outline";
+  if (type === "booking_declined") return "close-circle-outline";
+  if (type === "booking_time_proposed") return "time-outline";
+  if (type === "booking_reschedule_approved") return "swap-horizontal-outline";
+  if (type === "booking_reschedule_declined") return "close-outline";
+  return "calendar-outline";
 }
 
 function formatWhen(timestampMs: number): string {
@@ -30,23 +31,34 @@ function formatWhen(timestampMs: number): string {
   });
 }
 
-function routeForNotification(item: CompanyNotification): string | null {
-  if (!item.type.startsWith("booking_")) return null;
-  if (item.bookingId) return `/(company)/(tabs)/bookings?bookingId=${encodeURIComponent(item.bookingId)}`;
-  return "/(company)/(tabs)/bookings";
+function isBookingNotification(type: CustomerNotification["type"]): boolean {
+  return (
+    type === "booking_created" ||
+    type === "booking_confirmed" ||
+    type === "booking_declined" ||
+    type === "booking_time_proposed" ||
+    type === "booking_reschedule_approved" ||
+    type === "booking_reschedule_declined"
+  );
 }
 
-export default function CompanyNotificationsScreen() {
+function routeForNotification(item: CustomerNotification): string | null {
+  if (!isBookingNotification(item.type)) return null;
+  if (item.bookingId) return `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(item.bookingId)}`;
+  return "/(customer)/(tabs)/bookings";
+}
+
+export default function CustomerNotificationsScreen() {
   const uid = auth.currentUser?.uid ?? null;
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
-  const [items, setItems] = useState<CompanyNotification[]>([]);
+  const [items, setItems] = useState<CustomerNotification[]>([]);
 
   useEffect(() => {
     if (!uid) return;
     setLoading(true);
-    const unsub = subscribeMyCompanyNotifications(
+    const unsub = subscribeMyCustomerNotifications(
       uid,
       (rows) => {
         setItems(rows);
@@ -59,11 +71,11 @@ export default function CompanyNotificationsScreen() {
 
   const unreadCount = items.filter((item) => !item.read).length;
 
-  async function onMarkOne(item: CompanyNotification) {
+  async function onOpenNotification(item: CustomerNotification) {
     if (!uid) return;
     if (!item.read) {
       setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
-      await markNotificationRead(uid, item.id).catch(() => null);
+      await markCustomerNotificationRead(uid, item.id).catch(() => null);
     }
 
     const nextRoute = routeForNotification(item);
@@ -76,7 +88,7 @@ export default function CompanyNotificationsScreen() {
     if (!uid || !unreadCount || markingAll) return;
     setMarkingAll(true);
     try {
-      await markAllNotificationsRead(uid);
+      await markAllCustomerNotificationsRead(uid);
       setItems((prev) => prev.map((row) => ({ ...row, read: true })));
     } finally {
       setMarkingAll(false);
@@ -118,7 +130,7 @@ export default function CompanyNotificationsScreen() {
           renderItem={({ item }) => {
             const bookingRoute = routeForNotification(item);
             return (
-              <Pressable onPress={() => onMarkOne(item)} style={[styles.card, !item.read && styles.cardUnread]}>
+              <Pressable onPress={() => onOpenNotification(item)} style={[styles.card, !item.read && styles.cardUnread]}>
                 <View style={styles.cardIcon}>
                   <Ionicons name={typeIcon(item.type)} size={16} color={COLORS.primary} />
                 </View>
@@ -228,8 +240,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cardUnread: {
-    backgroundColor: "#fff3f9",
-    borderColor: "#f0c1d8",
+    backgroundColor: "#fff6fb",
+    borderColor: "#f0cfe0",
   },
   cardIcon: {
     width: 30,

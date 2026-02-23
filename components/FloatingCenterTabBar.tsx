@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -41,12 +41,25 @@ export default function FloatingCenterTabBar({
   rightRouteNames,
   config,
 }: FloatingCenterTabBarProps) {
-  const bottomPadding = Math.max(insets.bottom, 8);
-  const barHeight = 78 + bottomPadding;
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const bottomPadding = Math.max(insets.bottom, 10);
+  const topPadding = 6;
+  const barHeight = 84 + bottomPadding + topPadding;
   const routeOrder = useMemo(
     () => uniqueRouteOrder([...leftRouteNames, centerRouteName, ...rightRouteNames]),
     [leftRouteNames, centerRouteName, rightRouteNames]
   );
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   function onPressRoute(routeName: string) {
     const routeIndex = getRouteIndex(state.routes, routeName);
@@ -75,8 +88,12 @@ export default function FloatingCenterTabBar({
     });
   }
 
+  if (keyboardVisible) {
+    return <View style={{ height: bottomPadding }} />;
+  }
+
   return (
-    <View style={[styles.container, { height: barHeight, paddingBottom: bottomPadding }]}> 
+    <View style={[styles.container, { height: barHeight, paddingBottom: bottomPadding, paddingTop: topPadding }]}>
       <View style={styles.row}>
         {routeOrder.map((routeName) => {
           const routeIndex = getRouteIndex(state.routes, routeName);
@@ -138,7 +155,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     borderTopWidth: 1,
     borderColor: COLORS.border,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 10,
@@ -153,11 +170,11 @@ const styles = StyleSheet.create({
   },
   item: {
     flex: 1,
-    minHeight: 56,
+    minHeight: 58,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    gap: 3,
+    gap: 4,
     paddingHorizontal: 2,
   },
   itemActive: {

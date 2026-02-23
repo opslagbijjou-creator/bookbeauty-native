@@ -31,6 +31,12 @@ type AddServiceModalProps = {
 };
 
 const TOTAL_STEPS = 4;
+const STEP_META = [
+  { id: 1, label: "Basis" },
+  { id: 2, label: "Tijd & prijs" },
+  { id: 3, label: "Media" },
+  { id: 4, label: "Check" },
+] as const;
 
 const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Kapper: "cut-outline",
@@ -82,6 +88,10 @@ export default function AddServiceModal({
 
   const parsedPrice = useMemo(() => Number(String(price).replace(",", ".")), [price]);
   const parsedDuration = useMemo(() => Number(durationMin), [durationMin]);
+  const currentStepMeta = useMemo(
+    () => STEP_META.find((item) => item.id === step) ?? STEP_META[0],
+    [step]
+  );
 
   useEffect(() => {
     const onShow = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -238,6 +248,24 @@ export default function AddServiceModal({
     }
   }
 
+  function openUploadSourcePicker() {
+    Alert.alert("Foto toevoegen", "Kies hoe je deze foto wilt toevoegen.", [
+      { text: "Annuleren", style: "cancel" },
+      {
+        text: "Galerij",
+        onPress: () => {
+          onUploadPhoto("library").catch(() => null);
+        },
+      },
+      {
+        text: "Camera",
+        onPress: () => {
+          onUploadPhoto("camera").catch(() => null);
+        },
+      },
+    ]);
+  }
+
   function removePhoto(url: string) {
     setPhotoUrls((prev) => prev.filter((item) => item !== url));
   }
@@ -283,7 +311,7 @@ export default function AddServiceModal({
     if (step === 1) {
       return (
         <View style={styles.stepCard}>
-          <Text style={styles.stepTitle}>Basis info</Text>
+          <Text style={styles.stepTitle}>Basisinformatie</Text>
           <Text style={styles.stepDescription}>Vertel duidelijk wat deze dienst inhoudt.</Text>
 
           <View style={styles.fieldWrap} onLayout={(event) => registerFieldY("name", event.nativeEvent.layout.y)}>
@@ -308,7 +336,9 @@ export default function AddServiceModal({
               placeholderTextColor={COLORS.placeholder}
               style={[styles.input, styles.textarea]}
               multiline
+              maxLength={240}
             />
+            <Text style={styles.fieldCount}>{description.trim().length}/240</Text>
           </View>
 
           <View style={styles.fieldWrap}>
@@ -357,8 +387,8 @@ export default function AddServiceModal({
     if (step === 3) {
       return (
         <View style={styles.stepCard}>
-          <Text style={styles.stepTitle}>Extra opties</Text>
-          <Text style={styles.stepDescription}>Voeg 1 tot 3 foto&apos;s toe en kies zichtbaarheid.</Text>
+          <Text style={styles.stepTitle}>Foto&apos;s & zichtbaarheid</Text>
+          <Text style={styles.stepDescription}>Voeg 1 tot 3 foto&apos;s toe zodat klanten direct zien wat je aanbiedt.</Text>
 
           <View style={styles.photoCard}>
             <View style={styles.photoTitleRow}>
@@ -367,13 +397,13 @@ export default function AddServiceModal({
             </View>
 
             <View style={styles.photoActions}>
-              <Pressable style={[styles.photoBtn, photoUploading && styles.disabled]} onPress={() => onUploadPhoto("library")}>
-                <Ionicons name="image-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.photoBtnText}>Uit galerij</Text>
+              <Pressable style={[styles.photoBtnPrimary, photoUploading && styles.disabled]} onPress={openUploadSourcePicker}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+                <Text style={styles.photoBtnPrimaryText}>Upload foto</Text>
               </Pressable>
               <Pressable style={[styles.photoBtn, photoUploading && styles.disabled]} onPress={() => onUploadPhoto("camera")}>
                 <Ionicons name="camera-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.photoBtnText}>Met camera</Text>
+                <Text style={styles.photoBtnText}>Snelle camera</Text>
               </Pressable>
             </View>
 
@@ -429,7 +459,7 @@ export default function AddServiceModal({
         <KeyboardAvoidingView
           style={styles.keyboardAvoid}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={0}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 18 : 0}
         >
           <View
             style={[
@@ -445,7 +475,9 @@ export default function AddServiceModal({
             <View style={styles.topRow}>
               <View style={styles.topTitleWrap}>
                 <Text style={styles.title}>{isEditing ? "Dienst bewerken" : "Nieuwe dienst toevoegen"}</Text>
-                <Text style={styles.progressText}>Stap {step} van {TOTAL_STEPS}</Text>
+                <Text style={styles.progressText}>
+                  Stap {step} van {TOTAL_STEPS} • {currentStepMeta.label}
+                </Text>
               </View>
               <Pressable style={styles.closeBtn} onPress={onClose}>
                 <Ionicons name="close" size={16} color={COLORS.muted} />
@@ -454,6 +486,20 @@ export default function AddServiceModal({
 
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${(step / TOTAL_STEPS) * 100}%` }]} />
+            </View>
+
+            <View style={styles.stepChipsRow}>
+              {STEP_META.map((item) => {
+                const isActive = step === item.id;
+                const isDone = step > item.id;
+                return (
+                  <View key={item.id} style={[styles.stepChip, (isActive || isDone) && styles.stepChipActive]}>
+                    <Text style={[styles.stepChipText, (isActive || isDone) && styles.stepChipTextActive]}>
+                      {item.id}. {item.label}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
 
             <ScrollView
@@ -522,7 +568,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalCard: {
-    maxHeight: "92%",
+    maxHeight: "95%",
     backgroundColor: COLORS.bg,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -531,7 +577,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 16,
-    gap: 10,
+    gap: 11,
   },
   modalCardKeyboard: {
     maxHeight: "96%",
@@ -578,8 +624,33 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: COLORS.primary,
   },
+  stepChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  stepChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  stepChipActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primarySoft,
+  },
+  stepChipText: {
+    color: COLORS.muted,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  stepChipTextActive: {
+    color: COLORS.primary,
+  },
   content: {
-    paddingBottom: 8,
+    paddingBottom: 12,
     gap: 2,
   },
   stepCard: {
@@ -587,8 +658,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.card,
-    padding: 12,
-    gap: 11,
+    padding: 13,
+    gap: 12,
   },
   stepTitle: {
     color: COLORS.text,
@@ -602,7 +673,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   fieldWrap: {
-    gap: 6,
+    gap: 7,
   },
   fieldLabel: {
     color: COLORS.text,
@@ -623,6 +694,13 @@ const styles = StyleSheet.create({
   textarea: {
     minHeight: 92,
     textAlignVertical: "top",
+  },
+  fieldCount: {
+    alignSelf: "flex-end",
+    color: COLORS.muted,
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: -2,
   },
   photoCard: {
     borderWidth: 1,
@@ -646,8 +724,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  photoBtnPrimary: {
+    flex: 1.2,
+    minHeight: 38,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  photoBtnPrimaryText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
   photoBtn: {
-    flex: 1,
+    flex: 0.9,
     minHeight: 36,
     borderRadius: 9,
     borderWidth: 1,
@@ -750,7 +845,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    marginTop: 2,
+    marginTop: 4,
+    paddingTop: 6,
   },
   backBtn: {
     minHeight: 42,

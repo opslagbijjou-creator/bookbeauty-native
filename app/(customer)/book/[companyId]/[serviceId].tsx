@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -81,12 +83,14 @@ function splitSlotLabel(label: string): { start: string; end: string } {
 
 export default function BookServiceScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ companyId: string; serviceId: string }>();
+  const params = useLocalSearchParams<{ companyId: string; serviceId: string; refPostId?: string }>();
   const companyId = typeof params.companyId === "string" ? params.companyId : "";
   const serviceId = typeof params.serviceId === "string" ? params.serviceId : "";
+  const refPostId = typeof params.refPostId === "string" ? params.refPostId.trim() : "";
+  const hasReferralFromVideo = Boolean(refPostId);
   const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [authReady, setAuthReady] = useState(Boolean(auth.currentUser));
-  const [userRole, setUserRole] = useState<"customer" | "company" | "employee" | "admin" | null>(null);
+  const [userRole, setUserRole] = useState<"customer" | "company" | "employee" | "influencer" | "admin" | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
@@ -126,9 +130,10 @@ export default function BookServiceScreen() {
     () => staffMembers.find((member) => member.id === selectedStaffId) ?? null,
     [staffMembers, selectedStaffId]
   );
+  const bookingBlockedForRole = Boolean(uid && userRole !== null && userRole !== "customer");
   const canBook = Boolean(
     uid &&
-      (userRole === "customer" || userRole === "company") &&
+      userRole === "customer" &&
       service &&
       selectedStaff &&
       selectedSlot &&
@@ -222,14 +227,14 @@ export default function BookServiceScreen() {
       return;
     }
     getUserRole(uid)
-      .then((role) => setUserRole((role as "customer" | "company" | "employee" | "admin") ?? null))
+      .then((role) => setUserRole((role as "customer" | "company" | "employee" | "influencer" | "admin") ?? null))
       .catch(() => setUserRole(null));
   }, [uid]);
 
   useEffect(() => {
     if (!authReady) return;
 
-    if (!uid || !selectedDate || !service || !enabled || !selectedStaffId) {
+    if (!uid || !selectedDate || !service || !enabled || !selectedStaffId || bookingBlockedForRole) {
       setSlots([]);
       setSelectedSlotKey("");
       return;
@@ -266,7 +271,7 @@ export default function BookServiceScreen() {
     return () => {
       mounted = false;
     };
-  }, [authReady, uid, companyId, selectedDate, selectedStaffId, service, enabled]);
+  }, [authReady, uid, companyId, selectedDate, selectedStaffId, service, enabled, bookingBlockedForRole]);
 
   useEffect(() => {
     if (!selectedDate) return;
@@ -290,7 +295,7 @@ export default function BookServiceScreen() {
       Alert.alert("Login vereist", "Log in om een afspraak te boeken.");
       return;
     }
-    if (userRole !== "customer" && userRole !== "company") {
+    if (userRole !== "customer") {
       Alert.alert("Niet beschikbaar", "Dit accounttype kan geen afspraak boeken.");
       return;
     }
@@ -308,6 +313,7 @@ export default function BookServiceScreen() {
         customerEmail: auth.currentUser?.email ?? "",
         note,
         startAtMs: selectedSlot.startAtMs,
+        referralPostId: refPostId || undefined,
       });
 
       const confirmed = result.status === "confirmed";
@@ -332,16 +338,26 @@ export default function BookServiceScreen() {
         <Text style={styles.backText}>Terug</Text>
       </Pressable>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={COLORS.primary} />
-        </View>
-      ) : !service ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>Dienst niet gevonden.</Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={24}
+      >
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator color={COLORS.primary} />
+          </View>
+        ) : !service ? (
+          <View style={styles.center}>
+            <Text style={styles.emptyText}>Dienst niet gevonden.</Text>
+          </View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          >
           <View style={styles.heroCard}>
             <Text style={styles.heroOverline}>{companyName}</Text>
             <Text style={styles.heroTitle}>Boek {service.name}</Text>
@@ -379,10 +395,24 @@ export default function BookServiceScreen() {
                 </Text>
               </View>
 
+              {hasReferralFromVideo ? (
+                <View style={styles.referralCard}>
+                  <Ionicons name="megaphone-outline" size={15} color={BLUE.primary} />
+                  <Text style={styles.referralText}>
+                    Je boekt via een creator video. Eventuele influencer commissie wordt automatisch gekoppeld.
+                  </Text>
+                </View>
+              ) : null}
+
               {!uid ? (
                 <View style={styles.loginCard}>
                   <Ionicons name="log-in-outline" size={15} color={COLORS.primary} />
                   <Text style={styles.loginText}>Log in om dit tijdslot te kunnen boeken.</Text>
+                </View>
+              ) : bookingBlockedForRole ? (
+                <View style={styles.disabledCard}>
+                  <Ionicons name="lock-closed-outline" size={16} color={COLORS.danger} />
+                  <Text style={styles.disabledText}>Alleen klantaccounts kunnen een afspraak boeken.</Text>
                 </View>
               ) : null}
 
@@ -577,8 +607,9 @@ export default function BookServiceScreen() {
               </View>
             </>
           )}
-        </ScrollView>
-      )}
+          </ScrollView>
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -589,6 +620,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
     paddingHorizontal: 14,
     paddingTop: 6,
+  },
+  flex: {
+    flex: 1,
   },
   backBtn: {
     alignSelf: "flex-start",
@@ -768,6 +802,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  referralCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BLUE.border,
+    backgroundColor: "#edf4ff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  referralText: {
+    color: BLUE.primary,
+    fontWeight: "700",
+    fontSize: 12,
+    flex: 1,
   },
   loginCard: {
     borderRadius: 12,

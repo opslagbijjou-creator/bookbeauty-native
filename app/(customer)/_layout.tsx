@@ -1,9 +1,11 @@
 import React, { useEffect } from "react";
-import { Stack, useRouter } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
 import { getUserRole, subscribeAuth } from "../../lib/authRepo";
 
 export default function CustomerStackLayout() {
   const router = useRouter();
+  const pathname = usePathname();
+  const isPublicCatalogRoute = pathname.startsWith("/company/") || pathname.startsWith("/service/");
 
   useEffect(() => {
     const unsub = subscribeAuth(async (user) => {
@@ -15,13 +17,19 @@ export default function CustomerStackLayout() {
       const role = await getUserRole(user.uid);
       if (role === "admin") {
         router.replace("/(admin)/(tabs)" as never);
+      } else if (role === "company") {
+        if (!isPublicCatalogRoute) {
+          router.replace("/(company)/(tabs)/home" as never);
+        }
       } else if (role === "employee") {
-        router.replace("/(company)/(tabs)/bookings" as never);
+        if (!isPublicCatalogRoute) {
+          router.replace("/(company)/(tabs)/bookings" as never);
+        }
       }
     });
 
     return unsub;
-  }, [router]);
+  }, [router, isPublicCatalogRoute]);
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

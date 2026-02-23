@@ -15,6 +15,12 @@ import { db } from "./firebase";
 import { hasActiveService } from "./serviceRepo";
 import type { Category } from "./ui";
 
+export type CompanyBookingServiceSummary = {
+  serviceId?: string;
+  serviceName: string;
+  count: number;
+};
+
 export type CompanyPublic = {
   id: string;
   name: string;
@@ -27,6 +33,8 @@ export type CompanyPublic = {
   coverImageUrl?: string;
   ratingAvg?: number;
   ratingCount?: number;
+  bookingCountTotal?: number;
+  bookingTopServices?: CompanyBookingServiceSummary[];
   badge?: string;
 };
 
@@ -38,6 +46,23 @@ export type FetchCompaniesParams = {
 };
 
 function toCompanyPublic(id: string, data: Record<string, unknown>): CompanyPublic {
+  const topServices = Array.isArray(data.bookingTopServices)
+    ? data.bookingTopServices
+        .map((row) => {
+          const node = (row as Record<string, unknown> | undefined) ?? {};
+          const serviceName = String(node.serviceName ?? "").trim();
+          const count = Number(node.count ?? 0);
+          if (!serviceName || !Number.isFinite(count) || count <= 0) return null;
+          return {
+            serviceId: typeof node.serviceId === "string" ? node.serviceId : undefined,
+            serviceName,
+            count: Math.floor(count),
+          } as CompanyBookingServiceSummary;
+        })
+        .filter((row): row is CompanyBookingServiceSummary => Boolean(row))
+        .slice(0, 8)
+    : undefined;
+
   return {
     id,
     name: String(data.name ?? "Onbekende salon"),
@@ -50,6 +75,8 @@ function toCompanyPublic(id: string, data: Record<string, unknown>): CompanyPubl
     coverImageUrl: typeof data.coverImageUrl === "string" ? data.coverImageUrl : undefined,
     ratingAvg: typeof data.ratingAvg === "number" ? data.ratingAvg : undefined,
     ratingCount: typeof data.ratingCount === "number" ? data.ratingCount : undefined,
+    bookingCountTotal: typeof data.bookingCountTotal === "number" ? Math.max(0, Math.floor(data.bookingCountTotal)) : 0,
+    bookingTopServices: topServices,
     badge: typeof data.badge === "string" ? data.badge : undefined,
   };
 }

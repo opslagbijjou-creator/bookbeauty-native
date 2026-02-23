@@ -10,7 +10,7 @@ export default function AdminTabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.muted,
-        tabBarLabelStyle: { fontWeight: "700", fontSize: 12 },
+        tabBarLabelStyle: { fontWeight: "700", fontSize: 11 },
         tabBarStyle: {
           backgroundColor: COLORS.card,
           borderTopColor: COLORS.border,
@@ -19,11 +19,19 @@ export default function AdminTabsLayout() {
         tabBarIcon: ({ color, size }) => {
           const active = color === COLORS.primary;
           const map: Record<string, keyof typeof Ionicons.glyphMap> = {
-            index: active ? "shield-checkmark" : "shield-checkmark-outline",
+            index: active ? "speedometer" : "speedometer-outline",
+            companies: active ? "business" : "business-outline",
+            support: active ? "chatbubbles" : "chatbubbles-outline",
+            profile: active ? "sparkles" : "sparkles-outline",
           };
           return <Ionicons name={map[route.name] ?? "ellipse-outline"} color={color} size={size} />;
         },
       })}
-    />
+    >
+      <Tabs.Screen name="index" options={{ title: "Dashboard" }} />
+      <Tabs.Screen name="companies" options={{ title: "Bedrijven" }} />
+      <Tabs.Screen name="support" options={{ title: "Vragen" }} />
+      <Tabs.Screen name="profile" options={{ title: "Profiel" }} />
+    </Tabs>
   );
 }

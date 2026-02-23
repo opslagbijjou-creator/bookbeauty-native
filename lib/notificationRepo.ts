@@ -26,7 +26,19 @@ export type CompanyNotificationType =
   | "service_rating"
   | "company_rating"
   | "booking_request"
+  | "booking_cancelled"
+  | "booking_proposal_accepted"
+  | "booking_proposal_declined"
+  | "booking_reschedule_requested"
   | "new_follower";
+
+export type CustomerNotificationType =
+  | "booking_created"
+  | "booking_confirmed"
+  | "booking_declined"
+  | "booking_time_proposed"
+  | "booking_reschedule_approved"
+  | "booking_reschedule_declined";
 
 export type CompanyNotification = {
   id: string;
@@ -46,35 +58,79 @@ export type CompanyNotification = {
   updatedAtMs: number;
 };
 
+export type CustomerNotification = {
+  id: string;
+  customerId: string;
+  actorId: string;
+  actorRole: AppRole;
+  type: CustomerNotificationType;
+  title: string;
+  body: string;
+  companyId?: string;
+  companyName?: string;
+  serviceId?: string;
+  bookingId?: string;
+  read: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
 function roleLabel(role: AppRole): string {
   if (role === "company") return "Een bedrijf";
   if (role === "employee") return "Een medewerker";
+  if (role === "influencer") return "Een influencer";
   if (role === "admin") return "Admin";
   return "Een klant";
 }
 
-function toNotification(id: string, data: Record<string, unknown>): CompanyNotification {
-  const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
-  const updatedAt = data.updatedAt as { toMillis?: () => number } | undefined;
-  const roleRaw = String(data.actorRole ?? "customer");
-  const actorRole: AppRole =
-    roleRaw === "company" || roleRaw === "employee" || roleRaw === "admin" ? roleRaw : "customer";
-  const typeRaw = String(data.type ?? "post_like");
-  const type: CompanyNotificationType =
-    typeRaw === "comment_like" ||
+function normalizeActorRole(value: unknown): AppRole {
+  const roleRaw = String(value ?? "customer");
+  return roleRaw === "company" ||
+    roleRaw === "employee" ||
+    roleRaw === "influencer" ||
+    roleRaw === "admin"
+    ? roleRaw
+    : "customer";
+}
+
+function toMillis(value: unknown): number {
+  const ts = value as { toMillis?: () => number } | undefined;
+  return typeof ts?.toMillis === "function" ? ts.toMillis() : 0;
+}
+
+function normalizeCompanyNotificationType(value: unknown): CompanyNotificationType {
+  const typeRaw = String(value ?? "post_like");
+  return typeRaw === "comment_like" ||
     typeRaw === "service_rating" ||
     typeRaw === "company_rating" ||
     typeRaw === "booking_request" ||
+    typeRaw === "booking_cancelled" ||
+    typeRaw === "booking_proposal_accepted" ||
+    typeRaw === "booking_proposal_declined" ||
+    typeRaw === "booking_reschedule_requested" ||
     typeRaw === "new_follower"
-      ? typeRaw
-      : "post_like";
+    ? typeRaw
+    : "post_like";
+}
 
+function normalizeCustomerNotificationType(value: unknown): CustomerNotificationType {
+  const typeRaw = String(value ?? "booking_created");
+  return typeRaw === "booking_confirmed" ||
+    typeRaw === "booking_declined" ||
+    typeRaw === "booking_time_proposed" ||
+    typeRaw === "booking_reschedule_approved" ||
+    typeRaw === "booking_reschedule_declined"
+    ? typeRaw
+    : "booking_created";
+}
+
+function toNotification(id: string, data: Record<string, unknown>): CompanyNotification {
   return {
     id,
     companyId: String(data.companyId ?? ""),
     actorId: String(data.actorId ?? ""),
-    actorRole,
-    type,
+    actorRole: normalizeActorRole(data.actorRole),
+    type: normalizeCompanyNotificationType(data.type),
     title: String(data.title ?? ""),
     body: String(data.body ?? ""),
     postId: typeof data.postId === "string" ? data.postId : undefined,
@@ -83,15 +139,43 @@ function toNotification(id: string, data: Record<string, unknown>): CompanyNotif
     bookingId: typeof data.bookingId === "string" ? data.bookingId : undefined,
     score: typeof data.score === "number" ? data.score : undefined,
     read: Boolean(data.read),
-    createdAtMs: typeof createdAt?.toMillis === "function" ? createdAt.toMillis() : 0,
-    updatedAtMs: typeof updatedAt?.toMillis === "function" ? updatedAt.toMillis() : 0,
+    createdAtMs: toMillis(data.createdAt),
+    updatedAtMs: toMillis(data.updatedAt),
   };
 }
 
-async function createNotification(
+function toCustomerNotification(id: string, data: Record<string, unknown>): CustomerNotification {
+  return {
+    id,
+    customerId: String(data.customerId ?? ""),
+    actorId: String(data.actorId ?? ""),
+    actorRole: normalizeActorRole(data.actorRole),
+    type: normalizeCustomerNotificationType(data.type),
+    title: String(data.title ?? ""),
+    body: String(data.body ?? ""),
+    companyId: typeof data.companyId === "string" ? data.companyId : undefined,
+    companyName: typeof data.companyName === "string" ? data.companyName : undefined,
+    serviceId: typeof data.serviceId === "string" ? data.serviceId : undefined,
+    bookingId: typeof data.bookingId === "string" ? data.bookingId : undefined,
+    read: Boolean(data.read),
+    createdAtMs: toMillis(data.createdAt),
+    updatedAtMs: toMillis(data.updatedAt),
+  };
+}
+
+async function createCompanyNotification(
   companyId: string,
-  payload: Omit<CompanyNotification, "id" | "companyId" | "createdAtMs" | "updatedAtMs" | "read"> & {
-    companyId?: string;
+  payload: {
+    actorId: string;
+    actorRole: AppRole;
+    type: CompanyNotificationType;
+    title: string;
+    body: string;
+    postId?: string;
+    commentId?: string;
+    serviceId?: string;
+    bookingId?: string;
+    score?: number;
   }
 ): Promise<void> {
   const data: Record<string, unknown> = {
@@ -115,6 +199,40 @@ async function createNotification(
   await addDoc(collection(db, "companies", companyId, "notifications"), data);
 }
 
+async function createCustomerNotification(
+  customerId: string,
+  payload: {
+    actorId: string;
+    actorRole: AppRole;
+    type: CustomerNotificationType;
+    title: string;
+    body: string;
+    companyId?: string;
+    companyName?: string;
+    serviceId?: string;
+    bookingId?: string;
+  }
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    customerId,
+    actorId: payload.actorId,
+    actorRole: payload.actorRole,
+    type: payload.type,
+    title: payload.title,
+    body: payload.body,
+    read: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (payload.companyId) data.companyId = payload.companyId;
+  if (payload.companyName) data.companyName = payload.companyName;
+  if (payload.serviceId) data.serviceId = payload.serviceId;
+  if (payload.bookingId) data.bookingId = payload.bookingId;
+
+  await addDoc(collection(db, "users", customerId, "notifications"), data);
+}
+
 export async function notifyCompanyOnPostLike(params: {
   postId: string;
   actorId: string;
@@ -130,7 +248,7 @@ export async function notifyCompanyOnPostLike(params: {
   if (!companyId || companyId === actorId) return;
   if (!liked) return;
 
-  await createNotification(companyId, {
+  await createCompanyNotification(companyId, {
     actorId,
     actorRole,
     type: "post_like",
@@ -157,7 +275,7 @@ export async function notifyCompanyOnCommentLike(params: {
   if (!ownerId || ownerRole !== "company" || ownerId === actorId) return;
   if (!liked) return;
 
-  await createNotification(ownerId, {
+  await createCompanyNotification(ownerId, {
     actorId,
     actorRole,
     type: "comment_like",
@@ -180,7 +298,7 @@ export async function notifyCompanyOnServiceRating(params: {
   if (!companyId || companyId === actorId) return;
 
   const label = serviceName?.trim() ? serviceName.trim() : "een dienst";
-  await createNotification(companyId, {
+  await createCompanyNotification(companyId, {
     actorId,
     actorRole,
     type: "service_rating",
@@ -200,7 +318,7 @@ export async function notifyCompanyOnCompanyRating(params: {
   const { companyId, actorId, actorRole, score } = params;
   if (!companyId || companyId === actorId) return;
 
-  await createNotification(companyId, {
+  await createCompanyNotification(companyId, {
     actorId,
     actorRole,
     type: "company_rating",
@@ -222,7 +340,7 @@ export async function notifyCompanyOnBookingRequest(params: {
   if (!companyId || !customerId || !bookingId) return;
 
   const name = customerName?.trim() ? customerName.trim() : "Een klant";
-  await createNotification(companyId, {
+  await createCompanyNotification(companyId, {
     actorId: customerId,
     actorRole: "customer",
     type: "booking_request",
@@ -230,6 +348,85 @@ export async function notifyCompanyOnBookingRequest(params: {
     body: isAutoConfirmed
       ? `${name} heeft een boeking geplaatst (auto-bevestigd).`
       : `${name} heeft een nieuwe aanvraag gestuurd.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnBookingCancelledByCustomer(params: {
+  companyId: string;
+  customerId: string;
+  customerName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  feePercent?: number;
+}): Promise<void> {
+  const { companyId, customerId, customerName, serviceId, serviceName, bookingId, feePercent = 0 } = params;
+  if (!companyId || !customerId || !bookingId) return;
+
+  const name = customerName?.trim() ? customerName.trim() : "Een klant";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "een afspraak";
+  const feeNote = feePercent > 0 ? ` (${feePercent}% annuleringsfee)` : "";
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_cancelled",
+    title: "Boeking geannuleerd",
+    body: `${name} heeft ${serviceLabel} geannuleerd${feeNote}.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnBookingProposalDecisionByCustomer(params: {
+  companyId: string;
+  customerId: string;
+  customerName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  decision: "accepted" | "declined";
+}): Promise<void> {
+  const { companyId, customerId, customerName, serviceId, serviceName, bookingId, decision } = params;
+  if (!companyId || !customerId || !bookingId) return;
+
+  const name = customerName?.trim() ? customerName.trim() : "De klant";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: decision === "accepted" ? "booking_proposal_accepted" : "booking_proposal_declined",
+    title: decision === "accepted" ? "Tijdvoorstel geaccepteerd" : "Tijdvoorstel geweigerd",
+    body:
+      decision === "accepted"
+        ? `${name} heeft je nieuwe tijd voor ${serviceLabel} geaccepteerd.`
+        : `${name} heeft je tijdvoorstel voor ${serviceLabel} geweigerd.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnRescheduleRequestByCustomer(params: {
+  companyId: string;
+  customerId: string;
+  customerName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  proposedStartAtMs: number;
+}): Promise<void> {
+  const { companyId, customerId, customerName, serviceId, serviceName, bookingId, proposedStartAtMs } = params;
+  if (!companyId || !customerId || !bookingId) return;
+
+  const name = customerName?.trim() ? customerName.trim() : "Een klant";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_reschedule_requested",
+    title: "Verplaatsing aangevraagd",
+    body: `${name} wil ${serviceLabel} verplaatsen naar ${formatMoment(proposedStartAtMs)}.`,
     serviceId,
     bookingId,
   });
@@ -245,12 +442,152 @@ export async function notifyCompanyOnFollow(params: {
   if (!followed) return;
   if (!companyId || !actorId || companyId === actorId) return;
 
-  await createNotification(companyId, {
+  await createCompanyNotification(companyId, {
     actorId,
     actorRole,
     type: "new_follower",
     title: "Nieuwe volger",
     body: `${roleLabel(actorRole)} volgt je salon.`,
+  });
+}
+
+function formatMoment(timestampMs: number): string {
+  if (!timestampMs || !Number.isFinite(timestampMs)) return "binnenkort";
+  return new Date(timestampMs).toLocaleString("nl-NL", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export async function notifyCustomerOnBookingCreated(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  status: "pending" | "confirmed";
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId, status } = params;
+  if (!customerId || !bookingId) return;
+
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je dienst";
+  await createCustomerNotification(customerId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: status === "confirmed" ? "booking_confirmed" : "booking_created",
+    title: status === "confirmed" ? "Boeking bevestigd" : "Boeking geplaatst",
+    body:
+      status === "confirmed"
+        ? `Je afspraak voor ${serviceLabel} bij ${companyLabel} is direct bevestigd.`
+        : `Je afspraak voor ${serviceLabel} bij ${companyLabel} is geplaatst en wacht op goedkeuring.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingStatusByCompany(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  status: "confirmed" | "declined";
+  actorId?: string;
+  actorRole?: AppRole;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId, status, actorId, actorRole } = params;
+  if (!customerId || !companyId || !bookingId) return;
+
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  const actorIdToStore = actorId?.trim() || companyId;
+  const actorRoleToStore = actorRole ?? "company";
+  await createCustomerNotification(customerId, {
+    actorId: actorIdToStore,
+    actorRole: actorRoleToStore,
+    type: status === "confirmed" ? "booking_confirmed" : "booking_declined",
+    title: status === "confirmed" ? "Afspraak goedgekeurd" : "Afspraak afgewezen",
+    body:
+      status === "confirmed"
+        ? `${companyLabel} heeft ${serviceLabel} bevestigd.`
+        : `${companyLabel} heeft ${serviceLabel} afgewezen.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingProposalByCompany(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  proposedStartAtMs: number;
+  actorId?: string;
+  actorRole?: AppRole;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId, proposedStartAtMs, actorId, actorRole } =
+    params;
+  if (!customerId || !companyId || !bookingId) return;
+
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  const actorIdToStore = actorId?.trim() || companyId;
+  const actorRoleToStore = actorRole ?? "company";
+  await createCustomerNotification(customerId, {
+    actorId: actorIdToStore,
+    actorRole: actorRoleToStore,
+    type: "booking_time_proposed",
+    title: "Nieuw tijdvoorstel",
+    body: `${companyLabel} stelde voor ${serviceLabel} een nieuw tijdstip voor: ${formatMoment(proposedStartAtMs)}.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnRescheduleDecisionByCompany(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+  decision: "approved" | "declined";
+  actorId?: string;
+  actorRole?: AppRole;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId, decision, actorId, actorRole } = params;
+  if (!customerId || !companyId || !bookingId) return;
+
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  const actorIdToStore = actorId?.trim() || companyId;
+  const actorRoleToStore = actorRole ?? "company";
+  await createCustomerNotification(customerId, {
+    actorId: actorIdToStore,
+    actorRole: actorRoleToStore,
+    type: decision === "approved" ? "booking_reschedule_approved" : "booking_reschedule_declined",
+    title: decision === "approved" ? "Verplaatsing goedgekeurd" : "Verplaatsing afgewezen",
+    body:
+      decision === "approved"
+        ? `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} goedgekeurd.`
+        : `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} afgewezen.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
   });
 }
 
@@ -289,6 +626,41 @@ export function subscribeMyCompanyNotifications(
   );
 }
 
+export async function fetchMyCustomerNotifications(
+  customerId: string,
+  take = 80
+): Promise<CustomerNotification[]> {
+  const q = query(
+    collection(db, "users", customerId, "notifications"),
+    orderBy("createdAt", "desc"),
+    limit(take)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((row) => toCustomerNotification(row.id, row.data()));
+}
+
+export function subscribeMyCustomerNotifications(
+  customerId: string,
+  onData: (items: CustomerNotification[]) => void,
+  onError?: (error: unknown) => void,
+  take = 80
+): Unsubscribe {
+  const q = query(
+    collection(db, "users", customerId, "notifications"),
+    orderBy("createdAt", "desc"),
+    limit(take)
+  );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const rows = snap.docs.map((row: QueryDocumentSnapshot<DocumentData>) => toCustomerNotification(row.id, row.data()));
+      onData(rows);
+    },
+    (error) => onError?.(error)
+  );
+}
+
 export async function getMyUnreadNotificationsCount(companyId: string): Promise<number> {
   const q = query(collection(db, "companies", companyId, "notifications"), where("read", "==", false));
   const countSnap = await getCountFromServer(q);
@@ -308,8 +680,34 @@ export function subscribeMyUnreadNotificationsCount(
   );
 }
 
+export async function getMyCustomerUnreadNotificationsCount(customerId: string): Promise<number> {
+  const q = query(collection(db, "users", customerId, "notifications"), where("read", "==", false));
+  const countSnap = await getCountFromServer(q);
+  return countSnap.data().count;
+}
+
+export function subscribeMyCustomerUnreadNotificationsCount(
+  customerId: string,
+  onData: (count: number) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(collection(db, "users", customerId, "notifications"), where("read", "==", false));
+  return onSnapshot(
+    q,
+    (snap) => onData(snap.size),
+    (error) => onError?.(error)
+  );
+}
+
 export async function markNotificationRead(companyId: string, notificationId: string): Promise<void> {
   await updateDoc(doc(db, "companies", companyId, "notifications", notificationId), {
+    read: true,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function markCustomerNotificationRead(customerId: string, notificationId: string): Promise<void> {
+  await updateDoc(doc(db, "users", customerId, "notifications", notificationId), {
     read: true,
     updatedAt: serverTimestamp(),
   });
@@ -318,6 +716,25 @@ export async function markNotificationRead(companyId: string, notificationId: st
 export async function markAllNotificationsRead(companyId: string): Promise<void> {
   const q = query(
     collection(db, "companies", companyId, "notifications"),
+    where("read", "==", false),
+    limit(250)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const batch = writeBatch(db);
+  snap.docs.forEach((row) => {
+    batch.update(row.ref, {
+      read: true,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
+}
+
+export async function markAllCustomerNotificationsRead(customerId: string): Promise<void> {
+  const q = query(
+    collection(db, "users", customerId, "notifications"),
     where("read", "==", false),
     limit(250)
   );

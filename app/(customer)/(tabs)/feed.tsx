@@ -17,6 +17,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import CategoryChips from "../../../components/CategoryChips";
 import CommentsSheet from "../../../components/CommentsSheet";
 import VideoPostCard from "../../../components/VideoPostCard";
+import WebInstallPromptOverlay from "../../../components/WebInstallPromptOverlay";
 import { getUserRole } from "../../../lib/authRepo";
 import { auth } from "../../../lib/firebase";
 import { fetchFeed, FeedPost } from "../../../lib/feedRepo";
@@ -332,7 +333,10 @@ export default function CustomerFeedScreen() {
                   onOpenCompany={() => router.push(`/(customer)/company/${item.companyId}` as never)}
                   onOpenLinkedService={
                     linkedServiceId
-                      ? () => router.push(`/(customer)/book/${item.companyId}/${linkedServiceId}` as never)
+                      ? () =>
+                          router.push(
+                            `/(customer)/book/${item.companyId}/${linkedServiceId}?refPostId=${encodeURIComponent(item.id)}` as never
+                          )
                       : undefined
                   }
                 />
@@ -362,6 +366,7 @@ export default function CustomerFeedScreen() {
         onClose={() => setCommentsPostId(null)}
         onCountChange={(postId, count) => setCommentCountMap((prev) => ({ ...prev, [postId]: count }))}
       />
+      <WebInstallPromptOverlay />
     </SafeAreaView>
   );
 }

@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { Stack, useRouter } from "expo-router";
 import { getUserRole, subscribeAuth } from "../../lib/authRepo";
 
-export default function CompanyStackLayout() {
+export default function AdminStackLayout() {
   const router = useRouter();
 
   useEffect(() => {
@@ -13,10 +13,11 @@ export default function CompanyStackLayout() {
       }
 
       const role = await getUserRole(user.uid);
-      if (role === "customer" || role === "influencer") {
+      if (role === "admin") return;
+      if (role === "company" || role === "employee") {
+        router.replace("/(company)/(tabs)/home" as never);
+      } else {
         router.replace("/(customer)/(tabs)" as never);
-      } else if (role === "admin") {
-        router.replace("/(admin)/(tabs)" as never);
       }
     });
 

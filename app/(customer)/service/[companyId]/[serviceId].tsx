@@ -4,7 +4,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getUserRole } from "../../../../lib/authRepo";
 import { fetchCompanyById } from "../../../../lib/companyRepo";
+import { auth } from "../../../../lib/firebase";
 import { fetchCompanyServiceById } from "../../../../lib/serviceRepo";
 import { COLORS } from "../../../../lib/ui";
 
@@ -13,14 +15,27 @@ export default function ServiceDetailScreen() {
   const params = useLocalSearchParams<{ companyId: string; serviceId: string }>();
   const companyId = typeof params.companyId === "string" ? params.companyId : "";
   const serviceId = typeof params.serviceId === "string" ? params.serviceId : "";
+  const uid = auth.currentUser?.uid ?? null;
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
   const [service, setService] = useState<Awaited<ReturnType<typeof fetchCompanyServiceById>>>(null);
   const [selectedPhoto, setSelectedPhoto] = useState("");
+  const [role, setRole] = useState<"customer" | "company" | "employee" | "influencer" | "admin" | null>(null);
 
   const photoUrls = useMemo(() => service?.photoUrls ?? [], [service]);
   const heroPhoto = selectedPhoto || photoUrls[0] || "";
+  const canOpenBooking = !uid || role === "customer";
+
+  useEffect(() => {
+    if (!uid) {
+      setRole(null);
+      return;
+    }
+    getUserRole(uid)
+      .then((nextRole) => setRole((nextRole as "customer" | "company" | "employee" | "influencer" | "admin") ?? null))
+      .catch(() => setRole(null));
+  }, [uid]);
 
   useEffect(() => {
     if (!companyId || !serviceId) return;
@@ -110,13 +125,20 @@ export default function ServiceDetailScreen() {
 
             <Text style={styles.description}>{service.description || "Geen extra beschrijving beschikbaar."}</Text>
 
-            <Pressable
-              style={styles.bookBtn}
-              onPress={() => router.push(`/(customer)/book/${companyId}/${service.id}` as never)}
-            >
-              <Ionicons name="calendar-outline" size={15} color="#fff" />
-              <Text style={styles.bookText}>Boek nu</Text>
-            </Pressable>
+            {canOpenBooking ? (
+              <Pressable
+                style={styles.bookBtn}
+                onPress={() => router.push(`/(customer)/book/${companyId}/${service.id}` as never)}
+              >
+                <Ionicons name="calendar-outline" size={15} color="#fff" />
+                <Text style={styles.bookText}>Boek nu</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.blockedBookCard}>
+                <Ionicons name="lock-closed-outline" size={14} color={COLORS.danger} />
+                <Text style={styles.blockedBookText}>Alleen klantaccounts kunnen boeken.</Text>
+              </View>
+            )}
           </View>
         </ScrollView>
       )}
@@ -265,5 +287,22 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "900",
     fontSize: 14,
+  },
+  blockedBookCard: {
+    minHeight: 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#f4c3d2",
+    backgroundColor: "#fff0f5",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
+  blockedBookText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: "800",
   },
 });

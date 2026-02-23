@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   acceptBooking,
@@ -215,11 +216,18 @@ function createEmptyCounts(): DayCounts {
   };
 }
 
+function normalizeParamValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  if (typeof value === "string" && value.trim().length) return value.trim();
+  return null;
+}
+
 type BookingSectionProps = {
   title: string;
   items: Booking[];
   emptyText: string;
   busyBookingId: string | null;
+  selectedBookingId?: string | null;
   onAccept: (booking: Booking) => void;
   onReject: (booking: Booking) => void;
   onPropose: (booking: Booking) => void;
@@ -231,6 +239,7 @@ function BookingSection({
   items,
   emptyText,
   busyBookingId,
+  selectedBookingId,
   onAccept,
   onReject,
   onPropose,
@@ -257,9 +266,14 @@ function BookingSection({
             const isReschedulePending = booking.status === "pending_reschedule_approval";
             const needsDecision = isPending || isReschedulePending;
             const isBusy = busyBookingId === booking.id;
+            const isSelected = selectedBookingId === booking.id;
 
             return (
-              <Pressable key={booking.id} style={styles.bookingCard} onPress={() => onSelect?.(booking)}>
+              <Pressable
+                key={booking.id}
+                style={[styles.bookingCard, isSelected && styles.bookingCardSelected]}
+                onPress={() => onSelect?.(booking)}
+              >
                 <View style={styles.bookingTop}>
                   <Text style={styles.bookingService} numberOfLines={1}>
                     {booking.serviceName}
@@ -373,6 +387,7 @@ function StateCard({ icon, title, description, loading, ctaLabel, onPressCta }: 
 
 export default function BookingDashboardScreen() {
   const viewerId = auth.currentUser?.uid ?? null;
+  const params = useLocalSearchParams<{ bookingId?: string | string[] }>();
   const [viewerRole, setViewerRole] = useState<"company" | "employee">("company");
   const [businessId, setBusinessId] = useState<string | null>(viewerId);
   const [roleResolved, setRoleResolved] = useState(false);
@@ -395,6 +410,8 @@ export default function BookingDashboardScreen() {
   const [selectedDate, setSelectedDate] = useState(() => formatDateKey(new Date()));
   const [monthCursor, setMonthCursor] = useState(() => formatDateKey(new Date()));
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [pendingRouteBookingId, setPendingRouteBookingId] = useState<string | null>(null);
+  const routeBookingId = useMemo(() => normalizeParamValue(params.bookingId), [params.bookingId]);
 
   const calendarAnim = useRef(new Animated.Value(1)).current;
 
@@ -473,6 +490,10 @@ export default function BookingDashboardScreen() {
   const selectedBooking = useMemo(
     () => bookings.find((row) => row.id === selectedBookingId) ?? null,
     [bookings, selectedBookingId]
+  );
+  const hasRouteMatch = useMemo(
+    () => Boolean(routeBookingId && bookings.some((booking) => booking.id === routeBookingId)),
+    [bookings, routeBookingId]
   );
 
   const weekKeys = useMemo(() => weekKeysForDate(selectedDate), [selectedDate]);
@@ -625,10 +646,6 @@ export default function BookingDashboardScreen() {
 
     const employeeMode = viewerRole === "employee";
 
-    console.log("[BookingDashboard] businessId:", businessId);
-    console.log("[BookingDashboard] role:", viewerRole);
-    console.log("[BookingDashboard] query start");
-
     setLoading(true);
     setErrorMessage(null);
 
@@ -655,12 +672,10 @@ export default function BookingDashboardScreen() {
       setBookings(sortByStart(rows));
       setErrorMessage(null);
       resolveInitialLoad();
-      console.log("[BookingDashboard] query success count:", rows.length);
     };
 
-    const onQueryError = (error: unknown) => {
+    const onQueryError = () => {
       if (!active) return;
-      console.log("[BookingDashboard] query error:", error);
       setErrorMessage("Boekingen laden mislukt. Probeer opnieuw.");
       resolveInitialLoad();
     };
@@ -674,7 +689,6 @@ export default function BookingDashboardScreen() {
 
     watchdog = setTimeout(() => {
       if (!active || firstResponseHandled) return;
-      console.log("[BookingDashboard] query error:", "timeout");
       setErrorMessage("Laden duurt te lang. Controleer je verbinding en probeer opnieuw.");
       setLoading(false);
       firstResponseHandled = true;
@@ -693,6 +707,24 @@ export default function BookingDashboardScreen() {
       setSelectedBookingId(null);
     }
   }, [bookings, selectedBookingId]);
+
+  useEffect(() => {
+    setPendingRouteBookingId(routeBookingId);
+  }, [routeBookingId]);
+
+  useEffect(() => {
+    if (!pendingRouteBookingId || !bookings.length) return;
+    const target = bookings.find((booking) => booking.id === pendingRouteBookingId);
+    if (!target) {
+      setPendingRouteBookingId(null);
+      return;
+    }
+
+    setSelectedBookingId(target.id);
+    setSelectedDate(target.bookingDate);
+    setCalendarView("day");
+    setPendingRouteBookingId(null);
+  }, [bookings, pendingRouteBookingId]);
 
   useEffect(() => {
     calendarAnim.setValue(0.35);
@@ -1119,6 +1151,13 @@ export default function BookingDashboardScreen() {
           </View>
         ) : null}
 
+        {hasRouteMatch ? (
+          <View style={styles.notificationFocusCard}>
+            <Ionicons name="navigate-outline" size={13} color={BLUE.primary} />
+            <Text style={styles.notificationFocusText}>Afspraak geopend via melding.</Text>
+          </View>
+        ) : null}
+
         {!businessId ? (
           <StateCard
             icon="lock-closed-outline"
@@ -1319,6 +1358,7 @@ export default function BookingDashboardScreen() {
                   items={actionRequiredBookings}
                   emptyText="Geen aanvragen die actie vragen."
                   busyBookingId={busyBookingId}
+                  selectedBookingId={selectedBookingId}
                   onAccept={onAccept}
                   onReject={onReject}
                   onPropose={onPropose}
@@ -1330,6 +1370,7 @@ export default function BookingDashboardScreen() {
                   items={waitingCustomerBookings}
                   emptyText="Geen voorstellen in afwachting van klant."
                   busyBookingId={busyBookingId}
+                  selectedBookingId={selectedBookingId}
                   onAccept={onAccept}
                   onReject={onReject}
                   onPropose={onPropose}
@@ -1341,6 +1382,7 @@ export default function BookingDashboardScreen() {
                   items={upcomingBookings}
                   emptyText="Geen geaccepteerde toekomstige afspraken."
                   busyBookingId={busyBookingId}
+                  selectedBookingId={selectedBookingId}
                   onAccept={onAccept}
                   onReject={onReject}
                   onPropose={onPropose}
@@ -1353,6 +1395,7 @@ export default function BookingDashboardScreen() {
                     items={rejectedBookings}
                     emptyText="Nog geen geweigerde aanvragen."
                     busyBookingId={busyBookingId}
+                    selectedBookingId={selectedBookingId}
                     onAccept={onAccept}
                     onReject={onReject}
                     onPropose={onPropose}
@@ -1366,6 +1409,7 @@ export default function BookingDashboardScreen() {
                     items={cancelledBookings}
                     emptyText="Nog geen annuleringen."
                     busyBookingId={busyBookingId}
+                    selectedBookingId={selectedBookingId}
                     onAccept={onAccept}
                     onReject={onReject}
                     onPropose={onPropose}
@@ -1388,114 +1432,123 @@ export default function BookingDashboardScreen() {
           <Pressable style={styles.modalBackdropPress} onPress={closeProposeModal} />
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
-            keyboardVerticalOffset={12}
+            keyboardVerticalOffset={24}
             style={styles.modalSheetWrap}
           >
             <View style={styles.modalSheet}>
-              <View style={styles.modalTopRow}>
-                <View style={styles.modalTitleWrap}>
-                  <Text style={styles.modalTitle}>Andere tijd voorstellen</Text>
-                  <Text style={styles.modalSubtitle}>
-                    {proposeModalBooking?.customerName} • {proposeModalBooking?.serviceName}
-                  </Text>
+              <ScrollView
+                style={styles.modalSheetScroll}
+                contentContainerStyle={styles.modalSheetContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+              >
+                <View style={styles.modalTopRow}>
+                  <View style={styles.modalTitleWrap}>
+                    <Text style={styles.modalTitle}>Andere tijd voorstellen</Text>
+                    <Text style={styles.modalSubtitle}>
+                      {proposeModalBooking?.customerName} • {proposeModalBooking?.serviceName}
+                    </Text>
+                  </View>
+                  <Pressable style={styles.modalCloseBtn} onPress={closeProposeModal}>
+                    <Ionicons name="close" size={16} color={COLORS.muted} />
+                  </Pressable>
                 </View>
-                <Pressable style={styles.modalCloseBtn} onPress={closeProposeModal}>
-                  <Ionicons name="close" size={16} color={COLORS.muted} />
-                </Pressable>
-              </View>
 
-              {proposeModalBooking ? (
-                <View style={styles.requestedTimeCard}>
-                  <Ionicons name="time-outline" size={14} color={BLUE.primary} />
-                  <Text style={styles.requestedTimeText}>Aangevraagd: {formatDateTime(proposeModalBooking.startAtMs)}</Text>
-                </View>
-              ) : null}
+                {proposeModalBooking ? (
+                  <View style={styles.requestedTimeCard}>
+                    <Ionicons name="time-outline" size={14} color={BLUE.primary} />
+                    <Text style={styles.requestedTimeText}>Aangevraagd: {formatDateTime(proposeModalBooking.startAtMs)}</Text>
+                  </View>
+                ) : null}
 
-              <Text style={styles.modalSectionTitle}>Kies een dag</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipRow}>
-                {proposeDateOptions.map((dateKey) => {
-                  const active = proposeDate === dateKey;
-                  return (
-                    <Pressable
-                      key={dateKey}
-                      style={[styles.dateChip, active && styles.dateChipActive]}
-                      onPress={() => setProposeDate(dateKey)}
+                <Text style={styles.modalSectionTitle}>Kies een dag</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChipRow}>
+                  {proposeDateOptions.map((dateKey) => {
+                    const active = proposeDate === dateKey;
+                    return (
+                      <Pressable
+                        key={dateKey}
+                        style={[styles.dateChip, active && styles.dateChipActive]}
+                        onPress={() => setProposeDate(dateKey)}
+                      >
+                        <Text style={[styles.dateChipText, active && styles.dateChipTextActive]}>{dateChipLabel(dateKey)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+
+                <Text style={styles.modalSectionTitle}>Toelichting (optioneel)</Text>
+                <TextInput
+                  value={proposalNote}
+                  onChangeText={setProposalNote}
+                  placeholder="Bijv. Deze tijd sluit beter aan op onze planning."
+                  placeholderTextColor="#57657f"
+                  style={styles.noteInput}
+                  multiline
+                  maxLength={240}
+                  textAlignVertical="top"
+                />
+                <Text style={styles.noteCount}>{proposalNote.trim().length}/240</Text>
+
+                <Text style={styles.modalSectionTitle}>Kies een tijdslot</Text>
+                <View style={styles.slotCard}>
+                  {proposeLoading ? (
+                    <View style={styles.slotStateWrap}>
+                      <ActivityIndicator color={BLUE.primary} />
+                      <Text style={styles.slotStateText}>Beschikbare tijden laden...</Text>
+                    </View>
+                  ) : proposeError ? (
+                    <View style={styles.slotStateWrap}>
+                      <Text style={styles.slotErrorText}>{proposeError}</Text>
+                    </View>
+                  ) : proposeSlots.length === 0 ? (
+                    <View style={styles.slotStateWrap}>
+                      <Text style={styles.slotStateText}>Geen beschikbare tijden op deze dag.</Text>
+                    </View>
+                  ) : (
+                    <ScrollView
+                      style={styles.slotGridScroll}
+                      contentContainerStyle={styles.slotGrid}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
                     >
-                      <Text style={[styles.dateChipText, active && styles.dateChipTextActive]}>{dateChipLabel(dateKey)}</Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+                      {proposeSlots.map((slot) => {
+                        const active = selectedProposedStartAtMs === slot.startAtMs;
+                        return (
+                          <Pressable
+                            key={slot.key}
+                            style={[styles.slotBtn, active && styles.slotBtnActive]}
+                            onPress={() => setSelectedProposedStartAtMs(slot.startAtMs)}
+                          >
+                            <Text style={[styles.slotBtnTime, active && styles.slotBtnTimeActive]}>{slot.label}</Text>
+                            <Text style={[styles.slotBtnCapacity, active && styles.slotBtnCapacityActive]}>
+                              {slot.remainingCapacity}/{slot.totalCapacity} vrij
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                </View>
 
-              <Text style={styles.modalSectionTitle}>Kies een tijdslot</Text>
-              <View style={styles.slotCard}>
-                {proposeLoading ? (
-                  <View style={styles.slotStateWrap}>
-                    <ActivityIndicator color={BLUE.primary} />
-                    <Text style={styles.slotStateText}>Beschikbare tijden laden...</Text>
-                  </View>
-                ) : proposeError ? (
-                  <View style={styles.slotStateWrap}>
-                    <Text style={styles.slotErrorText}>{proposeError}</Text>
-                  </View>
-                ) : proposeSlots.length === 0 ? (
-                  <View style={styles.slotStateWrap}>
-                    <Text style={styles.slotStateText}>Geen beschikbare tijden op deze dag.</Text>
-                  </View>
-                ) : (
-                  <ScrollView
-                    style={styles.slotGridScroll}
-                    contentContainerStyle={styles.slotGrid}
-                    showsVerticalScrollIndicator={false}
+                <View style={styles.modalActionRow}>
+                  <Pressable style={styles.modalGhostBtn} onPress={closeProposeModal} disabled={busyBookingId !== null}>
+                    <Text style={styles.modalGhostBtnText}>Sluiten</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.modalPrimaryBtn,
+                      (!selectedProposedStartAtMs || busyBookingId !== null || proposeLoading) && styles.disabled,
+                    ]}
+                    onPress={submitProposedTime}
+                    disabled={!selectedProposedStartAtMs || busyBookingId !== null || proposeLoading}
                   >
-                    {proposeSlots.map((slot) => {
-                      const active = selectedProposedStartAtMs === slot.startAtMs;
-                      return (
-                        <Pressable
-                          key={slot.key}
-                          style={[styles.slotBtn, active && styles.slotBtnActive]}
-                          onPress={() => setSelectedProposedStartAtMs(slot.startAtMs)}
-                        >
-                          <Text style={[styles.slotBtnTime, active && styles.slotBtnTimeActive]}>{slot.label}</Text>
-                          <Text style={[styles.slotBtnCapacity, active && styles.slotBtnCapacityActive]}>
-                            {slot.remainingCapacity}/{slot.totalCapacity} vrij
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                )}
-              </View>
-
-              <Text style={styles.modalSectionTitle}>Toelichting (optioneel)</Text>
-              <TextInput
-                value={proposalNote}
-                onChangeText={setProposalNote}
-                placeholder="Bijv. Deze tijd sluit beter aan op onze planning."
-                placeholderTextColor="#57657f"
-                style={styles.noteInput}
-                multiline
-                maxLength={240}
-                textAlignVertical="top"
-              />
-              <Text style={styles.noteCount}>{proposalNote.trim().length}/240</Text>
-
-              <View style={styles.modalActionRow}>
-                <Pressable style={styles.modalGhostBtn} onPress={closeProposeModal} disabled={busyBookingId !== null}>
-                  <Text style={styles.modalGhostBtnText}>Sluiten</Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.modalPrimaryBtn,
-                    (!selectedProposedStartAtMs || busyBookingId !== null || proposeLoading) && styles.disabled,
-                  ]}
-                  onPress={submitProposedTime}
-                  disabled={!selectedProposedStartAtMs || busyBookingId !== null || proposeLoading}
-                >
-                  <Ionicons name="paper-plane-outline" size={14} color="#fff" />
-                  <Text style={styles.modalPrimaryBtnText}>Voorstel versturen</Text>
-                </Pressable>
-              </View>
+                    <Ionicons name="paper-plane-outline" size={14} color="#fff" />
+                    <Text style={styles.modalPrimaryBtnText}>Voorstel versturen</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -1579,6 +1632,22 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 16,
     fontWeight: "900",
+  },
+  notificationFocusCard: {
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: BLUE.border,
+    backgroundColor: "#eaf2ff",
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  notificationFocusText: {
+    color: BLUE.text,
+    fontSize: 12,
+    fontWeight: "700",
   },
   calendarCard: {
     borderRadius: 20,
@@ -2082,6 +2151,10 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 6,
   },
+  bookingCardSelected: {
+    borderColor: BLUE.primary,
+    backgroundColor: "#f4f8ff",
+  },
   bookingTop: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -2217,11 +2290,18 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
     borderBottomWidth: 0,
     backgroundColor: COLORS.card,
+    maxHeight: "90%",
+    overflow: "hidden",
+  },
+  modalSheetScroll: {
+    maxHeight: "100%",
+    flexGrow: 0,
+  },
+  modalSheetContent: {
     paddingTop: 14,
     paddingHorizontal: 16,
-    paddingBottom: 18,
+    paddingBottom: 24,
     gap: 10,
-    maxHeight: "90%",
   },
   modalTopRow: {
     flexDirection: "row",
@@ -2336,7 +2416,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   slotGridScroll: {
-    maxHeight: 190,
+    maxHeight: 160,
   },
   slotBtn: {
     width: "48.5%",

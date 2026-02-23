@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
+import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { FeedPost } from "../lib/feedRepo";
 
@@ -44,20 +44,45 @@ export default function VideoPostCard({
   const mediaType = post.mediaType === "image" ? "image" : "video";
   const canPlayVideo = mediaType === "video" && Boolean(post.videoUrl);
   const imageUri = post.imageUrl || post.thumbnailUrl || "";
+  const clipStartMs = Math.max(0, Math.round(Number(post.clipStartSec ?? 0) * 1000));
+  const rawClipEndMs = Math.max(0, Math.round(Number(post.clipEndSec ?? 0) * 1000));
+  const hasClipWindow = rawClipEndMs > clipStartMs + 250;
   const linkedServiceId = typeof post.serviceId === "string" ? post.serviceId.trim() : "";
   const hasLinkedService = Boolean(linkedServiceId && onOpenLinkedService);
   const linkedServiceName = typeof post.serviceName === "string" ? post.serviceName.trim() : "";
+  const influencerName = typeof post.influencerName === "string" ? post.influencerName.trim() : "";
+  const isInfluencerPost = post.creatorRole === "influencer" && Boolean(influencerName);
+
+  const onPlaybackStatusUpdate = useCallback(
+    (status: AVPlaybackStatus) => {
+      if (!isActive || !hasClipWindow) return;
+      if (!status.isLoaded) return;
+      const player = ref.current;
+      if (!player) return;
+      if (status.positionMillis >= rawClipEndMs - 80) {
+        player.setPositionAsync(clipStartMs).then(() => player.playAsync()).catch(() => null);
+      }
+    },
+    [isActive, hasClipWindow, rawClipEndMs, clipStartMs]
+  );
 
   useEffect(() => {
     const video = ref.current;
     if (!video) return;
 
     if (isActive && canPlayVideo) {
-      video.playAsync().catch(() => null);
+      if (clipStartMs > 0) {
+        video
+          .setPositionAsync(clipStartMs)
+          .then(() => video.playAsync())
+          .catch(() => null);
+      } else {
+        video.playAsync().catch(() => null);
+      }
     } else {
       video.pauseAsync().catch(() => null);
     }
-  }, [isActive, canPlayVideo]);
+  }, [isActive, canPlayVideo, clipStartMs]);
 
   useEffect(() => {
     const video = ref.current;
@@ -88,8 +113,9 @@ export default function VideoPostCard({
           style={StyleSheet.absoluteFillObject}
           resizeMode={ResizeMode.COVER}
           shouldPlay={isActive}
-          isLooping
+          isLooping={!hasClipWindow}
           isMuted={false}
+          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
       ) : (
         <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
@@ -107,6 +133,12 @@ export default function VideoPostCard({
             </View>
             <Text style={styles.company}>{post.companyName}</Text>
           </View>
+          {isInfluencerPost ? (
+            <View style={styles.influencerPill}>
+              <Ionicons name="megaphone-outline" size={12} color="#fff" />
+              <Text style={styles.influencerPillText}>Creator: {influencerName}</Text>
+            </View>
+          ) : null}
           <View style={styles.categoryPill}>
             <Text style={styles.category}>{post.category}</Text>
           </View>
@@ -234,6 +266,23 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
+  },
+  influencerPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(82,132,255,0.32)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.42)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  influencerPillText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 11,
   },
   category: {
     color: "#fff",

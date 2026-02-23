@@ -29,6 +29,20 @@
     "plugins": [
       "expo-router",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "BookBeauty heeft cameratoegang nodig om media op te nemen in de app.",
+          "microphonePermission": "BookBeauty heeft microfoontoegang nodig voor video-opnames in de app."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "BookBeauty heeft toegang nodig tot je foto's en video's om te uploaden.",
+          "savePhotosPermission": "BookBeauty heeft toegang nodig om bewerkte media op te slaan."
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "BookBeauty heeft toegang nodig tot je foto's om logo's en video's te uploaden.",

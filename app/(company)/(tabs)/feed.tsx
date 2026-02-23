@@ -17,6 +17,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import CategoryChips from "../../../components/CategoryChips";
 import CommentsSheet from "../../../components/CommentsSheet";
 import VideoPostCard from "../../../components/VideoPostCard";
+import WebInstallPromptOverlay from "../../../components/WebInstallPromptOverlay";
 import { getUserRole } from "../../../lib/authRepo";
 import { auth } from "../../../lib/firebase";
 import { fetchFeed, FeedPost } from "../../../lib/feedRepo";
@@ -359,6 +360,7 @@ export default function CompanyFeedScreen() {
         onClose={() => setCommentsPostId(null)}
         onCountChange={(postId, count) => setCommentCountMap((prev) => ({ ...prev, [postId]: count }))}
       />
+      <WebInstallPromptOverlay />
     </SafeAreaView>
   );
 }

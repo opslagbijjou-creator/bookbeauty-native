@@ -79,7 +79,7 @@ export default function CompanyProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string>("Alles");
   const [activeContent, setActiveContent] = useState<"services" | "videos">("services");
-  const [role, setRole] = useState<AppRole>("customer");
+  const [role, setRole] = useState<AppRole | null>(null);
   const [following, setFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
@@ -201,9 +201,17 @@ export default function CompanyProfileScreen() {
   const profileRatingLabel = hasEnoughProfileReviews
     ? `${ratingCount} ${ratingCount === 1 ? "review" : "reviews"}`
     : `${ratingCount}/${ratingMinReviews} reviews`;
+  const bookingTotal = Math.max(0, Number(company?.bookingCountTotal ?? 0));
+  const canUseCustomerActions = !uid || role === "customer";
+  const isBusinessViewer = role === "company" || role === "employee" || role === "admin";
+  const openFeedRoute = id
+    ? isBusinessViewer
+      ? (`/(company)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
+      : (`/(customer)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
+    : "";
 
   async function onToggleFollow() {
-    if (!id || !uid || followBusy) return;
+    if (!id || !uid || followBusy || role !== "customer") return;
     const previousFollow = following;
     const previousCount = followersCount;
     const optimisticFollow = !previousFollow;
@@ -261,7 +269,15 @@ export default function CompanyProfileScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <LinearGradient colors={["#f05a9f", "#d83e88"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
+          <LinearGradient colors={["#101010", "#1b1b1b", "#3b0f1e"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroCard}>
+            <View pointerEvents="none" style={styles.heroGridOverlay}>
+              {[1, 2, 3, 4, 5].map((line) => (
+                <View key={`v-${line}`} style={[styles.heroGridVLine, { left: `${line * 16}%` }]} />
+              ))}
+              {[1, 2, 3, 4].map((line) => (
+                <View key={`h-${line}`} style={[styles.heroGridHLine, { top: `${line * 20}%` }]} />
+              ))}
+            </View>
             <View style={styles.heroTopRow}>
               <View style={styles.logoWrap}>
                 {company.logoUrl ? (
@@ -296,9 +312,13 @@ export default function CompanyProfileScreen() {
             </View>
 
             <Text style={styles.bio}>{company.bio || "Geen bio toegevoegd."}</Text>
+            <View style={styles.bookingPill}>
+              <Ionicons name="calendar-outline" size={13} color="#fff" />
+              <Text style={styles.bookingPillText}>{bookingTotal}x geboekt in totaal</Text>
+            </View>
           </LinearGradient>
 
-          <View style={styles.statsRow}>
+          <View style={styles.statsGrid}>
             <View style={styles.statCard}>
               <Ionicons name="people-outline" size={16} color={COLORS.primary} />
               <Text style={styles.statValue}>{followersCount}</Text>
@@ -314,10 +334,15 @@ export default function CompanyProfileScreen() {
               <Text style={styles.statValue}>{profileRatingValue}</Text>
               <Text style={styles.statLabel}>{profileRatingLabel}</Text>
             </View>
+            <View style={styles.statCard}>
+              <Ionicons name="calendar-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.statValue}>{bookingTotal}</Text>
+              <Text style={styles.statLabel}>Boekingen totaal</Text>
+            </View>
           </View>
 
           <View style={styles.actionRow}>
-            {uid ? (
+            {uid && role === "customer" ? (
               <Pressable
                 style={[styles.followBtn, following && styles.followBtnActive, followBusy && styles.disabled]}
                 onPress={onToggleFollow}
@@ -333,8 +358,8 @@ export default function CompanyProfileScreen() {
             ) : null}
             {id ? (
               <Pressable
-                style={styles.openFeedBtn}
-                onPress={() => router.push(`/(customer)/(tabs)/feed?companyId=${id}&origin=company-profile` as never)}
+                style={[styles.openFeedBtn, !(uid && role === "customer") && styles.openFeedBtnFull]}
+                onPress={() => (openFeedRoute ? router.push(openFeedRoute as never) : null)}
               >
                 <Ionicons name="play" size={16} color="#fff" />
                 <Text style={styles.openFeedText}>Bekijk feed</Text>
@@ -342,7 +367,8 @@ export default function CompanyProfileScreen() {
             ) : null}
           </View>
 
-          <View style={styles.tabShell}>
+          <View style={styles.contentPanel}>
+            <View style={styles.tabShell}>
             <Pressable
               style={[styles.tabBtn, activeContent === "services" && styles.tabBtnActive]}
               onPress={() => setActiveContent("services")}
@@ -370,88 +396,93 @@ export default function CompanyProfileScreen() {
                 Video&apos;s ({videoCount})
               </Text>
             </Pressable>
-          </View>
+            </View>
 
-          {activeContent === "services" ? (
-            <>
-              <View style={styles.panelHeader}>
-                <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
-                <Text style={styles.section}>Beschikbare diensten</Text>
-              </View>
+            {activeContent === "services" ? (
+              <>
+                <View style={styles.panelHeader}>
+                  <Ionicons name="pricetags-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.section}>Beschikbare diensten</Text>
+                </View>
 
-              <CategoryChips
-                items={categories}
-                active={activeCategory}
-                onChange={setActiveCategory}
-                iconMap={categoryIcons}
-              />
+                <CategoryChips
+                  items={categories}
+                  active={activeCategory}
+                  onChange={setActiveCategory}
+                  iconMap={categoryIcons}
+                />
 
-              <View style={styles.serviceList}>
-                {filtered.length ? (
-                  filtered.map((item) => (
-                    <ServiceCard
-                      key={item.id}
-                      service={item}
-                      ratingAvg={serviceRatingMap[item.id]?.avg}
-                      ratingCount={serviceRatingMap[item.id]?.count}
-                      myRating={myServiceRatingMap[item.id]}
-                      canRate={Boolean(uid && role === "customer")}
-                      onRate={(score) => onRateService(item.id, score)}
-                      onMoreInfo={() => router.push(`/(customer)/service/${id}/${item.id}` as never)}
-                      onBookNow={() => router.push(`/(customer)/book/${id}/${item.id}` as never)}
-                    />
-                  ))
-                ) : (
-                  <Text style={styles.empty}>Geen diensten in deze categorie.</Text>
-                )}
-              </View>
-            </>
-          ) : (
-            <>
-              <View style={styles.panelHeader}>
-                <Ionicons name="albums-outline" size={15} color={COLORS.primary} />
-                <Text style={styles.section}>Recente posts</Text>
-              </View>
-
-              {videos.length ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.videoList}>
-                  {videos.map((item) => (
-                    <Pressable
-                      key={item.id}
-                      style={styles.videoCard}
-                      onPress={() => router.push(`/(customer)/(tabs)/feed?companyId=${item.companyId}&origin=company-profile` as never)}
-                    >
-                      <Image
-                        source={{ uri: feedPreviewImage(item) }}
-                        style={styles.videoThumb}
-                        contentFit="cover"
+                <View style={styles.serviceList}>
+                  {filtered.length ? (
+                    filtered.map((item) => (
+                      <ServiceCard
+                        key={item.id}
+                        service={item}
+                        ratingAvg={serviceRatingMap[item.id]?.avg}
+                        ratingCount={serviceRatingMap[item.id]?.count}
+                        myRating={myServiceRatingMap[item.id]}
+                        canRate={Boolean(uid && role === "customer")}
+                        onRate={(score) => onRateService(item.id, score)}
+                        onMoreInfo={() => router.push(`/(customer)/service/${id}/${item.id}` as never)}
+                        onBookNow={
+                          canUseCustomerActions
+                            ? () => router.push(`/(customer)/book/${id}/${item.id}` as never)
+                            : undefined
+                        }
                       />
-                      <View style={styles.videoGradient} />
-                      <View style={styles.videoCardTop}>
-                        <View style={styles.videoMiniLogo}>
-                          {company.logoUrl ? (
-                            <Image source={{ uri: company.logoUrl }} style={styles.videoMiniLogoImg} contentFit="cover" />
-                          ) : (
-                            <Ionicons name="business-outline" size={12} color="#fff" />
-                          )}
-                        </View>
-                        {item.mediaType !== "image" ? (
-                          <View style={styles.playCircle}>
-                            <Ionicons name="play" size={14} color="#fff" />
+                    ))
+                  ) : (
+                    <Text style={styles.empty}>Geen diensten in deze categorie.</Text>
+                  )}
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.panelHeader}>
+                  <Ionicons name="albums-outline" size={15} color={COLORS.primary} />
+                  <Text style={styles.section}>Recente posts</Text>
+                </View>
+
+                {videos.length ? (
+                  <View style={styles.videoGrid}>
+                    {videos.map((item) => (
+                      <Pressable
+                        key={item.id}
+                        style={styles.videoCard}
+                        onPress={() => (openFeedRoute ? router.push(openFeedRoute as never) : null)}
+                      >
+                        <Image
+                          source={{ uri: feedPreviewImage(item) }}
+                          style={styles.videoThumb}
+                          contentFit="cover"
+                        />
+                        <View style={styles.videoGradient} />
+                        <View style={styles.videoCardTop}>
+                          <View style={styles.videoMiniLogo}>
+                            {company.logoUrl ? (
+                              <Image source={{ uri: company.logoUrl }} style={styles.videoMiniLogoImg} contentFit="cover" />
+                            ) : (
+                              <Ionicons name="business-outline" size={12} color="#fff" />
+                            )}
                           </View>
-                        ) : null}
-                      </View>
-                      <Text style={styles.videoTitle} numberOfLines={2}>
-                        {videoPreviewText(item)}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              ) : (
-                <Text style={styles.empty}>Nog geen posts.</Text>
-              )}
-            </>
-          )}
+                          {item.mediaType !== "image" ? (
+                            <View style={styles.playCircle}>
+                              <Ionicons name="play" size={14} color="#fff" />
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.videoTitle} numberOfLines={2}>
+                          {videoPreviewText(item)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.empty}>Nog geen posts.</Text>
+                )}
+              </>
+            )}
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -494,10 +525,30 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     borderRadius: 24,
-    padding: 14,
+    padding: 15,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.35)",
     gap: 9,
+    overflow: "hidden",
+    position: "relative",
+  },
+  heroGridOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.24,
+  },
+  heroGridVLine: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  heroGridHLine: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   heroTopRow: {
     flexDirection: "row",
@@ -549,6 +600,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: "500",
   },
+  bookingPill: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  bookingPillText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -581,19 +649,22 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 11,
   },
-  statsRow: {
+  statsGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   statCard: {
-    flex: 1,
+    width: "48.8%",
     alignItems: "center",
+    justifyContent: "center",
     gap: 3,
     backgroundColor: COLORS.card,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
-    paddingVertical: 10,
+    paddingVertical: 11,
+    minHeight: 78,
   },
   statValue: {
     color: COLORS.text,
@@ -617,12 +688,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: COLORS.primary,
+    backgroundColor: "#111",
     borderRadius: 14,
     paddingHorizontal: 12,
   },
   followBtnActive: {
-    backgroundColor: "#4f9f66",
+    backgroundColor: "#299c57",
   },
   followText: {
     color: "#fff",
@@ -636,9 +707,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    backgroundColor: COLORS.text,
+    backgroundColor: "#ee1d52",
     borderRadius: 14,
     paddingHorizontal: 12,
+  },
+  openFeedBtnFull: {
+    flex: 1,
   },
   openFeedText: {
     color: "#fff",
@@ -661,14 +735,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: COLORS.surface,
   },
-  tabShell: {
-    borderRadius: 14,
+  contentPanel: {
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.card,
-    padding: 6,
+    padding: 8,
+    gap: 10,
+  },
+  tabShell: {
+    borderRadius: 12,
+    backgroundColor: COLORS.surface,
+    padding: 4,
     flexDirection: "row",
-    gap: 8,
+    gap: 6,
   },
   tabBtn: {
     flex: 1,
@@ -684,8 +764,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   tabBtnActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: "#111",
+    borderColor: "#111",
   },
   tabText: {
     color: COLORS.muted,
@@ -705,6 +785,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     marginTop: 2,
+    paddingHorizontal: 2,
   },
   serviceRatingCard: {
     backgroundColor: COLORS.card,
@@ -728,13 +809,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  videoList: {
+  videoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   videoCard: {
-    width: 182,
-    height: 212,
+    width: "48.8%",
+    aspectRatio: 9 / 12,
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 16,
