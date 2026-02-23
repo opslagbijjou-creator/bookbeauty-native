@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AddServiceModal from "../../../components/AddServiceModal";
 import CategoryChips from "../../../components/CategoryChips";
 import ServicesList from "../../../components/ServicesList";
+import { subscribeAuth } from "../../../lib/authRepo";
 import {
   CompanyService,
   deleteMyService,
@@ -30,7 +31,7 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 export default function CompanyServicesScreen() {
-  const uid = auth.currentUser?.uid ?? "";
+  const [uid, setUid] = useState(auth.currentUser?.uid ?? "");
 
   const [items, setItems] = useState<CompanyService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +48,11 @@ export default function CompanyServicesScreen() {
   const activeCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
 
   const load = useCallback(async () => {
-    if (!uid) return;
+    if (!uid) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -62,6 +67,12 @@ export default function CompanyServicesScreen() {
     load().catch(() => null);
   }, [load]);
 
+  useEffect(() => {
+    return subscribeAuth((user) => {
+      setUid(user?.uid ?? "");
+    });
+  }, []);
+
   function openCreateModal() {
     setEditingService(null);
     setModalVisible(true);
@@ -73,7 +84,11 @@ export default function CompanyServicesScreen() {
   }
 
   async function onToggleActive(service: CompanyService, next: boolean) {
-    if (!uid || busyActionId) return;
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om diensten te wijzigen.");
+      return;
+    }
+    if (busyActionId) return;
 
     setBusyActionId(service.id);
     try {
@@ -87,7 +102,11 @@ export default function CompanyServicesScreen() {
   }
 
   function onDelete(service: CompanyService) {
-    if (!uid || busyActionId) return;
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om diensten te verwijderen.");
+      return;
+    }
+    if (busyActionId) return;
 
     Alert.alert("Dienst verwijderen", "Weet je zeker dat je deze dienst wilt verwijderen?", [
       { text: "Annuleren", style: "cancel" },

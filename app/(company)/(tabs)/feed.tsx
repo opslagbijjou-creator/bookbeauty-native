@@ -19,7 +19,7 @@ import CategoryChips from "../../../components/CategoryChips";
 import CommentsSheet from "../../../components/CommentsSheet";
 import VideoPostCard from "../../../components/VideoPostCard";
 import WebInstallPromptOverlay from "../../../components/WebInstallPromptOverlay";
-import { getUserRole } from "../../../lib/authRepo";
+import { getUserRole, subscribeAuth } from "../../../lib/authRepo";
 import { auth } from "../../../lib/firebase";
 import { fetchFeed, FeedPost } from "../../../lib/feedRepo";
 import { AppRole } from "../../../lib/roles";
@@ -42,7 +42,7 @@ export default function CompanyFeedScreen() {
   const params = useLocalSearchParams<{ companyId?: string; origin?: string }>();
   const companyFilter = typeof params.companyId === "string" ? params.companyId : undefined;
   const fromCompanyProfile = companyFilter && params.origin === "company-profile";
-  const uid = auth.currentUser?.uid ?? null;
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
   const [items, setItems] = useState<FeedPost[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [category, setCategory] = useState<string>("Alles");
@@ -107,6 +107,12 @@ export default function CompanyFeedScreen() {
     setFollowingMap((prev) => ({ ...prev, ...followNext }));
     setFollowersCountMap((prev) => ({ ...prev, ...followerCountNext }));
   }, [uid]);
+
+  useEffect(() => {
+    return subscribeAuth((user) => {
+      setUid(user?.uid ?? null);
+    });
+  }, []);
 
   useEffect(() => {
     if (!uid) return;
@@ -196,7 +202,11 @@ export default function CompanyFeedScreen() {
   }
 
   async function onToggleLike(postId: string) {
-    if (!uid || likeBusyMap[postId]) return;
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om te liken.");
+      return;
+    }
+    if (likeBusyMap[postId]) return;
     const prevLiked = Boolean(likedMap[postId]);
     const prevCount = likeCountMap[postId] ?? 0;
     const optimisticLiked = !prevLiked;
@@ -220,7 +230,11 @@ export default function CompanyFeedScreen() {
   }
 
   async function onToggleFollow(companyId: string) {
-    if (!uid || followBusyMap[companyId]) return;
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om te volgen.");
+      return;
+    }
+    if (followBusyMap[companyId]) return;
     const prevFollowing = Boolean(followingMap[companyId]);
     const prevCount = followersCountMap[companyId] ?? 0;
     const optimisticFollowing = !prevFollowing;

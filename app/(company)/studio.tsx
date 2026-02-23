@@ -20,6 +20,7 @@ import { Image } from "expo-image";
 import { type AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { useRouter, useSegments } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { subscribeAuth } from "../../lib/authRepo";
 import CategoryChips from "../../components/CategoryChips";
 import InAppCaptureModal, { CapturedMedia } from "../../components/InAppCaptureModal";
 import MediaLibraryPickerModal, { PickedLibraryMedia } from "../../components/MediaLibraryPickerModal";
@@ -153,7 +154,7 @@ export default function CompanyStudioScreen() {
   const router = useRouter();
   const segments = useSegments();
   const inTabs = (segments as string[]).includes("(tabs)");
-  const uid = auth.currentUser?.uid;
+  const [uid, setUid] = useState<string | null>(auth.currentUser?.uid ?? null);
 
   const [studioTab, setStudioTab] = useState<StudioTab>("upload");
   const [items, setItems] = useState<FeedPost[]>([]);
@@ -308,8 +309,21 @@ export default function CompanyStudioScreen() {
     refreshPermissionStates().catch(() => null);
   }, [refreshPermissionStates]);
 
+  useEffect(() => {
+    return subscribeAuth((user) => {
+      setUid(user?.uid ?? null);
+    });
+  }, []);
+
   const load = useCallback(async () => {
-    if (!uid) return;
+    if (!uid) {
+      setItems([]);
+      setServices([]);
+      setLikesByPost({});
+      setHasActiveServices(false);
+      setLoadingLibrary(false);
+      return;
+    }
 
     setLoadingLibrary(true);
     try {
@@ -518,7 +532,10 @@ export default function CompanyStudioScreen() {
   }
 
   async function onSubmit() {
-    if (!uid) return;
+    if (!uid) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om te uploaden of wijzigen.");
+      return;
+    }
 
     if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) {
       Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een feed post plaatst.");
