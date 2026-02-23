@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Alert, AppState, Linking, Platform } from "react-native";
-import { Stack } from "expo-router";
+import * as Notifications from "expo-notifications";
+import { Stack, useRouter } from "expo-router";
 import { getUserRole, subscribeAuth } from "../lib/authRepo";
 import { ensureBookBeautyAutoFollow } from "../lib/platformRepo";
 import { touchPresence } from "../lib/presenceRepo";
@@ -12,6 +13,7 @@ import {
   requestMediaLibraryPermission,
   requestMicrophonePermission,
 } from "../lib/mediaRepo";
+import { configurePushNotifications, registerPushTokenForUser } from "../lib/pushRepo";
 import type { AppRole } from "../lib/roles";
 
 const PRESENCE_TOUCH_INTERVAL_MS = 15_000;
@@ -22,10 +24,25 @@ function normalizeRole(role: AppRole | null): AppRole {
 }
 
 function AppBootstrapEffects() {
+  const router = useRouter();
   const activeUidRef = useRef("");
   const activeRoleRef = useRef<AppRole>("customer");
   const lastTouchRef = useRef(0);
   const lastTouchUidRef = useRef("");
+
+  function openRouteFromPushData(data: Record<string, unknown>) {
+    const role = String(data.role ?? "").trim();
+    const bookingId = String(data.bookingId ?? "").trim();
+
+    if (role === "company") {
+      router.push((bookingId ? "/(company)/(tabs)/bookings" : "/(company)/notifications") as never);
+      return;
+    }
+    if (role === "customer") {
+      router.push((bookingId ? "/(customer)/(tabs)/bookings" : "/(customer)/notifications") as never);
+      return;
+    }
+  }
 
   async function syncUserSession(uid: string, roleHint?: AppRole | null): Promise<void> {
     const cleanUid = uid.trim();
@@ -44,6 +61,8 @@ function AppBootstrapEffects() {
   }
 
   useEffect(() => {
+    configurePushNotifications();
+
     const unsubAuth = subscribeAuth(async (user) => {
       if (!user?.uid) {
         activeUidRef.current = "";
@@ -52,6 +71,7 @@ function AppBootstrapEffects() {
         return;
       }
       await syncUserSession(user.uid).catch(() => null);
+      registerPushTokenForUser(user.uid).catch(() => null);
     });
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
@@ -73,6 +93,23 @@ function AppBootstrapEffects() {
       clearInterval(heartbeat);
     };
   }, []);
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = (response.notification.request.content.data ?? {}) as Record<string, unknown>;
+      openRouteFromPushData(data);
+    });
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (!response) return;
+        const data = (response.notification.request.content.data ?? {}) as Record<string, unknown>;
+        openRouteFromPushData(data);
+      })
+      .catch(() => null);
+
+    return () => sub.remove();
+  }, [router]);
 
   return null;
 }

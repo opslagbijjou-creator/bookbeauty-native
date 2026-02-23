@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import type { AppRole } from "./roles";
+import { sendPushToUser } from "./pushRepo";
 
 export type CompanyNotificationType =
   | "post_like"
@@ -196,7 +197,20 @@ async function createCompanyNotification(
   if (payload.bookingId) data.bookingId = payload.bookingId;
   if (typeof payload.score === "number") data.score = payload.score;
 
-  await addDoc(collection(db, "companies", companyId, "notifications"), data);
+  const rowRef = await addDoc(collection(db, "companies", companyId, "notifications"), data);
+  void sendPushToUser(companyId, {
+    title: payload.title,
+    body: payload.body,
+    data: {
+      notificationId: rowRef.id,
+      notificationType: payload.type,
+      role: "company",
+      companyId,
+      bookingId: payload.bookingId ?? "",
+      postId: payload.postId ?? "",
+      serviceId: payload.serviceId ?? "",
+    },
+  }).catch(() => null);
 }
 
 async function createCustomerNotification(
@@ -230,7 +244,20 @@ async function createCustomerNotification(
   if (payload.serviceId) data.serviceId = payload.serviceId;
   if (payload.bookingId) data.bookingId = payload.bookingId;
 
-  await addDoc(collection(db, "users", customerId, "notifications"), data);
+  const rowRef = await addDoc(collection(db, "users", customerId, "notifications"), data);
+  void sendPushToUser(customerId, {
+    title: payload.title,
+    body: payload.body,
+    data: {
+      notificationId: rowRef.id,
+      notificationType: payload.type,
+      role: "customer",
+      customerId,
+      companyId: payload.companyId ?? "",
+      bookingId: payload.bookingId ?? "",
+      serviceId: payload.serviceId ?? "",
+    },
+  }).catch(() => null);
 }
 
 export async function notifyCompanyOnPostLike(params: {

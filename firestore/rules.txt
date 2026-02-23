@@ -273,6 +273,11 @@ service cloud.firestore {
       allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
     }
 
+    match /push_subscriptions/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+    }
+
     match /support_threads/{threadId} {
       allow read: if signedIn() && (isAdmin() || resource.data.createdById == request.auth.uid);
       allow create: if signedIn()
