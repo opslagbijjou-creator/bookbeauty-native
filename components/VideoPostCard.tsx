@@ -112,7 +112,7 @@ export default function VideoPostCard({
           ref={ref}
           source={{ uri: post.videoUrl }}
           style={StyleSheet.absoluteFillObject}
-          resizeMode={ResizeMode.COVER}
+          resizeMode={ResizeMode.CONTAIN}
           shouldPlay={isActive}
           isLooping={!hasClipWindow}
           isMuted={isWeb}

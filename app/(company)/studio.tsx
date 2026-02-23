@@ -162,6 +162,8 @@ export default function CompanyStudioScreen() {
 
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [refreshingAfterUpload, setRefreshingAfterUpload] = useState(false);
+  const [uploadStatusText, setUploadStatusText] = useState("");
   const [busyPostId, setBusyPostId] = useState<string | null>(null);
 
   const [category, setCategory] = useState<string>(CATEGORIES[0]);
@@ -384,6 +386,12 @@ export default function CompanyStudioScreen() {
     }).start();
   }, [studioTab, tabOpacity]);
 
+  useEffect(() => {
+    if (!uploadStatusText) return;
+    const timer = setTimeout(() => setUploadStatusText(""), 4200);
+    return () => clearTimeout(timer);
+  }, [uploadStatusText]);
+
   function resetForm() {
     setCategory(CATEGORIES[0]);
     setTitle("");
@@ -404,6 +412,7 @@ export default function CompanyStudioScreen() {
     setUploadStep("select");
     setVideoLengthWarning(null);
     setEditingPostId(null);
+    setRefreshingAfterUpload(false);
   }
 
   function applyEditForm(post: FeedPost) {
@@ -651,6 +660,7 @@ export default function CompanyStudioScreen() {
         });
 
         Alert.alert("Opgeslagen", "Je feed post is bijgewerkt.");
+        setUploadStatusText("Wijzigingen opgeslagen.");
       } else {
         let sourceVideoUrl = "";
         let sourceImageUrl = "";
@@ -710,11 +720,15 @@ export default function CompanyStudioScreen() {
         });
 
         Alert.alert("Geplaatst", "Je feed post staat in je content library.");
+        setUploadStatusText("Upload geplaatst.");
       }
 
       resetForm();
       setStudioTab("videos");
-      await load();
+      setRefreshingAfterUpload(true);
+      void load()
+        .catch(() => null)
+        .finally(() => setRefreshingAfterUpload(false));
     } catch (error: any) {
       Alert.alert("Upload mislukt", error?.message ?? "Kon post niet opslaan.");
     } finally {
@@ -810,7 +824,7 @@ export default function CompanyStudioScreen() {
                 ref={previewVideoRef}
                 source={{ uri: previewVideoUri }}
                 style={styles.uploadEditorVideo}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
                 isMuted
                 isLooping={false}
@@ -1018,7 +1032,7 @@ export default function CompanyStudioScreen() {
                 ref={previewVideoRef}
                 source={{ uri: previewVideoUri }}
                 style={styles.selectedVideoPreview}
-                resizeMode={ResizeMode.COVER}
+                resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
                 isMuted
                 isLooping={false}
@@ -1287,6 +1301,14 @@ export default function CompanyStudioScreen() {
         </Pressable>
       </View>
 
+      {uploadStatusText ? (
+        <View style={styles.uploadStatusCard}>
+          <Ionicons name="checkmark-circle-outline" size={15} color={COLORS.success} />
+          <Text style={styles.uploadStatusText}>{uploadStatusText}</Text>
+          {refreshingAfterUpload ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+        </View>
+      ) : null}
+
       <KeyboardAvoidingView
         style={styles.tabContentWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -1532,6 +1554,24 @@ const styles = StyleSheet.create({
   topTabs: {
     flexDirection: "row",
     gap: 10,
+  },
+  uploadStatusCard: {
+    minHeight: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#cde7d8",
+    backgroundColor: "#f4fff7",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  uploadStatusText: {
+    flex: 1,
+    color: "#116733",
+    fontSize: 12,
+    fontWeight: "800",
   },
   topTabBtn: {
     flex: 1,
