@@ -264,7 +264,8 @@ export default function InfluencerStudioScreen() {
       const uploadedUrl = await uploadUriToStorage(
         `influencers/${uid}/feed/${Date.now()}-${media.fileName}`,
         media.uri,
-        media.mimeType
+        media.mimeType,
+        media.webFile
       );
 
       const isVideo = mediaType === "video";

@@ -592,7 +592,8 @@ export default function CompanyStudioScreen() {
           sourceVideoUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${video.fileName}`,
             video.uri,
-            video.mimeType
+            video.mimeType,
+            video.webFile
           );
           sourceImageUrl = "";
         }
@@ -600,7 +601,8 @@ export default function CompanyStudioScreen() {
           sourceImageUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${imageMedia.fileName}`,
             imageMedia.uri,
-            imageMedia.mimeType
+            imageMedia.mimeType,
+            imageMedia.webFile
           );
           sourceVideoUrl = "";
         }
@@ -659,7 +661,8 @@ export default function CompanyStudioScreen() {
           sourceVideoUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${pickedVideo.fileName}`,
             pickedVideo.uri,
-            pickedVideo.mimeType
+            pickedVideo.mimeType,
+            pickedVideo.webFile
           );
         } else {
           const pickedImage = imageMedia;
@@ -667,7 +670,8 @@ export default function CompanyStudioScreen() {
           sourceImageUrl = await uploadUriToStorage(
             `companies/${uid}/feed/${Date.now()}-${pickedImage.fileName}`,
             pickedImage.uri,
-            pickedImage.mimeType
+            pickedImage.mimeType,
+            pickedImage.webFile
           );
         }
 

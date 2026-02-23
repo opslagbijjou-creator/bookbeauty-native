@@ -9,6 +9,7 @@ export type PickedMedia = {
   fileName: string;
   mimeType: string;
   durationMs?: number | null;
+  webFile?: File | Blob | null;
 };
 
 export type PickedMediaWithKind = PickedMedia & {
@@ -56,7 +57,111 @@ function filenameFromUri(uri: string, fallback = "upload"): string {
   return last || fallback;
 }
 
+function inferMediaKindFromMimeOrName(mimeType: string, fileName: string): "image" | "video" {
+  const mime = String(mimeType ?? "").toLowerCase();
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("image/")) return "image";
+
+  const lower = String(fileName ?? "").toLowerCase();
+  if (/\.(mp4|mov|m4v|webm|avi)$/.test(lower)) return "video";
+  return "image";
+}
+
+function canUseWebFilePicker(): boolean {
+  return (
+    Platform.OS === "web" &&
+    typeof document !== "undefined" &&
+    typeof window !== "undefined" &&
+    typeof URL !== "undefined"
+  );
+}
+
+async function pickWebFile(accept: string): Promise<File | null> {
+  if (!canUseWebFilePicker()) return null;
+
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    input.style.opacity = "0";
+
+    let done = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let removeFocusListener: (() => void) | null = null;
+
+    const finish = (file: File | null) => {
+      if (done) return;
+      done = true;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (removeFocusListener) removeFocusListener();
+      input.onchange = null;
+      input.remove();
+      resolve(file);
+    };
+
+    input.onchange = () => {
+      const file = input.files?.[0] ?? null;
+      finish(file);
+    };
+
+    const onWindowFocus = () => {
+      setTimeout(() => {
+        if (done) return;
+        finish(input.files?.[0] ?? null);
+      }, 260);
+    };
+
+    timeoutId = setTimeout(() => finish(null), 60_000);
+    window.addEventListener("focus", onWindowFocus, { once: true });
+    removeFocusListener = () => window.removeEventListener("focus", onWindowFocus);
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+async function readWebVideoDurationMs(file: File): Promise<number | null> {
+  if (!canUseWebFilePicker() || typeof URL === "undefined") return null;
+
+  return new Promise((resolve) => {
+    const probeUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let done = false;
+
+    const finish = (durationMs: number | null) => {
+      if (done) return;
+      done = true;
+      try {
+        video.src = "";
+      } catch {
+        // noop
+      }
+      URL.revokeObjectURL(probeUrl);
+      resolve(durationMs);
+    };
+
+    const timeoutId = setTimeout(() => finish(null), 7000);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      clearTimeout(timeoutId);
+      const raw = Number(video.duration);
+      if (!Number.isFinite(raw) || raw <= 0) {
+        finish(null);
+        return;
+      }
+      finish(Math.round(raw * 1000));
+    };
+    video.onerror = () => {
+      clearTimeout(timeoutId);
+      finish(null);
+    };
+    video.src = probeUrl;
+  });
+}
+
 async function ensureLibraryPermission(): Promise<void> {
+  if (Platform.OS === "web") return;
   const granted = await requestMediaLibraryPermission();
   if (!granted) {
     throw new Error("Geef toegang tot je galerij om media te kiezen.");
@@ -64,6 +169,7 @@ async function ensureLibraryPermission(): Promise<void> {
 }
 
 async function ensureCameraPermission(): Promise<void> {
+  if (Platform.OS === "web") return;
   const granted = await requestCameraPermission();
   if (!granted) {
     throw new Error("Geef toegang tot je camera om media te maken.");
@@ -125,6 +231,20 @@ export async function requestMicrophonePermission(): Promise<boolean> {
 }
 
 export async function pickImageFromLibrary(): Promise<PickedMedia | null> {
+  if (canUseWebFilePicker()) {
+    const file = await pickWebFile("image/*");
+    if (!file) return null;
+
+    const uri = URL.createObjectURL(file);
+    return {
+      uri,
+      fileName: file.name || "image.jpg",
+      mimeType: file.type || "image/jpeg",
+      durationMs: null,
+      webFile: file,
+    };
+  }
+
   await ensureLibraryPermission();
 
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -165,6 +285,30 @@ export async function captureImageWithCamera(): Promise<PickedMedia | null> {
 }
 
 export async function pickVideoFromLibrary(options?: PickVideoFromLibraryOptions): Promise<PickedMedia | null> {
+  const maxDurationMs =
+    typeof options?.maxDurationMs === "number" && Number.isFinite(options.maxDurationMs)
+      ? Math.max(0, options.maxDurationMs)
+      : MAX_VIDEO_DURATION_MS;
+
+  if (canUseWebFilePicker()) {
+    const file = await pickWebFile("video/*");
+    if (!file) return null;
+
+    const durationMs = await readWebVideoDurationMs(file).catch(() => null);
+    if (maxDurationMs > 0 && typeof durationMs === "number" && durationMs > maxDurationMs) {
+      throw new Error("Video mag maximaal 15 seconden zijn.");
+    }
+
+    const uri = URL.createObjectURL(file);
+    return {
+      uri,
+      fileName: file.name || "video.mp4",
+      mimeType: file.type || "video/mp4",
+      durationMs,
+      webFile: file,
+    };
+  }
+
   await ensureLibraryPermission();
 
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -176,10 +320,6 @@ export async function pickVideoFromLibrary(options?: PickVideoFromLibraryOptions
   if (result.canceled || !result.assets?.[0]) return null;
 
   const asset = result.assets[0];
-  const maxDurationMs =
-    typeof options?.maxDurationMs === "number" && Number.isFinite(options.maxDurationMs)
-      ? Math.max(0, options.maxDurationMs)
-      : MAX_VIDEO_DURATION_MS;
   if (maxDurationMs > 0 && typeof asset.duration === "number" && asset.duration > maxDurationMs) {
     throw new Error("Video mag maximaal 15 seconden zijn.");
   }
@@ -242,6 +382,24 @@ function ensurePickedVideoDurationWithinLimit(picked: PickedMediaWithKind): void
 }
 
 export async function pickAnyMediaFromLibrary(): Promise<PickedMediaWithKind | null> {
+  if (canUseWebFilePicker()) {
+    const file = await pickWebFile("image/*,video/*");
+    if (!file) return null;
+
+    const kind = inferMediaKindFromMimeOrName(file.type, file.name);
+    const durationMs = kind === "video" ? await readWebVideoDurationMs(file).catch(() => null) : null;
+    const picked: PickedMediaWithKind = {
+      kind,
+      uri: URL.createObjectURL(file),
+      fileName: file.name || (kind === "video" ? "video.mp4" : "image.jpg"),
+      mimeType: file.type || (kind === "video" ? "video/mp4" : "image/jpeg"),
+      durationMs,
+      webFile: file,
+    };
+    ensurePickedVideoDurationWithinLimit(picked);
+    return picked;
+  }
+
   await ensureLibraryPermission();
 
   const result = await ImagePicker.launchImageLibraryAsync({
@@ -271,7 +429,12 @@ export async function captureAnyMediaWithCamera(): Promise<PickedMediaWithKind |
   return picked;
 }
 
-export async function uploadUriToStorage(path: string, uri: string, mimeType: string): Promise<string> {
+export async function uploadUriToStorage(
+  path: string,
+  uri: string,
+  mimeType: string,
+  webFile?: File | Blob | null
+): Promise<string> {
   try {
     const fileName = path.split("/").pop() || filenameFromUri(uri, "upload.bin");
     const folderPath = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : undefined;
@@ -283,6 +446,7 @@ export async function uploadUriToStorage(path: string, uri: string, mimeType: st
       fileName,
       folder: folderPath,
       resourceType,
+      webFile: webFile ?? undefined,
     });
   } catch (error) {
     throw friendlyUploadError(error);

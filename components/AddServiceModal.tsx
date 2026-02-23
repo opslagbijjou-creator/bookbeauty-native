@@ -237,7 +237,8 @@ export default function AddServiceModal({
       const uploaded = await uploadUriToStorage(
         `companies/${companyId}/services/${initialService?.id ?? "draft"}/${Date.now()}-${media.fileName}`,
         media.uri,
-        media.mimeType
+        media.mimeType,
+        media.webFile
       );
 
       setPhotoUrls((prev) => [...prev, uploaded].slice(0, 3));

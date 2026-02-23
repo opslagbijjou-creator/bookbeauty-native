@@ -217,7 +217,8 @@ export default function CompanyHomeScreen() {
       const uploaded = await uploadUriToStorage(
         `companies/${companyId}/logos/${Date.now()}-${media.fileName}`,
         media.uri,
-        media.mimeType
+        media.mimeType,
+        media.webFile
       );
       setLogoUrl(uploaded);
     } catch (error: any) {
@@ -233,7 +234,8 @@ export default function CompanyHomeScreen() {
       const uploaded = await uploadUriToStorage(
         `companies/${companyId}/logos/${Date.now()}-${media.fileName}`,
         media.uri,
-        media.mimeType
+        media.mimeType,
+        media.webFile
       );
       setLogoUrl(uploaded);
     } catch (error: any) {
