@@ -74,16 +74,8 @@ type UploadMediaType = "video" | "image";
 type PermissionState = "granted" | "denied" | "undetermined";
 type PendingMediaAction = "library" | "camera";
 
-const CLIP_STEP_SEC = 0.5;
-const DEFAULT_CROP_PRESET: MediaCropPreset = "9:16";
+const DEFAULT_CROP_PRESET: MediaCropPreset = "original";
 const DEFAULT_FILTER_PRESET: MediaFilterPreset = "none";
-const CROP_OPTIONS: { key: MediaCropPreset; label: string }[] = [
-  { key: "9:16", label: "9:16" },
-  { key: "4:5", label: "4:5" },
-  { key: "1:1", label: "1:1" },
-  { key: "16:9", label: "16:9" },
-  { key: "original", label: "Origineel" },
-];
 const FILTER_OPTIONS: { key: MediaFilterPreset; label: string }[] = [
   { key: "none", label: "Geen" },
   { key: "clean", label: "Clean" },
@@ -91,6 +83,14 @@ const FILTER_OPTIONS: { key: MediaFilterPreset; label: string }[] = [
   { key: "warm", label: "Warm" },
   { key: "mono", label: "Mono" },
 ];
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 function parseHashtagsInput(value: string): string[] {
   const normalized = value
@@ -182,6 +182,9 @@ export default function CompanyStudioScreen() {
   const [videoLengthWarning, setVideoLengthWarning] = useState<string | null>(null);
   const [clipStartSec, setClipStartSec] = useState(0);
   const [clipEndSec, setClipEndSec] = useState(MAX_VIDEO_SECONDS);
+  const [detectedPreviewDurationSec, setDetectedPreviewDurationSec] = useState(0);
+  const [startRailWidth, setStartRailWidth] = useState(0);
+  const [endRailWidth, setEndRailWidth] = useState(0);
   const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
   const [cameraPermission, setCameraPermission] = useState<PermissionState>("undetermined");
   const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
@@ -239,21 +242,34 @@ export default function CompanyStudioScreen() {
     () => (video?.durationMs ? Math.max(0, video.durationMs / 1000) : 0),
     [video?.durationMs]
   );
+  const savedVideoDurationSec = useMemo(
+    () => Math.max(0, Number(editingItem?.videoDurationSec ?? 0) || 0),
+    [editingItem?.videoDurationSec]
+  );
+  const effectiveVideoDurationSec = useMemo(
+    () => Math.max(videoDurationSec, detectedPreviewDurationSec, savedVideoDurationSec),
+    [videoDurationSec, detectedPreviewDurationSec, savedVideoDurationSec]
+  );
   const clipDurationSec = useMemo(
     () => Math.max(0, Number((clipEndSec - clipStartSec).toFixed(2))),
     [clipEndSec, clipStartSec]
   );
   const hasVideoClipError =
-    Boolean(video) &&
+    uploadMediaType === "video" &&
+    hasLiveVideoPreview &&
     (clipDurationSec < 1 ||
       clipDurationSec > MAX_VIDEO_SECONDS ||
       clipStartSec < 0 ||
       clipEndSec <= clipStartSec ||
-      (videoDurationSec > 0 && clipEndSec > videoDurationSec + 0.001));
+      (effectiveVideoDurationSec > 0 && clipEndSec > effectiveVideoDurationSec + 0.001));
 
   const onPreviewStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
       if (!status.isLoaded || uploadMediaType !== "video" || !hasLiveVideoPreview) return;
+      if (typeof status.durationMillis === "number" && Number.isFinite(status.durationMillis) && status.durationMillis > 0) {
+        const nextDurationSec = status.durationMillis / 1000;
+        setDetectedPreviewDurationSec((prev) => (Math.abs(prev - nextDurationSec) > 0.05 ? nextDurationSec : prev));
+      }
       if (previewSeekingRef.current) return;
 
       const minStartSec = Math.max(0, clipStartSec);
@@ -286,6 +302,34 @@ export default function CompanyStudioScreen() {
 
     return () => clearTimeout(timer);
   }, [hasLiveVideoPreview, uploadMediaType, previewVideoUri, clipStartSec, clipEndSec, uploadStep]);
+
+  useEffect(() => {
+    if (uploadMediaType !== "video") return;
+
+    const totalDuration = effectiveVideoDurationSec > 0 ? effectiveVideoDurationSec : MAX_VIDEO_SECONDS;
+    const maxStart = Math.max(0, totalDuration - 1);
+    let nextStart = clamp(clipStartSec, 0, maxStart);
+    let nextEnd = clamp(clipEndSec, nextStart + 1, totalDuration);
+
+    if (nextEnd - nextStart > MAX_VIDEO_SECONDS) {
+      nextEnd = clamp(nextStart + MAX_VIDEO_SECONDS, nextStart + 1, totalDuration);
+    }
+
+    if (Math.abs(nextStart - clipStartSec) > 0.001) {
+      setClipStartSec(roundToTenth(nextStart));
+    }
+    if (Math.abs(nextEnd - clipEndSec) > 0.001) {
+      setClipEndSec(roundToTenth(nextEnd));
+    }
+
+    if (totalDuration > MAX_VIDEO_SECONDS) {
+      setVideoLengthWarning(
+        `Deze video is ${totalDuration.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
+      );
+    } else {
+      setVideoLengthWarning(null);
+    }
+  }, [uploadMediaType, effectiveVideoDurationSec, clipStartSec, clipEndSec]);
 
   const submitLabel = editingPostId ? "Wijzigingen opslaan" : "Upload plaatsen";
   const canSubmit = useMemo(() => {
@@ -379,6 +423,9 @@ export default function CompanyStudioScreen() {
     setFilterPreset(DEFAULT_FILTER_PRESET);
     setClipStartSec(0);
     setClipEndSec(MAX_VIDEO_SECONDS);
+    setDetectedPreviewDurationSec(0);
+    setStartRailWidth(0);
+    setEndRailWidth(0);
     setUploadStep("select");
     setVideoLengthWarning(null);
     setEditingPostId(null);
@@ -403,6 +450,9 @@ export default function CompanyStudioScreen() {
     setImageMedia(null);
     setClipStartSec(nextClipStart);
     setClipEndSec(nextClipEnd);
+    setDetectedPreviewDurationSec(Math.max(0, Number(post.videoDurationSec ?? 0) || 0));
+    setStartRailWidth(0);
+    setEndRailWidth(0);
     setUploadStep("details");
     setVideoLengthWarning(null);
     setStudioTab("upload");
@@ -422,6 +472,9 @@ export default function CompanyStudioScreen() {
     setVideo(picked);
     setClipStartSec(0);
     setClipEndSec(defaultEnd);
+    setDetectedPreviewDurationSec(durationSec);
+    setStartRailWidth(0);
+    setEndRailWidth(0);
     if (durationSec > MAX_VIDEO_SECONDS) {
       setVideoLengthWarning(
         `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
@@ -432,7 +485,7 @@ export default function CompanyStudioScreen() {
   }
 
   function setClipByDuration(durationSec: number) {
-    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
+    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
     const nextDuration = Math.min(MAX_VIDEO_SECONDS, Math.max(1, durationSec));
     const nextEnd = Math.min(totalDuration, clipStartSec + nextDuration);
     if (nextEnd - clipStartSec < 1) {
@@ -443,21 +496,35 @@ export default function CompanyStudioScreen() {
     setClipEndSec(nextEnd);
   }
 
-  function nudgeClipStart(deltaSec: number) {
-    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
-    const clipDuration = Math.max(1, clipEndSec - clipStartSec);
-    const maxStart = Math.max(0, totalDuration - clipDuration);
-    const nextStart = Math.min(maxStart, Math.max(0, clipStartSec + deltaSec));
-    setClipStartSec(nextStart);
-    setClipEndSec(Math.min(totalDuration, nextStart + clipDuration));
+  function setClipStartFromRatio(ratioRaw: number) {
+    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
+    const ratio = clamp(ratioRaw, 0, 1);
+    const maxStart = Math.max(0, totalDuration - 1);
+    const nextStart = roundToTenth(ratio * maxStart);
+    const currentDuration = Math.max(1, clipEndSec - clipStartSec);
+    let nextEnd = nextStart + currentDuration;
+
+    if (nextEnd - nextStart > MAX_VIDEO_SECONDS) {
+      nextEnd = nextStart + MAX_VIDEO_SECONDS;
+    }
+    if (nextEnd > totalDuration) {
+      nextEnd = totalDuration;
+    }
+    if (nextEnd <= nextStart) {
+      nextEnd = Math.min(totalDuration, nextStart + 1);
+    }
+
+    setClipStartSec(roundToTenth(nextStart));
+    setClipEndSec(roundToTenth(nextEnd));
   }
 
-  function nudgeClipEnd(deltaSec: number) {
-    const totalDuration = videoDurationSec || MAX_VIDEO_SECONDS;
-    const minEnd = clipStartSec + 1;
+  function setClipEndFromRatio(ratioRaw: number) {
+    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
+    const ratio = clamp(ratioRaw, 0, 1);
     const maxEnd = Math.min(totalDuration, clipStartSec + MAX_VIDEO_SECONDS);
-    const nextEnd = Math.min(maxEnd, Math.max(minEnd, clipEndSec + deltaSec));
-    setClipEndSec(nextEnd);
+    const targetEnd = roundToTenth(ratio * totalDuration);
+    const nextEnd = clamp(targetEnd, clipStartSec + 1, maxEnd);
+    setClipEndSec(roundToTenth(nextEnd));
   }
 
   async function executeMediaAction(action: PendingMediaAction) {
@@ -611,7 +678,7 @@ export default function CompanyStudioScreen() {
             ? {
                 clipStartSec: clipStartSec,
                 clipEndSec: clipEndSec,
-                videoDurationSec: Math.max(videoDurationSec, fallbackVideoDurationSec),
+                videoDurationSec: Math.max(effectiveVideoDurationSec, fallbackVideoDurationSec),
               }
             : {}),
           ...(selectedMediaType === "image"
@@ -676,7 +743,7 @@ export default function CompanyStudioScreen() {
           clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
           clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
           videoDurationSec:
-            selectedMediaType === "video" ? Math.max(videoDurationSec, clipEndSec) : 0,
+            selectedMediaType === "video" ? Math.max(effectiveVideoDurationSec, clipEndSec) : 0,
           viewCount: 0,
         });
 
@@ -736,8 +803,8 @@ export default function CompanyStudioScreen() {
 
   function renderUploadTab() {
     const selectedVideoDurationSec =
-      videoDurationSec > 0
-        ? videoDurationSec
+      effectiveVideoDurationSec > 0
+        ? effectiveVideoDurationSec
         : Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
     const hasSelectedVideo =
       uploadMediaType === "video" &&
@@ -855,54 +922,51 @@ export default function CompanyStudioScreen() {
                     />
                   </View>
 
-                  <View style={styles.trimButtonRow}>
-                    <Pressable style={styles.trimBtnDark} onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}>
-                      <Text style={styles.trimBtnDarkText}>Start -0.5s</Text>
-                    </Pressable>
-                    <Pressable style={styles.trimBtnDark} onPress={() => nudgeClipStart(CLIP_STEP_SEC)}>
-                      <Text style={styles.trimBtnDarkText}>Start +0.5s</Text>
+                  <View style={styles.trimDirectRow}>
+                    <Text style={styles.trimDirectLabel}>Start: {clipStartSec.toFixed(1)}s</Text>
+                    <Pressable
+                      style={styles.trimTapRail}
+                      onLayout={(event) => setStartRailWidth(event.nativeEvent.layout.width)}
+                      onPress={(event) => {
+                        const ratio = event.nativeEvent.locationX / Math.max(1, startRailWidth);
+                        setClipStartFromRatio(ratio);
+                      }}
+                    >
+                      <View
+                        style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, clipStartPercent))}%` }]}
+                      />
+                      <View style={[styles.trimTapThumb, { left: `${clipStartPercent}%` }]} />
                     </Pressable>
                   </View>
 
-                  <View style={styles.trimButtonRow}>
-                    <Pressable style={styles.trimBtnDark} onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}>
-                      <Text style={styles.trimBtnDarkText}>Eind -0.5s</Text>
-                    </Pressable>
-                    <Pressable style={styles.trimBtnDark} onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}>
-                      <Text style={styles.trimBtnDarkText}>Eind +0.5s</Text>
+                  <View style={styles.trimDirectRow}>
+                    <Text style={styles.trimDirectLabel}>Eind: {clipEndSec.toFixed(1)}s</Text>
+                    <Pressable
+                      style={styles.trimTapRail}
+                      onLayout={(event) => setEndRailWidth(event.nativeEvent.layout.width)}
+                      onPress={(event) => {
+                        const ratio = event.nativeEvent.locationX / Math.max(1, endRailWidth);
+                        setClipEndFromRatio(ratio);
+                      }}
+                    >
+                      <View
+                        style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, (clipEndSec / safeDurationForUi) * 100))}%` }]}
+                      />
+                      <View
+                        style={[
+                          styles.trimTapThumb,
+                          { left: `${Math.max(0, Math.min(100, (clipEndSec / safeDurationForUi) * 100))}%` },
+                        ]}
+                      />
                     </Pressable>
                   </View>
 
-                  <View style={styles.trimPresetRow}>
-                    {[5, 10, 15].map((preset) => (
-                      <Pressable key={preset} style={styles.trimPresetBtnDark} onPress={() => setClipByDuration(preset)}>
-                        <Text style={styles.trimPresetDarkText}>{preset}s</Text>
-                      </Pressable>
-                    ))}
+                  <View style={styles.uploadBottomRow}>
+                    <Pressable style={styles.secondaryDarkBtn} onPress={() => setClipByDuration(15)}>
+                      <Ionicons name="cut-outline" size={15} color="#fff" />
+                      <Text style={styles.secondaryDarkBtnText}>Automatisch 15s</Text>
+                    </Pressable>
                   </View>
-
-                  <Text style={styles.uploadEditorSectionTitle}>Zoom / crop</Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.editorChipRow}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {CROP_OPTIONS.map((option) => {
-                      const active = cropPreset === option.key;
-                      return (
-                        <Pressable
-                          key={option.key}
-                          style={[styles.editorChipDark, active && styles.editorChipDarkActive]}
-                          onPress={() => setCropPreset(option.key)}
-                        >
-                          <Text style={[styles.editorChipDarkText, active && styles.editorChipDarkTextActive]}>
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
 
                   {hasVideoClipError ? (
                     <View style={styles.trimErrorCard}>
@@ -941,11 +1005,6 @@ export default function CompanyStudioScreen() {
                   ) : null}
 
                   <View style={styles.uploadBottomRow}>
-                    <Pressable style={styles.secondaryDarkBtn} onPress={() => setClipByDuration(15)}>
-                      <Ionicons name="cut-outline" size={15} color="#fff" />
-                      <Text style={styles.secondaryDarkBtnText}>15s clip</Text>
-                    </Pressable>
-
                     <Pressable
                       style={[styles.nextStepBtn, !canContinue && styles.disabled]}
                       onPress={() => setUploadStep("details")}
@@ -1013,10 +1072,6 @@ export default function CompanyStudioScreen() {
               <Text style={styles.ghostBtnText}>Kies andere video</Text>
             </Pressable>
             <View style={styles.selectedEditRow}>
-              <View style={styles.selectedEditPill}>
-                <Ionicons name="resize-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.selectedEditText}>Crop: {cropPreset}</Text>
-              </View>
               <View style={styles.selectedEditPill}>
                 <Ionicons name="cut-outline" size={13} color={COLORS.primary} />
                 <Text style={styles.selectedEditText}>
@@ -1800,6 +1855,38 @@ const styles = StyleSheet.create({
     height: "100%",
     borderRadius: 999,
     backgroundColor: "#4a7bff",
+  },
+  trimDirectRow: {
+    gap: 6,
+  },
+  trimDirectLabel: {
+    color: "#f5f5f5",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  trimTapRail: {
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    overflow: "hidden",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  trimTapFill: {
+    height: "100%",
+    backgroundColor: "rgba(74,123,255,0.55)",
+  },
+  trimTapThumb: {
+    position: "absolute",
+    top: "50%",
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#f7fbff",
+    borderWidth: 2,
+    borderColor: "#4a7bff",
+    transform: [{ translateX: -7 }, { translateY: -7 }],
   },
   trimBtnDark: {
     flex: 1,
