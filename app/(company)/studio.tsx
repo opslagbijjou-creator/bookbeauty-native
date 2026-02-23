@@ -65,6 +65,7 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 const MAX_HASHTAGS = 12;
 const MAX_VIDEO_SECONDS = 15;
+const INPUT_HINT_COLOR = "#363636";
 
 type StudioTab = "upload" | "videos";
 type UploadVisibility = "public" | "clients";
@@ -409,32 +410,25 @@ export default function CompanyStudioScreen() {
   }
 
   function applyPickedMedia(picked: PickedMedia, kind: "video" | "image") {
-    if (kind === "video") {
-      const durationSec = picked.durationMs ? Math.max(0, picked.durationMs / 1000) : 0;
-      const defaultEnd = durationSec > 0 ? Math.min(durationSec, MAX_VIDEO_SECONDS) : MAX_VIDEO_SECONDS;
-      setUploadMediaType("video");
-      setImageMedia(null);
-      setVideo(picked);
-      setClipStartSec(0);
-      setClipEndSec(defaultEnd);
-      if (durationSec > MAX_VIDEO_SECONDS) {
-        setVideoLengthWarning(
-          `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
-        );
-      } else {
-        setVideoLengthWarning(null);
-      }
-      setUploadStep("details");
+    if (kind !== "video") {
+      Alert.alert("Alleen video", "Kies een video uit je galerij om verder te gaan.");
       return;
     }
 
-    setUploadMediaType("image");
-    setVideo(null);
+    const durationSec = picked.durationMs ? Math.max(0, picked.durationMs / 1000) : 0;
+    const defaultEnd = durationSec > 0 ? Math.min(durationSec, MAX_VIDEO_SECONDS) : MAX_VIDEO_SECONDS;
+    setUploadMediaType("video");
+    setImageMedia(null);
+    setVideo(picked);
     setClipStartSec(0);
-    setClipEndSec(MAX_VIDEO_SECONDS);
-    setVideoLengthWarning(null);
-    setImageMedia(picked);
-    setUploadStep("details");
+    setClipEndSec(defaultEnd);
+    if (durationSec > MAX_VIDEO_SECONDS) {
+      setVideoLengthWarning(
+        `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
+      );
+    } else {
+      setVideoLengthWarning(null);
+    }
   }
 
   function setClipByDuration(durationSec: number) {
@@ -520,8 +514,8 @@ export default function CompanyStudioScreen() {
       Alert.alert(
         "Toegang nodig",
         needLibrary
-          ? "Zonder galerij-toegang kun je geen video of foto kiezen."
-          : "Zonder camera-toegang kun je geen video of foto opnemen."
+          ? "Zonder galerij-toegang kun je geen video kiezen."
+          : "Zonder camera-toegang kun je geen video opnemen."
       );
       return;
     }
@@ -548,7 +542,7 @@ export default function CompanyStudioScreen() {
     }
 
     if (!editingPostId && !video && !imageMedia) {
-      Alert.alert("Media ontbreekt", "Kies eerst een video of foto om te uploaden.");
+      Alert.alert("Media ontbreekt", "Kies eerst een video om te uploaden.");
       return;
     }
     if (hasVideoClipError) {
@@ -741,222 +735,193 @@ export default function CompanyStudioScreen() {
   }
 
   function renderUploadTab() {
-    const hasSelectedMedia = Boolean(video?.uri || imageMedia?.uri || previewThumbnail);
-    const previewNode = hasLiveVideoPreview ? (
-      <Video
-        ref={previewVideoRef}
-        source={{ uri: previewVideoUri }}
-        style={styles.dropPreview}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay
-        isMuted
-        isLooping={false}
-        onPlaybackStatusUpdate={onPreviewStatusUpdate}
-      />
-    ) : imageMedia?.uri ? (
-      <Image source={{ uri: imageMedia.uri }} style={styles.dropPreview} contentFit="cover" />
-    ) : previewThumbnail ? (
-      <Image source={{ uri: previewThumbnail }} style={styles.dropPreview} contentFit="cover" />
-    ) : (
-      <View style={styles.dropPlaceholder}>
-        <Ionicons name="images-outline" size={32} color={COLORS.primary} />
-        <Text style={styles.dropTitle}>Kies media uit je album</Text>
-        <Text style={styles.dropText}>Upload of neem meteen op in dit scherm.</Text>
-      </View>
-    );
-    const detailsPreviewNode = hasLiveVideoPreview ? (
-      <Video
-        ref={previewVideoRef}
-        source={{ uri: previewVideoUri }}
-        style={styles.selectedVideoPreview}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay
-        isMuted
-        isLooping={false}
-        onPlaybackStatusUpdate={onPreviewStatusUpdate}
-      />
-    ) : imageMedia?.uri ? (
-      <Image source={{ uri: imageMedia.uri }} style={styles.selectedVideoPreview} contentFit="cover" />
-    ) : previewThumbnail ? (
-      <Image source={{ uri: previewThumbnail }} style={styles.selectedVideoPreview} contentFit="cover" />
-    ) : (
-      <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
-        <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
-      </View>
-    );
-
-    const mediaActionRow = (
-      <View style={styles.dropOverlayRow}>
-        <Pressable style={styles.dropActionBtn} onPress={() => openActionWithPermission("library")}>
-          <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.dropActionText}>Upload</Text>
-        </Pressable>
-        <Pressable style={styles.dropActionBtn} onPress={() => openActionWithPermission("camera")}>
-          <Ionicons name="camera-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.dropActionText}>Opnemen</Text>
-        </Pressable>
-      </View>
-    );
-    const hasEditableMedia = Boolean(video || imageMedia || editingItem);
-    const editorCard = hasEditableMedia ? (
-      <View style={styles.editorCard}>
-        <View style={styles.editorHeaderRow}>
-          <Ionicons name="color-wand-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.editorTitle}>Bewerken</Text>
-        </View>
-        <Text style={styles.editorHint}>Crop, filter en clip spelen live mee in de preview hierboven.</Text>
-
-        <Text style={styles.editorLabel}>Crop</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.editorChipRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {CROP_OPTIONS.map((option) => {
-            const active = cropPreset === option.key;
-            return (
-              <Pressable
-                key={option.key}
-                style={[styles.editorChip, active && styles.editorChipActive]}
-                onPress={() => setCropPreset(option.key)}
-              >
-                <Text style={[styles.editorChipText, active && styles.editorChipTextActive]}>{option.label}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <Text style={styles.editorLabel}>Filter</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.editorChipRow}
-          keyboardShouldPersistTaps="handled"
-        >
-          {FILTER_OPTIONS.map((option) => {
-            const active = filterPreset === option.key;
-            return (
-              <Pressable
-                key={option.key}
-                style={[styles.editorChip, active && styles.editorChipActive]}
-                onPress={() => setFilterPreset(option.key)}
-              >
-                <Text style={[styles.editorChipText, active && styles.editorChipTextActive]}>{option.label}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      </View>
-    ) : null;
+    const selectedVideoDurationSec =
+      videoDurationSec > 0
+        ? videoDurationSec
+        : Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
+    const hasSelectedVideo =
+      uploadMediaType === "video" &&
+      Boolean(
+        previewVideoUri ||
+          video?.uri ||
+          (editingItem?.mediaType === "video" &&
+            (editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim()))
+      );
+    const canContinue = hasSelectedVideo && !hasVideoClipError;
 
     if (uploadStep === "select") {
       return (
-        <ScrollView
-          contentContainerStyle={styles.uploadSelectContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-        >
-          <View style={styles.uploadFlowScreen}>
-            <View style={styles.uploadFlowTopRow}>
-              <View>
-                <Text style={styles.uploadFlowTitle}>Nieuwe post</Text>
-                <Text style={styles.uploadFlowSubTitle}>Stap 1 van 2 - kies je media</Text>
+        <View style={styles.uploadEditorScreen}>
+          {!hasActiveServices ? (
+            <View style={styles.requirementCard}>
+              <View style={styles.requirementTitleRow}>
+                <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
               </View>
-              <View style={styles.uploadFlowStepPill}>
-                <Text style={styles.uploadFlowStepText}>1/2</Text>
+              <Text style={styles.requirementText}>
+                Plaats minimaal 1 actieve dienst om feed posts te publiceren.
+              </Text>
+              <Pressable
+                style={styles.requirementBtn}
+                onPress={() => router.push("/(company)/(tabs)/services" as never)}
+              >
+                <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          <View style={styles.uploadEditorHero}>
+            {hasLiveVideoPreview ? (
+              <Video
+                ref={previewVideoRef}
+                source={{ uri: previewVideoUri }}
+                style={styles.uploadEditorVideo}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                isMuted
+                isLooping
+                onPlaybackStatusUpdate={onPreviewStatusUpdate}
+              />
+            ) : (
+              <Pressable style={styles.uploadEditorEmpty} onPress={() => openActionWithPermission("library")}>
+                <Ionicons name="cloud-upload-outline" size={46} color="#fff" />
+                <Text style={styles.uploadEditorEmptyTitle}>Druk hier om te uploaden</Text>
+                <Text style={styles.uploadEditorEmptyText}>Kies 1 video uit je galerij</Text>
+              </Pressable>
+            )}
+
+            <View style={styles.uploadEditorTopBadges}>
+              <View style={styles.uploadEditorBadge}>
+                <Text style={styles.uploadEditorBadgeText}>Stap 1/2</Text>
+              </View>
+              <View style={styles.uploadEditorBadge}>
+                <Text style={styles.uploadEditorBadgeText}>Max {MAX_VIDEO_SECONDS}s</Text>
               </View>
             </View>
 
-            {!hasActiveServices ? (
-              <View style={styles.requirementCard}>
-                <View style={styles.requirementTitleRow}>
-                  <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
-                  <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
-                </View>
-                <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
-                <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
-                  <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
-                  <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
+            {hasLiveVideoPreview ? (
+              <View style={styles.uploadEditorBottomInfo}>
+                <Ionicons name="repeat-outline" size={14} color="#fff" />
+                <Text style={styles.uploadEditorBottomInfoText}>Preview loopt automatisch in een lus.</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <ScrollView
+            contentContainerStyle={styles.uploadEditorControls}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          >
+            <Pressable
+              style={[styles.uploadEditorPrimaryBtn, !hasActiveServices && styles.disabled]}
+              onPress={() => openActionWithPermission("library")}
+              disabled={!hasActiveServices}
+            >
+              <Ionicons name={hasSelectedVideo ? "images-outline" : "cloud-upload-outline"} size={16} color="#fff" />
+              <Text style={styles.uploadEditorPrimaryBtnText}>
+                {hasSelectedVideo ? "Kies andere video" : "Upload video"}
+              </Text>
+            </Pressable>
+
+            <View style={styles.uploadEditorMetaRow}>
+              <Text style={styles.uploadEditorSectionTitle}>Kort je video in</Text>
+              <Text style={styles.uploadEditorMetaText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
+            </View>
+
+            <Text style={styles.uploadEditorMetaText}>
+              Duur: {clipDurationSec.toFixed(1)}s van{" "}
+              {selectedVideoDurationSec > 0 ? selectedVideoDurationSec.toFixed(1) : "--"}s
+            </Text>
+
+            <View style={styles.trimButtonRow}>
+              <Pressable
+                style={[styles.trimBtnDark, !hasSelectedVideo && styles.disabled]}
+                onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}
+                disabled={!hasSelectedVideo}
+              >
+                <Text style={styles.trimBtnDarkText}>Start -0.5s</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.trimBtnDark, !hasSelectedVideo && styles.disabled]}
+                onPress={() => nudgeClipStart(CLIP_STEP_SEC)}
+                disabled={!hasSelectedVideo}
+              >
+                <Text style={styles.trimBtnDarkText}>Start +0.5s</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.trimButtonRow}>
+              <Pressable
+                style={[styles.trimBtnDark, !hasSelectedVideo && styles.disabled]}
+                onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}
+                disabled={!hasSelectedVideo}
+              >
+                <Text style={styles.trimBtnDarkText}>Eind -0.5s</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.trimBtnDark, !hasSelectedVideo && styles.disabled]}
+                onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}
+                disabled={!hasSelectedVideo}
+              >
+                <Text style={styles.trimBtnDarkText}>Eind +0.5s</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.trimPresetRow}>
+              {[5, 10, 15].map((preset) => (
+                <Pressable
+                  key={preset}
+                  style={[styles.trimPresetBtnDark, !hasSelectedVideo && styles.disabled]}
+                  onPress={() => setClipByDuration(preset)}
+                  disabled={!hasSelectedVideo}
+                >
+                  <Text style={styles.trimPresetDarkText}>{preset}s</Text>
                 </Pressable>
-              </View>
-            ) : null}
-
-            <View style={[styles.dropZone, styles.fullScreenDropZone]}>
-              {previewNode}
-              {mediaActionRow}
+              ))}
             </View>
 
-            {uploadMediaType === "video" ? (
-              <View style={styles.uploadHintRow}>
-                <Ionicons name="timer-outline" size={13} color={COLORS.muted} />
-                <Text style={styles.uploadHintText}>Maximaal {MAX_VIDEO_SECONDS} seconden per video.</Text>
+            {hasVideoClipError ? (
+              <View style={styles.trimErrorCard}>
+                <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
+                <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
               </View>
             ) : null}
 
-            {uploadMediaType === "video" && videoLengthWarning ? (
+            <Text style={styles.uploadEditorSectionTitle}>Zoom / crop</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.editorChipRow}
+              keyboardShouldPersistTaps="handled"
+            >
+              {CROP_OPTIONS.map((option) => {
+                const active = cropPreset === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    style={[styles.editorChipDark, active && styles.editorChipDarkActive]}
+                    onPress={() => setCropPreset(option.key)}
+                  >
+                    <Text style={[styles.editorChipDarkText, active && styles.editorChipDarkTextActive]}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {videoLengthWarning ? (
               <View style={styles.warningCard}>
                 <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
                 <Text style={styles.warningText}>{videoLengthWarning}</Text>
               </View>
             ) : null}
 
-            {uploadMediaType === "video" && video ? (
-              <View style={styles.trimCard}>
-                <View style={styles.trimTopRow}>
-                  <View style={styles.trimTitleWrap}>
-                    <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
-                    <Text style={styles.trimTitle}>Clip inkorten</Text>
-                  </View>
-                  <Text style={styles.trimRangeText}>{formatClipRange(clipStartSec, clipEndSec)}</Text>
-                </View>
-                <Text style={styles.trimHint}>
-                  Duur: {clipDurationSec.toFixed(1)}s van {videoDurationSec > 0 ? videoDurationSec.toFixed(1) : "--"}s
-                </Text>
-
-                <View style={styles.trimButtonRow}>
-                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(-CLIP_STEP_SEC)}>
-                    <Text style={styles.trimBtnText}>Start -0.5s</Text>
-                  </Pressable>
-                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipStart(CLIP_STEP_SEC)}>
-                    <Text style={styles.trimBtnText}>Start +0.5s</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.trimButtonRow}>
-                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(-CLIP_STEP_SEC)}>
-                    <Text style={styles.trimBtnText}>Eind -0.5s</Text>
-                  </Pressable>
-                  <Pressable style={styles.trimBtn} onPress={() => nudgeClipEnd(CLIP_STEP_SEC)}>
-                    <Text style={styles.trimBtnText}>Eind +0.5s</Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.trimPresetRow}>
-                  {[5, 10, 15].map((preset) => (
-                    <Pressable key={preset} style={styles.trimPresetBtn} onPress={() => setClipByDuration(preset)}>
-                      <Text style={styles.trimPresetText}>{preset}s</Text>
-                    </Pressable>
-                  ))}
-                </View>
-
-                {hasVideoClipError ? (
-                  <View style={styles.trimErrorCard}>
-                    <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
-                    <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-
-            {editorCard}
-
-            {video || imageMedia ? (
-              <View style={styles.fileCard}>
+            {video ? (
+              <View style={styles.fileCardDark}>
                 <Ionicons name="checkmark-circle" size={14} color={COLORS.success} />
-                <Text style={styles.fileText} numberOfLines={1}>
-                  {video?.fileName || imageMedia?.fileName}{" "}
-                  {video ? formatDuration(video.durationMs ? video.durationMs / 1000 : undefined) : ""}
+                <Text style={styles.fileDarkText} numberOfLines={1}>
+                  {video.fileName} {formatDuration(video.durationMs ? video.durationMs / 1000 : undefined)}
                 </Text>
                 <Pressable
                   onPress={() => {
@@ -964,24 +929,35 @@ export default function CompanyStudioScreen() {
                     setImageMedia(null);
                     setClipStartSec(0);
                     setClipEndSec(MAX_VIDEO_SECONDS);
-                    setUploadStep("select");
+                    setVideoLengthWarning(null);
                   }}
                 >
-                  <Ionicons name="close-circle-outline" size={16} color={COLORS.primary} />
+                  <Ionicons name="close-circle-outline" size={17} color="#fff" />
                 </Pressable>
               </View>
             ) : null}
 
-            <Pressable
-              style={[styles.nextStepBtn, !hasSelectedMedia && styles.disabled]}
-              onPress={() => setUploadStep("details")}
-              disabled={!hasSelectedMedia}
-            >
-              <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
-              <Text style={styles.nextStepText}>Volgende stap</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
+            <View style={styles.uploadBottomRow}>
+              <Pressable
+                style={[styles.secondaryDarkBtn, !hasSelectedVideo && styles.disabled]}
+                onPress={() => setClipByDuration(15)}
+                disabled={!hasSelectedVideo}
+              >
+                <Ionicons name="cut-outline" size={15} color="#fff" />
+                <Text style={styles.secondaryDarkBtnText}>15s clip</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.nextStepBtn, !canContinue && styles.disabled]}
+                onPress={() => setUploadStep("details")}
+                disabled={!canContinue}
+              >
+                <Ionicons name="arrow-forward-outline" size={15} color="#fff" />
+                <Text style={styles.nextStepText}>Verder</Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </View>
       );
     }
 
@@ -991,85 +967,83 @@ export default function CompanyStudioScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
       >
-        <View style={styles.uploadFlowTopRow}>
-          <View>
-            <Text style={styles.uploadFlowTitle}>Post details</Text>
-            <Text style={styles.uploadFlowSubTitle}>Stap 2 van 2 - beschrijving en publiceren</Text>
-          </View>
+        <View style={styles.uploadDetailsTopRow}>
+          <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
+            <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
+            <Text style={styles.backToStepText}>Terug naar video</Text>
+          </Pressable>
           <View style={styles.uploadFlowStepPill}>
             <Text style={styles.uploadFlowStepText}>2/2</Text>
           </View>
         </View>
 
-        <Pressable style={styles.backToStepBtn} onPress={() => setUploadStep("select")}>
-          <Ionicons name="arrow-back-outline" size={14} color={COLORS.primary} />
-          <Text style={styles.backToStepText}>Terug naar media</Text>
-        </Pressable>
-
-        {!hasActiveServices ? (
-          <View style={styles.requirementCard}>
-            <View style={styles.requirementTitleRow}>
-              <Ionicons name="alert-circle-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.requirementTitle}>Upload tijdelijk geblokkeerd</Text>
-            </View>
-            <Text style={styles.requirementText}>Plaats minimaal 1 actieve dienst om feed posts te publiceren.</Text>
-            <Pressable style={styles.requirementBtn} onPress={() => router.push("/(company)/(tabs)/services" as never)}>
-              <Ionicons name="cut-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.requirementBtnText}>Ga naar diensten</Text>
-            </Pressable>
-          </View>
-        ) : null}
+        <View>
+          <Text style={styles.uploadFlowTitle}>Bijna klaar</Text>
+          <Text style={styles.uploadFlowSubTitle}>Voeg titel, omschrijving en instellingen toe</Text>
+        </View>
 
         <View style={styles.uploadDetailsMediaCard}>
           <View style={styles.sectionHeader}>
             <Ionicons name="film-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.sectionTitle}>Gekozen media</Text>
+            <Text style={styles.sectionTitle}>Preview</Text>
           </View>
           <View style={styles.selectedVideoCard}>
-            {detailsPreviewNode}
-            {mediaActionRow}
-            {uploadMediaType === "video" && (video || editingItem?.mediaType === "video") ? (
-              <View style={styles.selectedClipPill}>
-                <Ionicons name="cut-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.selectedClipText}>
-                  Clip: {formatClipRange(clipStartSec, clipEndSec)} ({clipDurationSec.toFixed(1)}s)
-                </Text>
+            {hasLiveVideoPreview ? (
+              <Video
+                ref={previewVideoRef}
+                source={{ uri: previewVideoUri }}
+                style={styles.selectedVideoPreview}
+                resizeMode={ResizeMode.COVER}
+                shouldPlay
+                isMuted
+                isLooping
+                onPlaybackStatusUpdate={onPreviewStatusUpdate}
+              />
+            ) : (
+              <View style={[styles.selectedVideoPreview, styles.selectedVideoFallback]}>
+                <Ionicons name="videocam-outline" size={18} color={COLORS.muted} />
               </View>
-            ) : null}
+            )}
+            <Pressable style={styles.ghostBtn} onPress={() => openActionWithPermission("library")}>
+              <Ionicons name="images-outline" size={14} color={COLORS.primary} />
+              <Text style={styles.ghostBtnText}>Kies andere video</Text>
+            </Pressable>
             <View style={styles.selectedEditRow}>
               <View style={styles.selectedEditPill}>
                 <Ionicons name="resize-outline" size={13} color={COLORS.primary} />
                 <Text style={styles.selectedEditText}>Crop: {cropPreset}</Text>
               </View>
               <View style={styles.selectedEditPill}>
-                <Ionicons name="color-filter-outline" size={13} color={COLORS.primary} />
-                <Text style={styles.selectedEditText}>Filter: {filterPreset}</Text>
+                <Ionicons name="cut-outline" size={13} color={COLORS.primary} />
+                <Text style={styles.selectedEditText}>
+                  Clip: {formatClipRange(clipStartSec, clipEndSec)}
+                </Text>
               </View>
             </View>
           </View>
-          {editorCard}
         </View>
 
         <View style={styles.uploadDetailsFormCard}>
           <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Post titel</Text>
+            <Text style={styles.fieldLabel}>Titel</Text>
             <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="Bijv. Fresh balayage transformation"
-              placeholderTextColor={COLORS.placeholder}
+              placeholder="Geef je video een duidelijke titel"
+              placeholderTextColor={INPUT_HINT_COLOR}
               style={styles.input}
             />
           </View>
 
           <View style={styles.fieldWrap}>
-            <Text style={styles.fieldLabel}>Beschrijving</Text>
+            <Text style={styles.fieldLabel}>Omschrijving</Text>
             <TextInput
               value={description}
               onChangeText={setDescription}
-              placeholder="Vertel kort wat je hebt gedaan"
-              placeholderTextColor={COLORS.placeholder}
+              placeholder="Wat laat je in deze video zien?"
+              placeholderTextColor={INPUT_HINT_COLOR}
               style={[styles.input, styles.textarea]}
               multiline
             />
@@ -1086,14 +1060,12 @@ export default function CompanyStudioScreen() {
               value={hashtagsInput}
               onChangeText={setHashtagsInput}
               placeholder="#balayage #nails #lashlift"
-              placeholderTextColor={COLORS.placeholder}
+              placeholderTextColor={INPUT_HINT_COLOR}
               autoCapitalize="none"
               autoCorrect={false}
               style={styles.input}
             />
-            <Text style={styles.fieldHint}>
-              {hashtags.length}/{MAX_HASHTAGS} tags
-            </Text>
+            <Text style={styles.fieldHint}>{hashtags.length}/{MAX_HASHTAGS} tags</Text>
           </View>
 
           <View style={styles.fieldWrap}>
@@ -1110,6 +1082,26 @@ export default function CompanyStudioScreen() {
                 return (
                   <Pressable key={service.id} style={[styles.serviceChip, active && styles.serviceChipActive]} onPress={() => setSelectedServiceId(service.id)}>
                     <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>{service.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          <View style={styles.fieldWrap}>
+            <Text style={styles.fieldLabel}>Filter (optioneel)</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
+              {FILTER_OPTIONS.map((option) => {
+                const active = filterPreset === option.key;
+                return (
+                  <Pressable
+                    key={option.key}
+                    style={[styles.serviceChip, active && styles.serviceChipActive]}
+                    onPress={() => setFilterPreset(option.key)}
+                  >
+                    <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>
+                      {option.label}
+                    </Text>
                   </Pressable>
                 );
               })}
@@ -1339,8 +1331,8 @@ export default function CompanyStudioScreen() {
             </View>
             <Text style={styles.permissionModalText}>
               {pendingMediaAction === "library"
-                ? "Geef galerij-toegang om foto&apos;s en video&apos;s te kiezen en te bewerken."
-                : "Geef camera-toegang om direct video&apos;s of foto&apos;s op te nemen."}
+                ? "Geef galerij-toegang om video&apos;s te kiezen en te bewerken."
+                : "Geef camera-toegang om direct video&apos;s op te nemen."}
             </Text>
 
             <View style={styles.permissionModalActions}>
@@ -1635,6 +1627,223 @@ const styles = StyleSheet.create({
   uploadDetailsContent: {
     gap: 12,
     paddingBottom: 52,
+  },
+  uploadEditorScreen: {
+    flex: 1,
+    gap: 10,
+  },
+  uploadEditorHero: {
+    flex: 1,
+    minHeight: 340,
+    borderRadius: 22,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#202020",
+    backgroundColor: "#000",
+    position: "relative",
+  },
+  uploadEditorVideo: {
+    width: "100%",
+    height: "100%",
+  },
+  uploadEditorEmpty: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 24,
+    backgroundColor: "#000",
+  },
+  uploadEditorEmptyTitle: {
+    color: "#fff",
+    fontSize: 21,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  uploadEditorEmptyText: {
+    color: "#c8c8c8",
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  uploadEditorTopBadges: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    right: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  uploadEditorBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(16,16,16,0.72)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  uploadEditorBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  uploadEditorBottomInfo: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(0,0,0,0.45)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  uploadEditorBottomInfoText: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  uploadEditorControls: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#2a2a2a",
+    backgroundColor: "#0f0f0f",
+    padding: 12,
+    gap: 10,
+    paddingBottom: 16,
+  },
+  uploadEditorPrimaryBtn: {
+    minHeight: 44,
+    borderRadius: 11,
+    backgroundColor: COLORS.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  uploadEditorPrimaryBtnText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  uploadEditorMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  uploadEditorSectionTitle: {
+    color: "#f5f5f5",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  uploadEditorMetaText: {
+    color: "#c6c6c6",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  trimBtnDark: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#323232",
+    backgroundColor: "#1a1a1a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimBtnDarkText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  trimPresetBtnDark: {
+    minHeight: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#323232",
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trimPresetDarkText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  editorChipDark: {
+    minHeight: 32,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#353535",
+    backgroundColor: "#1b1b1b",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editorChipDarkActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: "rgba(51,93,255,0.24)",
+  },
+  editorChipDarkText: {
+    color: "#d8d8d8",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  editorChipDarkTextActive: {
+    color: "#fff",
+    fontWeight: "900",
+  },
+  fileCardDark: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#333333",
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  fileDarkText: {
+    flex: 1,
+    color: "#f2f2f2",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  uploadBottomRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  secondaryDarkBtn: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#343434",
+    backgroundColor: "#1d1d1d",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  secondaryDarkBtnText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  uploadDetailsTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
   heroCard: {
     backgroundColor: "#101319",
@@ -2046,6 +2255,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   nextStepBtn: {
+    flex: 1,
     minHeight: 46,
     borderRadius: 12,
     backgroundColor: COLORS.primary,
