@@ -20,6 +20,24 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
         <link rel="icon" type="image/png" href="/favicon.png" />
 
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+              html {
+                -webkit-text-size-adjust: 100%;
+              }
+
+              @supports (-webkit-touch-callout: none) {
+                input,
+                textarea,
+                select {
+                  font-size: 16px !important;
+                }
+              }
+            `,
+          }}
+        />
+
         <ScrollViewStyleReset />
       </head>
       <body>{children}</body>

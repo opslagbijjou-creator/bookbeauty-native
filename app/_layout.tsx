@@ -1,9 +1,17 @@
 import React, { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { Alert, AppState, Linking, Platform } from "react-native";
 import { Stack } from "expo-router";
 import { getUserRole, subscribeAuth } from "../lib/authRepo";
 import { ensureBookBeautyAutoFollow } from "../lib/platformRepo";
 import { touchPresence } from "../lib/presenceRepo";
+import {
+  getCameraPermissionState,
+  getMediaLibraryPermissionState,
+  getMicrophonePermissionState,
+  requestCameraPermission,
+  requestMediaLibraryPermission,
+  requestMicrophonePermission,
+} from "../lib/mediaRepo";
 import type { AppRole } from "../lib/roles";
 
 const PRESENCE_TOUCH_INTERVAL_MS = 15_000;
@@ -69,10 +77,72 @@ function AppBootstrapEffects() {
   return null;
 }
 
+type PermissionState = "granted" | "denied" | "undetermined";
+
+async function ensurePermission(
+  readState: () => Promise<PermissionState>,
+  request: () => Promise<boolean>
+): Promise<boolean> {
+  const state = await readState().catch(() => "undetermined" as PermissionState);
+  if (state === "granted") return true;
+  return request().catch(() => false);
+}
+
+function AppStartupPermissionBootstrap() {
+  const requestedRef = useRef(false);
+
+  useEffect(() => {
+    if (requestedRef.current) return;
+    requestedRef.current = true;
+
+    if (Platform.OS === "web") return;
+
+    const timer = setTimeout(() => {
+      Promise.resolve()
+        .then(async () => {
+          const libraryGranted = await ensurePermission(
+            getMediaLibraryPermissionState,
+            requestMediaLibraryPermission
+          );
+          const cameraGranted = await ensurePermission(
+            getCameraPermissionState,
+            requestCameraPermission
+          );
+          const microphoneGranted = await ensurePermission(
+            getMicrophonePermissionState,
+            requestMicrophonePermission
+          );
+
+          if (libraryGranted && cameraGranted && microphoneGranted) return;
+
+          Alert.alert(
+            "Toestemming nodig",
+            "Geef toegang tot galerij, camera en microfoon. Zonder deze rechten werken upload en opnemen niet goed.",
+            [
+              { text: "Nu niet", style: "cancel" },
+              {
+                text: "Open instellingen",
+                onPress: () => {
+                  Linking.openSettings().catch(() => null);
+                },
+              },
+            ]
+          );
+        })
+        .catch(() => null);
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <>
       <AppBootstrapEffects />
+      <AppStartupPermissionBootstrap />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />

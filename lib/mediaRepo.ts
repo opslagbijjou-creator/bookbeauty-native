@@ -106,6 +106,24 @@ export async function requestCameraPermission(): Promise<boolean> {
   return status.granted;
 }
 
+export async function getMicrophonePermissionState(): Promise<PermissionState> {
+  try {
+    const status = await Camera.getMicrophonePermissionsAsync();
+    return toPermissionState(status.status);
+  } catch {
+    return "undetermined";
+  }
+}
+
+export async function requestMicrophonePermission(): Promise<boolean> {
+  try {
+    const status = await Camera.requestMicrophonePermissionsAsync();
+    return status.granted;
+  } catch {
+    return false;
+  }
+}
+
 export async function pickImageFromLibrary(): Promise<PickedMedia | null> {
   await ensureLibraryPermission();
 
