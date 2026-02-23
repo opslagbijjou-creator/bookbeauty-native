@@ -125,6 +125,14 @@ function normalizeCustomerNotificationType(value: unknown): CustomerNotification
     : "booking_created";
 }
 
+function shouldPlaySoundForCompanyNotification(type: CompanyNotificationType): boolean {
+  return type === "booking_request";
+}
+
+function shouldPlaySoundForCustomerNotification(type: CustomerNotificationType): boolean {
+  return type === "booking_created" || type === "booking_confirmed";
+}
+
 function toNotification(id: string, data: Record<string, unknown>): CompanyNotification {
   return {
     id,
@@ -201,6 +209,7 @@ async function createCompanyNotification(
   void sendPushToUser(companyId, {
     title: payload.title,
     body: payload.body,
+    playSound: shouldPlaySoundForCompanyNotification(payload.type),
     data: {
       notificationId: rowRef.id,
       notificationType: payload.type,
@@ -248,6 +257,7 @@ async function createCustomerNotification(
   void sendPushToUser(customerId, {
     title: payload.title,
     body: payload.body,
+    playSound: shouldPlaySoundForCustomerNotification(payload.type),
     data: {
       notificationId: rowRef.id,
       notificationType: payload.type,

@@ -320,17 +320,6 @@ export async function addMyFeedPost(companyId: string, payload: AddFeedPostPaylo
     throw new Error("Bedrijfsprofiel ontbreekt. Sla eerst je profiel op.");
   }
 
-  const activeServiceSnap = await getDocs(
-    query(
-      collection(db, "companies_public", companyId, "services_public"),
-      where("isActive", "==", true),
-      limit(1)
-    )
-  );
-  if (activeServiceSnap.empty) {
-    throw new Error("Plaats minimaal 1 actieve dienst voordat je een feed post plaatst.");
-  }
-
   const mediaType: "video" | "image" = payload.mediaType === "image" ? "image" : "video";
   const videoUrl = String(payload.videoUrl ?? "").trim();
   const imageUrl = String(payload.imageUrl ?? "").trim();

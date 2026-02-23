@@ -27,6 +27,12 @@ export default function Root({ children }: { children: React.ReactNode }) {
                 -webkit-text-size-adjust: 100%;
               }
 
+              input,
+              textarea,
+              select {
+                font-size: 16px;
+              }
+
               @supports (-webkit-touch-callout: none) {
                 input,
                 textarea,

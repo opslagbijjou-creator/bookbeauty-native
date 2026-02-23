@@ -161,7 +161,6 @@ export default function CompanyStudioScreen() {
   const [items, setItems] = useState<FeedPost[]>([]);
   const [likesByPost, setLikesByPost] = useState<Record<string, number>>({});
   const [services, setServices] = useState<CompanyService[]>([]);
-  const [hasActiveServices, setHasActiveServices] = useState(true);
 
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -211,24 +210,6 @@ export default function CompanyStudioScreen() {
 
   const liveCount = useMemo(() => items.filter((item) => item.isActive).length, [items]);
   const totalViews = useMemo(() => items.reduce((acc, item) => acc + (item.viewCount ?? 0), 0), [items]);
-  const previewThumbnail = useMemo(() => {
-    if (video || imageMedia) return "";
-    if (!editingItem) return "";
-
-    const baseVideo = editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim() || "";
-    const baseImage = editingItem.sourceImageUrl?.trim() || editingItem.imageUrl?.trim() || "";
-    if (editingItem.mediaType === "image" && baseImage) {
-      return buildCloudinaryEditedUrl(baseImage, { cropPreset, filterPreset });
-    }
-    if (baseImage && !baseVideo) {
-      return buildCloudinaryEditedUrl(baseImage, { cropPreset, filterPreset });
-    }
-    if (baseVideo) {
-      const editedVideoUrl = buildCloudinaryEditedUrl(baseVideo, { cropPreset, filterPreset });
-      return cloudinaryVideoThumbnailFromUrl(editedVideoUrl);
-    }
-    return getPostThumbnail(editingItem);
-  }, [editingItem, video, imageMedia, cropPreset, filterPreset]);
   const previewVideoUri = useMemo(() => {
     if (uploadMediaType !== "video") return "";
     if (video?.uri) return video.uri;
@@ -336,10 +317,9 @@ export default function CompanyStudioScreen() {
     if (uploading) return false;
     if (title.trim().length < 2) return false;
     if (!editingPostId && !video && !imageMedia) return false;
-    if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) return false;
     if (hasVideoClipError) return false;
     return true;
-  }, [uploading, title, editingPostId, video, imageMedia, hasActiveServices, hasVideoClipError]);
+  }, [uploading, title, editingPostId, video, imageMedia, hasVideoClipError]);
 
   const refreshPermissionStates = useCallback(async () => {
     const [libraryState, cameraState] = await Promise.all([
@@ -365,7 +345,6 @@ export default function CompanyStudioScreen() {
       setItems([]);
       setServices([]);
       setLikesByPost({});
-      setHasActiveServices(false);
       setLoadingLibrary(false);
       return;
     }
@@ -377,7 +356,6 @@ export default function CompanyStudioScreen() {
       const onlyActiveServices = companyServices.filter((service) => service.isActive);
       setItems(posts);
       setServices(onlyActiveServices);
-      setHasActiveServices(onlyActiveServices.length > 0);
       setSelectedServiceId((prev) => (prev && onlyActiveServices.some((service) => service.id === prev) ? prev : ""));
 
       const likesPairs = await Promise.all(
@@ -553,10 +531,6 @@ export default function CompanyStudioScreen() {
   }
 
   function openActionWithPermission(action: PendingMediaAction) {
-    if (!hasActiveServices && !editingPostId) {
-      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je media uploadt.");
-      return;
-    }
     if (Platform.OS === "web") {
       executeMediaAction(action).catch((error: any) => {
         Alert.alert("Media kiezen mislukt", error?.message ?? "Kon media niet openen.");
@@ -595,11 +569,6 @@ export default function CompanyStudioScreen() {
   async function onSubmit() {
     if (!uid) {
       Alert.alert("Niet ingelogd", "Log opnieuw in om te uploaden of wijzigen.");
-      return;
-    }
-
-    if (!hasActiveServices && (!editingPostId || Boolean(video) || Boolean(imageMedia))) {
-      Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je een feed post plaatst.");
       return;
     }
 
@@ -763,23 +732,38 @@ export default function CompanyStudioScreen() {
   async function onDelete(postId: string) {
     if (busyPostId) return;
 
+    const runDelete = async () => {
+      setBusyPostId(postId);
+      try {
+        await deleteMyFeedPost(postId);
+        if (editingPostId === postId) resetForm();
+        if (detailPostId === postId) setDetailPostId(null);
+        await load();
+      } catch (error: any) {
+        Alert.alert("Fout", error?.message ?? "Kon video niet verwijderen.");
+      } finally {
+        setBusyPostId(null);
+      }
+    };
+
+    if (Platform.OS === "web") {
+      const confirmFn = (globalThis as { confirm?: (message?: string) => boolean }).confirm;
+      const confirmed =
+        typeof confirmFn === "function"
+          ? confirmFn("Weet je zeker dat je deze video wilt verwijderen?")
+          : true;
+      if (!confirmed) return;
+      runDelete().catch(() => null);
+      return;
+    }
+
     Alert.alert("Video verwijderen", "Weet je zeker dat je deze video wilt verwijderen?", [
       { text: "Annuleren", style: "cancel" },
       {
         text: "Verwijderen",
         style: "destructive",
-        onPress: async () => {
-          setBusyPostId(postId);
-          try {
-            await deleteMyFeedPost(postId);
-            if (editingPostId === postId) resetForm();
-            if (detailPostId === postId) setDetailPostId(null);
-            await load();
-          } catch (error: any) {
-            Alert.alert("Fout", error?.message ?? "Kon video niet verwijderen.");
-          } finally {
-            setBusyPostId(null);
-          }
+        onPress: () => {
+          runDelete().catch(() => null);
         },
       },
     ]);
@@ -814,7 +798,7 @@ export default function CompanyStudioScreen() {
           (editingItem?.mediaType === "video" &&
             (editingItem.sourceVideoUrl?.trim() || editingItem.videoUrl?.trim()))
       );
-    const canContinue = hasSelectedVideo && !hasVideoClipError && hasActiveServices;
+    const canContinue = hasSelectedVideo && !hasVideoClipError;
     const safeDurationForUi = Math.max(
       selectedVideoDurationSec,
       clipEndSec,
@@ -860,22 +844,7 @@ export default function CompanyStudioScreen() {
 
             {!hasSelectedVideo ? (
               <View style={styles.uploadEditorFloatingActions}>
-                {!hasActiveServices ? (
-                  <View style={styles.uploadEditorInlineAlert}>
-                    <Ionicons name="alert-circle-outline" size={13} color="#fff" />
-                    <Text style={styles.uploadEditorInlineAlertText}>
-                      Voeg eerst 1 actieve dienst toe om te posten.
-                    </Text>
-                    <Pressable onPress={() => router.push("/(company)/(tabs)/services" as never)}>
-                      <Text style={styles.uploadEditorInlineAlertAction}>Diensten</Text>
-                    </Pressable>
-                  </View>
-                ) : null}
-                <Pressable
-                  style={[styles.uploadEditorPrimaryBtn, !hasActiveServices && styles.disabled]}
-                  onPress={() => openActionWithPermission("library")}
-                  disabled={!hasActiveServices}
-                >
+                <Pressable style={styles.uploadEditorPrimaryBtn} onPress={() => openActionWithPermission("library")}>
                   <Ionicons name="cloud-upload-outline" size={16} color="#fff" />
                   <Text style={styles.uploadEditorPrimaryBtnText}>Upload video</Text>
                 </Pressable>

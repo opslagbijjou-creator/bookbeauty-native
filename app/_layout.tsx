@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { Alert, AppState, Linking, Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
@@ -30,7 +30,7 @@ function AppBootstrapEffects() {
   const lastTouchRef = useRef(0);
   const lastTouchUidRef = useRef("");
 
-  function openRouteFromPushData(data: Record<string, unknown>) {
+  const openRouteFromPushData = useCallback((data: Record<string, unknown>) => {
     const role = String(data.role ?? "").trim();
     const bookingId = String(data.bookingId ?? "").trim();
 
@@ -42,7 +42,7 @@ function AppBootstrapEffects() {
       router.push((bookingId ? "/(customer)/(tabs)/bookings" : "/(customer)/notifications") as never);
       return;
     }
-  }
+  }, [router]);
 
   async function syncUserSession(uid: string, roleHint?: AppRole | null): Promise<void> {
     const cleanUid = uid.trim();
@@ -109,7 +109,7 @@ function AppBootstrapEffects() {
       .catch(() => null);
 
     return () => sub.remove();
-  }, [router]);
+  }, [openRouteFromPushData]);
 
   return null;
 }

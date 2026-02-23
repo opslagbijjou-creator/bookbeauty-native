@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AddServiceModal from "../../../components/AddServiceModal";
@@ -108,25 +108,40 @@ export default function CompanyServicesScreen() {
     }
     if (busyActionId) return;
 
+    const runDelete = async () => {
+      setBusyActionId(service.id);
+      try {
+        await deleteMyService(uid, service.id);
+        if (editingService?.id === service.id) {
+          setEditingService(null);
+          setModalVisible(false);
+        }
+        await load();
+      } catch (error: any) {
+        Alert.alert("Fout", error?.message ?? "Kon dienst niet verwijderen.");
+      } finally {
+        setBusyActionId(null);
+      }
+    };
+
+    if (Platform.OS === "web") {
+      const confirmFn = (globalThis as { confirm?: (message?: string) => boolean }).confirm;
+      const confirmed =
+        typeof confirmFn === "function"
+          ? confirmFn("Weet je zeker dat je deze dienst wilt verwijderen?")
+          : true;
+      if (!confirmed) return;
+      runDelete().catch(() => null);
+      return;
+    }
+
     Alert.alert("Dienst verwijderen", "Weet je zeker dat je deze dienst wilt verwijderen?", [
       { text: "Annuleren", style: "cancel" },
       {
         text: "Verwijderen",
         style: "destructive",
-        onPress: async () => {
-          setBusyActionId(service.id);
-          try {
-            await deleteMyService(uid, service.id);
-            if (editingService?.id === service.id) {
-              setEditingService(null);
-              setModalVisible(false);
-            }
-            await load();
-          } catch (error: any) {
-            Alert.alert("Fout", error?.message ?? "Kon dienst niet verwijderen.");
-          } finally {
-            setBusyActionId(null);
-          }
+        onPress: () => {
+          runDelete().catch(() => null);
         },
       },
     ]);

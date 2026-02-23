@@ -8,6 +8,7 @@ type PushMessage = {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  playSound?: boolean;
 };
 
 type PushSubscriptionDoc = {
@@ -16,6 +17,9 @@ type PushSubscriptionDoc = {
 };
 
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
+const BOOKING_SOUND_CHANNEL_ID = "booking-alerts";
+const SILENT_CHANNEL_ID = "silent-updates";
+const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
 let pushConfigured = false;
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -50,27 +54,56 @@ function resolveProjectId(): string | undefined {
   return fromNestedExtra || undefined;
 }
 
+function parseBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return undefined;
+}
+
+function shouldPlaySoundForData(data: Record<string, unknown>): boolean {
+  const explicit = parseBoolean(data.playSound);
+  if (typeof explicit === "boolean") return explicit;
+  const notificationType = String(data.notificationType ?? "").trim();
+  return SOUND_NOTIFICATION_TYPES.has(notificationType);
+}
+
 export function configurePushNotifications(): void {
   if (pushConfigured) return;
   pushConfigured = true;
 
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+    handleNotification: async (notification) => {
+      const data = (notification.request.content.data ?? {}) as Record<string, unknown>;
+      const shouldPlaySound = shouldPlaySoundForData(data);
+      return {
+        shouldShowAlert: true,
+        shouldPlaySound,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      };
+    },
   });
 
   if (Platform.OS === "android") {
-    Notifications.setNotificationChannelAsync("default", {
-      name: "Standaard",
+    Notifications.setNotificationChannelAsync(BOOKING_SOUND_CHANNEL_ID, {
+      name: "Boekingen",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 200, 250],
       lightColor: "#335DFF",
       sound: "default",
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    }).catch(() => null);
+
+    Notifications.setNotificationChannelAsync(SILENT_CHANNEL_ID, {
+      name: "Updates zonder geluid",
+      importance: Notifications.AndroidImportance.DEFAULT,
+      vibrationPattern: [0],
+      lightColor: "#335DFF",
+      sound: null,
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     }).catch(() => null);
   }
@@ -116,15 +149,20 @@ export async function registerPushTokenForUser(uid: string): Promise<void> {
 
 async function sendExpoPush(tokens: string[], message: PushMessage): Promise<void> {
   if (!tokens.length) return;
+  const playSound = message.playSound === true;
+  const data = {
+    ...(message.data ?? {}),
+    playSound,
+  };
 
   const payload = tokens.map((to) => ({
     to,
     title: message.title,
     body: message.body,
-    sound: "default",
+    sound: playSound ? "default" : undefined,
     priority: "high",
-    data: message.data ?? {},
-    channelId: Platform.OS === "android" ? "default" : undefined,
+    data,
+    channelId: playSound ? BOOKING_SOUND_CHANNEL_ID : SILENT_CHANNEL_ID,
   }));
 
   const chunks = chunk(payload, 100);
@@ -147,6 +185,7 @@ export async function sendPushToUser(
     title: string;
     body: string;
     data?: Record<string, unknown>;
+    playSound?: boolean;
   }
 ): Promise<void> {
   const cleanUid = String(uid ?? "").trim();
@@ -161,4 +200,3 @@ export async function sendPushToUser(
 
   await sendExpoPush(tokens, message);
 }
-

@@ -30,6 +30,8 @@ type InAppCaptureModalProps = {
   onCaptured: (media: CapturedMedia) => void;
 };
 
+const MAX_CAPTURE_VIDEO_SECONDS = 15;
+
 function makeCaptureFileName(kind: "image" | "video"): string {
   const stamp = Date.now();
   return kind === "video" ? `capture-${stamp}.mp4` : `capture-${stamp}.jpg`;
@@ -97,7 +99,7 @@ export default function InAppCaptureModal({
       setRecording(true);
       try {
         const video = await cameraRef.current.recordAsync({
-          maxDuration: 60,
+          maxDuration: MAX_CAPTURE_VIDEO_SECONDS,
         });
         if (!video?.uri) return;
         onCaptured({

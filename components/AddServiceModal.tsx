@@ -199,12 +199,8 @@ export default function AddServiceModal({
     }
 
     if (currentStep === 3) {
-      if (photoUrls.length < 1) {
-        Alert.alert("Foto vereist", "Voeg minimaal 1 foto toe aan je dienst.");
-        return false;
-      }
       if (photoUrls.length > 3) {
-        Alert.alert("Controle", "Maximaal 3 foto&apos;s per dienst.");
+        Alert.alert("Controle", "Maximaal 3 foto's per dienst.");
         return false;
       }
       return true;
@@ -223,9 +219,13 @@ export default function AddServiceModal({
   }
 
   async function onUploadPhoto(mode: "library" | "camera") {
-    if (!companyId || photoUploading) return;
+    if (!companyId) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om media toe te voegen.");
+      return;
+    }
+    if (photoUploading) return;
     if (photoUrls.length >= 3) {
-      Alert.alert("Max bereikt", "Per dienst kun je maximaal 3 foto&apos;s uploaden.");
+      Alert.alert("Max bereikt", "Per dienst kun je maximaal 3 foto's uploaden.");
       return;
     }
 
@@ -249,6 +249,11 @@ export default function AddServiceModal({
   }
 
   function openUploadSourcePicker() {
+    if (Platform.OS === "web") {
+      onUploadPhoto("library").catch(() => null);
+      return;
+    }
+
     Alert.alert("Foto toevoegen", "Kies hoe je deze foto wilt toevoegen.", [
       { text: "Annuleren", style: "cancel" },
       {
@@ -271,7 +276,11 @@ export default function AddServiceModal({
   }
 
   async function onSave() {
-    if (!companyId || saving) return;
+    if (!companyId) {
+      Alert.alert("Niet ingelogd", "Log opnieuw in om diensten op te slaan.");
+      return;
+    }
+    if (saving) return;
 
     if (!validateStep(1) || !validateStep(2) || !validateStep(3)) {
       return;
@@ -388,12 +397,12 @@ export default function AddServiceModal({
       return (
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Foto&apos;s & zichtbaarheid</Text>
-          <Text style={styles.stepDescription}>Voeg 1 tot 3 foto&apos;s toe zodat klanten direct zien wat je aanbiedt.</Text>
+          <Text style={styles.stepDescription}>Voeg optioneel 1 tot 3 foto&apos;s toe zodat klanten direct zien wat je aanbiedt.</Text>
 
           <View style={styles.photoCard}>
             <View style={styles.photoTitleRow}>
               <Ionicons name="images-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.photoTitle}>Foto&apos;s ({photoUrls.length}/3) • minimaal 1</Text>
+              <Text style={styles.photoTitle}>Foto&apos;s ({photoUrls.length}/3) • optioneel</Text>
             </View>
 
             <View style={styles.photoActions}>
@@ -421,7 +430,7 @@ export default function AddServiceModal({
                 ))}
               </View>
             ) : (
-              <Text style={styles.photoHint}>Voeg minimaal 1 en maximaal 3 foto&apos;s toe voor klanten.</Text>
+              <Text style={styles.photoHint}>Je kunt optioneel tot 3 foto&apos;s toevoegen voor klanten.</Text>
             )}
           </View>
 
