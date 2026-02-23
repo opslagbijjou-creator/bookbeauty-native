@@ -4,6 +4,7 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -301,7 +302,7 @@ export default function CompanyFeedScreen() {
           <FlatList
             data={items}
             keyExtractor={(item) => item.id}
-            pagingEnabled
+            pagingEnabled={Platform.OS !== "web"}
             onEndReachedThreshold={0.35}
             onEndReached={loadMore}
             showsVerticalScrollIndicator={false}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
@@ -52,6 +52,7 @@ export default function VideoPostCard({
   const linkedServiceName = typeof post.serviceName === "string" ? post.serviceName.trim() : "";
   const influencerName = typeof post.influencerName === "string" ? post.influencerName.trim() : "";
   const isInfluencerPost = post.creatorRole === "influencer" && Boolean(influencerName);
+  const isWeb = Platform.OS === "web";
 
   const onPlaybackStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
@@ -114,7 +115,7 @@ export default function VideoPostCard({
           resizeMode={ResizeMode.COVER}
           shouldPlay={isActive}
           isLooping={!hasClipWindow}
-          isMuted={false}
+          isMuted={isWeb}
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
       ) : (

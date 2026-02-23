@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../lib/ui";
 
@@ -7,6 +7,8 @@ type DeferredInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
+
+const DISMISS_KEY = "bookbeauty_web_install_prompt_dismissed";
 
 function isStandaloneWebApp(): boolean {
   if (Platform.OS !== "web") return true;
@@ -30,12 +32,13 @@ export default function WebInstallPromptOverlay() {
   const [visible, setVisible] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<DeferredInstallPromptEvent | null>(null);
   const [errorText, setErrorText] = useState("");
-
   const platformHint = useMemo(() => detectPlatformHint(), []);
 
   useEffect(() => {
     if (Platform.OS !== "web") return;
     if (isStandaloneWebApp()) return;
+    if (globalThis.localStorage?.getItem(DISMISS_KEY) === "1") return;
+
     setVisible(true);
 
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -48,6 +51,7 @@ export default function WebInstallPromptOverlay() {
       setVisible(false);
       setDeferredPrompt(null);
       setErrorText("");
+      globalThis.localStorage?.setItem(DISMISS_KEY, "1");
     };
 
     globalThis.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt as EventListener);
@@ -63,9 +67,13 @@ export default function WebInstallPromptOverlay() {
     if (!deferredPrompt) return;
     try {
       await deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === "accepted") {
+        setVisible(false);
+        globalThis.localStorage?.setItem(DISMISS_KEY, "1");
+      }
     } catch {
-      // no-op when browser blocks prompt
+      // browser kan prompt blokkeren
     }
   }
 
@@ -73,167 +81,158 @@ export default function WebInstallPromptOverlay() {
     if (isStandaloneWebApp()) {
       setVisible(false);
       setErrorText("");
+      globalThis.localStorage?.setItem(DISMISS_KEY, "1");
       return;
     }
-    setErrorText("Nog niet toegevoegd als app. Volg de stappen hieronder en open daarna opnieuw via je beginscherm.");
+    setErrorText("Nog niet als app geopend. Voeg toe aan beginscherm en open daarna via dat icoon.");
   }
 
   function onDismiss() {
     setVisible(false);
     setErrorText("");
+    globalThis.localStorage?.setItem(DISMISS_KEY, "1");
   }
 
   if (!visible || Platform.OS !== "web" || isStandaloneWebApp()) return null;
 
   const stepsText =
     platformHint === "ios"
-      ? "iPhone/iPad: tik op Deel en kies 'Zet op beginscherm'."
+      ? "iPhone/iPad: Deel -> Zet op beginscherm."
       : platformHint === "android"
-        ? "Android: open browsermenu en kies 'App installeren' of 'Toevoegen aan startscherm'."
-        : "Browser: kies 'Install app' of 'Toevoegen aan startscherm' in het menu.";
+        ? "Android: browsermenu -> App installeren / Toevoegen aan startscherm."
+        : "Browsermenu: kies Install app / Toevoegen aan startscherm.";
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onDismiss}>
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <View style={styles.iconWrap}>
-              <Ionicons name="phone-portrait-outline" size={18} color={COLORS.primary} />
-            </View>
-            <Text style={styles.title}>Open Feed Als App</Text>
+    <View pointerEvents="box-none" style={styles.root}>
+      <View style={styles.card}>
+        <View style={styles.headerRow}>
+          <View style={styles.titleRow}>
+            <Ionicons name="phone-portrait-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.title}>Feed als app</Text>
           </View>
+          <Pressable style={styles.closeBtn} onPress={onDismiss}>
+            <Ionicons name="close" size={14} color={COLORS.muted} />
+          </Pressable>
+        </View>
 
-          <Text style={styles.description}>
-            Voor de beste feed-ervaring moet je BookBeauty eerst toevoegen aan je beginscherm en openen als app.
-          </Text>
-          <Text style={styles.stepText}>{stepsText}</Text>
-          {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
+        <Text style={styles.description}>
+          Feed werkt ook in web, maar als app is hij soepeler en sneller.
+        </Text>
+        <Text style={styles.stepText}>{stepsText}</Text>
+        {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
-          <View style={styles.actionsRow}>
-            {deferredPrompt ? (
-              <Pressable style={styles.primaryBtn} onPress={() => onInstallNow().catch(() => null)}>
-                <Ionicons name="download-outline" size={14} color="#fff" />
-                <Text style={styles.primaryBtnText}>Installeer nu</Text>
-              </Pressable>
-            ) : null}
-            <Pressable style={styles.secondaryBtn} onPress={onIAddedIt}>
-              <Ionicons name="checkmark-circle-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.secondaryBtnText}>Ik heb hem toegevoegd</Text>
+        <View style={styles.actionsRow}>
+          {deferredPrompt ? (
+            <Pressable style={styles.primaryBtn} onPress={() => onInstallNow().catch(() => null)}>
+              <Ionicons name="download-outline" size={13} color="#fff" />
+              <Text style={styles.primaryBtnText}>Installeer</Text>
             </Pressable>
-            <Pressable style={styles.ghostBtn} onPress={onDismiss}>
-              <Text style={styles.ghostBtnText}>Nu niet</Text>
-            </Pressable>
-          </View>
+          ) : null}
+          <Pressable style={styles.secondaryBtn} onPress={onIAddedIt}>
+            <Ionicons name="checkmark-circle-outline" size={13} color={COLORS.primary} />
+            <Text style={styles.secondaryBtnText}>Al toegevoegd</Text>
+          </Pressable>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.58)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 14,
+  root: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 10,
+    zIndex: 50,
   },
   card: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.card,
-    padding: 14,
-    gap: 10,
+    padding: 10,
+    gap: 7,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: 8,
   },
-  iconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.primarySoft,
+  titleRow: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 6,
   },
   title: {
     color: COLORS.text,
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: "900",
   },
-  description: {
-    color: COLORS.text,
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "600",
-  },
-  stepText: {
-    color: COLORS.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  errorText: {
-    color: COLORS.danger,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  actionsRow: {
-    gap: 7,
-    marginTop: 2,
-  },
-  primaryBtn: {
-    minHeight: 40,
-    borderRadius: 11,
-    backgroundColor: COLORS.primary,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  primaryBtnText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  secondaryBtn: {
-    minHeight: 40,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.primarySoft,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  secondaryBtnText: {
-    color: COLORS.primary,
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  ghostBtn: {
-    minHeight: 36,
-    borderRadius: 10,
+  closeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.surface,
     alignItems: "center",
     justifyContent: "center",
   },
-  ghostBtnText: {
-    color: COLORS.muted,
-    fontWeight: "700",
+  description: {
+    color: COLORS.text,
     fontSize: 12,
+    fontWeight: "700",
+  },
+  stepText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  errorText: {
+    color: COLORS.danger,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    gap: 7,
+  },
+  primaryBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 10,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  primaryBtnText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  secondaryBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  secondaryBtnText: {
+    color: COLORS.primary,
+    fontSize: 11,
+    fontWeight: "800",
   },
 });

@@ -1,5 +1,3 @@
-import { ScrollViewStyleReset } from "expo-router/html";
-
 export default function Root({ children }: { children: React.ReactNode }) {
   return (
     <html lang="nl">
@@ -20,7 +18,6 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
         <link rel="icon" type="image/png" href="/favicon.png" />
 
-        <ScrollViewStyleReset />
       </head>
       <body>{children}</body>
     </html>

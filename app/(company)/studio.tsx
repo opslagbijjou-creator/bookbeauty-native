@@ -32,8 +32,10 @@ import {
 } from "../../lib/feedRepo";
 import { auth } from "../../lib/firebase";
 import {
+  captureAnyMediaWithCamera,
   getCameraPermissionState,
   getMediaLibraryPermissionState,
+  pickAnyMediaFromLibrary,
   requestCameraPermission,
   requestMediaLibraryPermission,
   type PickedMedia,
@@ -451,6 +453,16 @@ export default function CompanyStudioScreen() {
   }
 
   async function executeMediaAction(action: PendingMediaAction) {
+    if (Platform.OS === "web") {
+      const picked =
+        action === "library"
+          ? await pickAnyMediaFromLibrary()
+          : await captureAnyMediaWithCamera();
+      if (!picked) return;
+      applyPickedMedia(picked, picked.kind);
+      return;
+    }
+
     if (action === "library") {
       setLibraryPickerVisible(true);
       return;
@@ -468,6 +480,12 @@ export default function CompanyStudioScreen() {
   function openActionWithPermission(action: PendingMediaAction) {
     if (!hasActiveServices && !editingPostId) {
       Alert.alert("Minimaal 1 dienst", "Plaats minimaal 1 actieve dienst voordat je media uploadt.");
+      return;
+    }
+    if (Platform.OS === "web") {
+      executeMediaAction(action).catch((error: any) => {
+        Alert.alert("Media kiezen mislukt", error?.message ?? "Kon media niet openen.");
+      });
       return;
     }
     if (needsPermissionForAction(action)) {
