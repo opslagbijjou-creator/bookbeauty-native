@@ -317,9 +317,13 @@ function BookingSection({
                       onPress={() => onAccept(booking)}
                       disabled={isBusy}
                     >
-                      <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+                      {isBusy ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+                      )}
                       <Text style={styles.acceptBtnText}>
-                        {isReschedulePending ? "Akkoord verplaatsen" : "Accepteren"}
+                        {isBusy ? "Bezig..." : isReschedulePending ? "Akkoord verplaatsen" : "Accepteren"}
                       </Text>
                     </Pressable>
 
@@ -328,9 +332,13 @@ function BookingSection({
                       onPress={() => onReject(booking)}
                       disabled={isBusy}
                     >
-                      <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+                      {isBusy ? (
+                        <ActivityIndicator size="small" color={COLORS.danger} />
+                      ) : (
+                        <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+                      )}
                       <Text style={styles.rejectBtnText}>
-                        {isReschedulePending ? "Afwijzen" : "Weigeren"}
+                        {isBusy ? "Bezig..." : isReschedulePending ? "Afwijzen" : "Weigeren"}
                       </Text>
                     </Pressable>
                   </View>
@@ -342,8 +350,12 @@ function BookingSection({
                     onPress={() => onPropose(booking)}
                     disabled={isBusy}
                   >
-                    <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
-                    <Text style={styles.proposeBtnText}>Nieuwe tijd kiezen + bericht</Text>
+                    {isBusy ? (
+                      <ActivityIndicator size="small" color={BLUE.primary} />
+                    ) : (
+                      <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
+                    )}
+                    <Text style={styles.proposeBtnText}>{isBusy ? "Bezig..." : "Nieuwe tijd kiezen + bericht"}</Text>
                   </Pressable>
                 ) : null}
               </Pressable>
@@ -1310,9 +1322,17 @@ export default function BookingDashboardScreen() {
                         onPress={() => onAccept(selectedBooking)}
                         disabled={busyBookingId === selectedBooking.id}
                       >
-                        <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+                        {busyBookingId === selectedBooking.id ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+                        )}
                         <Text style={styles.acceptBtnText}>
-                          {selectedBooking.status === "pending_reschedule_approval" ? "Akkoord verplaatsen" : "Accepteren"}
+                          {busyBookingId === selectedBooking.id
+                            ? "Bezig..."
+                            : selectedBooking.status === "pending_reschedule_approval"
+                              ? "Akkoord verplaatsen"
+                              : "Accepteren"}
                         </Text>
                       </Pressable>
 
@@ -1321,9 +1341,17 @@ export default function BookingDashboardScreen() {
                         onPress={() => onReject(selectedBooking)}
                         disabled={busyBookingId === selectedBooking.id}
                       >
-                        <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+                        {busyBookingId === selectedBooking.id ? (
+                          <ActivityIndicator size="small" color={COLORS.danger} />
+                        ) : (
+                          <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+                        )}
                         <Text style={styles.rejectBtnText}>
-                          {selectedBooking.status === "pending_reschedule_approval" ? "Afwijzen" : "Weigeren"}
+                          {busyBookingId === selectedBooking.id
+                            ? "Bezig..."
+                            : selectedBooking.status === "pending_reschedule_approval"
+                              ? "Afwijzen"
+                              : "Weigeren"}
                         </Text>
                       </Pressable>
                     </View>
@@ -1335,8 +1363,14 @@ export default function BookingDashboardScreen() {
                       onPress={() => onPropose(selectedBooking)}
                       disabled={busyBookingId === selectedBooking.id}
                     >
-                      <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
-                      <Text style={styles.proposeBtnText}>Nieuwe tijd kiezen + bericht</Text>
+                      {busyBookingId === selectedBooking.id ? (
+                        <ActivityIndicator size="small" color={BLUE.primary} />
+                      ) : (
+                        <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
+                      )}
+                      <Text style={styles.proposeBtnText}>
+                        {busyBookingId === selectedBooking.id ? "Bezig..." : "Nieuwe tijd kiezen + bericht"}
+                      </Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -1544,8 +1578,12 @@ export default function BookingDashboardScreen() {
                     onPress={submitProposedTime}
                     disabled={!selectedProposedStartAtMs || busyBookingId !== null || proposeLoading}
                   >
-                    <Ionicons name="paper-plane-outline" size={14} color="#fff" />
-                    <Text style={styles.modalPrimaryBtnText}>Voorstel versturen</Text>
+                    {busyBookingId !== null ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons name="paper-plane-outline" size={14} color="#fff" />
+                    )}
+                    <Text style={styles.modalPrimaryBtnText}>{busyBookingId !== null ? "Verzenden..." : "Voorstel versturen"}</Text>
                   </Pressable>
                 </View>
               </ScrollView>

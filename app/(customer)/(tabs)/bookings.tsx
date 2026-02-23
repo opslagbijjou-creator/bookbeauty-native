@@ -12,10 +12,12 @@ import {
   requestSameDayRescheduleByCustomer,
   subscribeCustomerBookings,
 } from "../../../lib/bookingRepo";
+import { confirmAction } from "../../../lib/confirmAction";
 import { auth } from "../../../lib/firebase";
 import { COLORS } from "../../../lib/ui";
 
 type CustomerSectionKey = "action" | "upcoming" | "history";
+type BusyAction = "cancel" | "accept_proposal" | "decline_proposal" | "request_move";
 
 type BookingSections = {
   action: Booking[];
@@ -105,6 +107,7 @@ export default function CustomerBookingsScreen() {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Booking[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [activeSection, setActiveSection] = useState<CustomerSectionKey>("action");
   const [focusedBookingId, setFocusedBookingId] = useState<string | null>(null);
 
@@ -190,46 +193,51 @@ export default function CustomerBookingsScreen() {
 
   async function onCancel(bookingId: string) {
     if (!uid || busyId) return;
-    Alert.alert("Boeking annuleren", "Weet je zeker dat je deze boeking wilt annuleren?", [
-      { text: "Nee", style: "cancel" },
-      {
-        text: "Ja, annuleren",
-        style: "destructive",
-        onPress: async () => {
-          setBusyId(bookingId);
-          try {
-            const result = await cancelBookingByCustomer(bookingId, uid);
-            setItems((prev) =>
-              prev.map((row) =>
-                row.id === bookingId
-                  ? {
-                      ...row,
-                      status: result.feePercent > 0 ? "cancelled_with_fee" : "cancelled_by_customer",
-                      cancellationFeePercent: result.feePercent,
-                      cancellationFeeAmount: result.feeAmount,
-                    }
-                  : row
-              )
-            );
-            if (result.feePercent > 0) {
-              Alert.alert(
-                "Geannuleerd met fee",
-                `Te laat geannuleerd. ${result.feePercent}% (${result.feeAmount.toFixed(2)} EUR) wordt ingehouden.`
-              );
-            }
-          } catch (error: any) {
-            Alert.alert("Fout", error?.message ?? "Kon boeking niet annuleren.");
-          } finally {
-            setBusyId(null);
-          }
-        },
-      },
-    ]);
+    const confirmed = await confirmAction({
+      title: "Boeking annuleren",
+      message: "Weet je zeker dat je deze boeking wilt annuleren?",
+      confirmText: "Ja, annuleren",
+      cancelText: "Nee",
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setBusyId(bookingId);
+    setBusyAction("cancel");
+    try {
+      const result = await cancelBookingByCustomer(bookingId, uid);
+      setItems((prev) =>
+        prev.map((row) =>
+          row.id === bookingId
+            ? {
+                ...row,
+                status: result.feePercent > 0 ? "cancelled_with_fee" : "cancelled_by_customer",
+                cancellationFeePercent: result.feePercent,
+                cancellationFeeAmount: result.feeAmount,
+              }
+            : row
+        )
+      );
+      if (result.feePercent > 0) {
+        Alert.alert(
+          "Geannuleerd met fee",
+          `Te laat geannuleerd. ${result.feePercent}% (${result.feeAmount.toFixed(2)} EUR) wordt ingehouden.`
+        );
+      } else {
+        Alert.alert("Boeking geannuleerd", "Je afspraak is geannuleerd.");
+      }
+    } catch (error: any) {
+      Alert.alert("Fout", error?.message ?? "Kon boeking niet annuleren.");
+    } finally {
+      setBusyId(null);
+      setBusyAction(null);
+    }
   }
 
   async function onAcceptProposal(booking: Booking) {
     if (!uid || busyId) return;
     setBusyId(booking.id);
+    setBusyAction("accept_proposal");
     try {
       await acceptCompanyProposalByCustomer(booking.id, uid);
       setItems((prev) =>
@@ -255,29 +263,35 @@ export default function CustomerBookingsScreen() {
             : row
         )
       );
+      Alert.alert("Voorstel geaccepteerd", "Je afspraak is bijgewerkt naar het nieuwe tijdstip.");
     } catch (error: any) {
       Alert.alert("Kon voorstel niet bevestigen", error?.message ?? "Probeer het opnieuw.");
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   }
 
   async function onDeclineProposal(bookingId: string) {
     if (!uid || busyId) return;
     setBusyId(bookingId);
+    setBusyAction("decline_proposal");
     try {
       await declineCompanyProposalByCustomer(bookingId, uid);
       setItems((prev) => prev.map((row) => (row.id === bookingId ? { ...row, status: "declined" } : row)));
+      Alert.alert("Voorstel geweigerd", "Het voorstel is geweigerd.");
     } catch (error: any) {
       Alert.alert("Kon voorstel niet weigeren", error?.message ?? "Probeer het opnieuw.");
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   }
 
   async function onRequestMove(bookingId: string) {
     if (!uid || busyId) return;
     setBusyId(bookingId);
+    setBusyAction("request_move");
     try {
       const res = await requestSameDayRescheduleByCustomer(bookingId, uid);
       const proposedTime = new Date(res.proposedStartAtMs).toLocaleTimeString("nl-NL", {
@@ -301,6 +315,7 @@ export default function CustomerBookingsScreen() {
       Alert.alert("Kon niet verplaatsen", error?.message ?? "Probeer het opnieuw.");
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   }
 
@@ -324,6 +339,11 @@ export default function CustomerBookingsScreen() {
       item.status === "confirmed" && isSameDay(item.bookingDate) && (item.customerRescheduleCount || 0) < 1;
     const palette = statusPalette(item.status);
     const isFocused = focusedBookingId === item.id;
+    const isBusy = busyId === item.id;
+    const cancelBusy = isBusy && busyAction === "cancel";
+    const acceptBusy = isBusy && busyAction === "accept_proposal";
+    const declineBusy = isBusy && busyAction === "decline_proposal";
+    const moveBusy = isBusy && busyAction === "request_move";
 
     return (
       <View key={item.id} style={[styles.bookingCard, isFocused && styles.bookingCardFocused]}>
@@ -389,43 +409,59 @@ export default function CustomerBookingsScreen() {
         {proposal ? (
           <View style={styles.actionRow}>
             <Pressable
-              style={[styles.acceptBtn, busyId === item.id && styles.disabled]}
+              style={[styles.acceptBtn, isBusy && styles.disabled]}
               onPress={() => onAcceptProposal(item)}
-              disabled={busyId === item.id}
+              disabled={isBusy}
             >
-              <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
-              <Text style={styles.acceptBtnText}>Accepteer voorstel</Text>
+              {acceptBusy ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+              )}
+              <Text style={styles.acceptBtnText}>{acceptBusy ? "Bezig..." : "Accepteer voorstel"}</Text>
             </Pressable>
             <Pressable
-              style={[styles.rejectBtn, busyId === item.id && styles.disabled]}
+              style={[styles.rejectBtn, isBusy && styles.disabled]}
               onPress={() => onDeclineProposal(item.id)}
-              disabled={busyId === item.id}
+              disabled={isBusy}
             >
-              <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
-              <Text style={styles.rejectBtnText}>Weiger</Text>
+              {declineBusy ? (
+                <ActivityIndicator size="small" color={COLORS.danger} />
+              ) : (
+                <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+              )}
+              <Text style={styles.rejectBtnText}>{declineBusy ? "Bezig..." : "Weiger"}</Text>
             </Pressable>
           </View>
         ) : null}
 
         {canMoveSameDay ? (
           <Pressable
-            style={[styles.moveBtn, busyId === item.id && styles.disabled]}
+            style={[styles.moveBtn, isBusy && styles.disabled]}
             onPress={() => onRequestMove(item.id)}
-            disabled={busyId === item.id}
+            disabled={isBusy}
           >
-            <Ionicons name="swap-horizontal-outline" size={14} color={COLORS.primary} />
-            <Text style={styles.moveText}>Verplaats 1x (zelfde dag)</Text>
+            {moveBusy ? (
+              <ActivityIndicator size="small" color={COLORS.primary} />
+            ) : (
+              <Ionicons name="swap-horizontal-outline" size={14} color={COLORS.primary} />
+            )}
+            <Text style={styles.moveText}>{moveBusy ? "Bezig..." : "Verplaats 1x (zelfde dag)"}</Text>
           </Pressable>
         ) : null}
 
         {cancellable ? (
           <Pressable
-            style={[styles.cancelBtn, busyId === item.id && styles.disabled]}
+            style={[styles.cancelBtn, isBusy && styles.disabled]}
             onPress={() => onCancel(item.id)}
-            disabled={busyId === item.id}
+            disabled={isBusy}
           >
-            <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
-            <Text style={styles.cancelText}>Annuleer boeking</Text>
+            {cancelBusy ? (
+              <ActivityIndicator size="small" color={COLORS.danger} />
+            ) : (
+              <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+            )}
+            <Text style={styles.cancelText}>{cancelBusy ? "Annuleren..." : "Annuleer boeking"}</Text>
           </Pressable>
         ) : null}
       </View>

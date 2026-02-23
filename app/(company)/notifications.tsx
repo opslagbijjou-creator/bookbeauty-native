@@ -41,6 +41,7 @@ export default function CompanyNotificationsScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const [items, setItems] = useState<CompanyNotification[]>([]);
 
   useEffect(() => {
@@ -60,20 +61,25 @@ export default function CompanyNotificationsScreen() {
   const unreadCount = items.filter((item) => !item.read).length;
 
   async function onMarkOne(item: CompanyNotification) {
-    if (!uid) return;
-    if (!item.read) {
-      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
-      await markNotificationRead(uid, item.id).catch(() => null);
-    }
+    if (!uid || openingId) return;
+    setOpeningId(item.id);
+    try {
+      if (!item.read) {
+        setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
+        await markNotificationRead(uid, item.id).catch(() => null);
+      }
 
-    const nextRoute = routeForNotification(item);
-    if (nextRoute) {
-      router.push(nextRoute as never);
+      const nextRoute = routeForNotification(item);
+      if (nextRoute) {
+        router.push(nextRoute as never);
+      }
+    } finally {
+      setOpeningId(null);
     }
   }
 
   async function onMarkAll() {
-    if (!uid || !unreadCount || markingAll) return;
+    if (!uid || !unreadCount || markingAll || Boolean(openingId)) return;
     setMarkingAll(true);
     try {
       await markAllNotificationsRead(uid);
@@ -92,8 +98,8 @@ export default function CompanyNotificationsScreen() {
         </Pressable>
         <Pressable
           onPress={onMarkAll}
-          disabled={!unreadCount || markingAll}
-          style={[styles.readAllBtn, (!unreadCount || markingAll) && styles.disabled]}
+          disabled={!unreadCount || markingAll || Boolean(openingId)}
+          style={[styles.readAllBtn, (!unreadCount || markingAll || Boolean(openingId)) && styles.disabled]}
         >
           <Ionicons name="checkmark-done-outline" size={14} color={COLORS.primary} />
           <Text style={styles.readAllText}>{markingAll ? "Bezig..." : "Alles gelezen"}</Text>
@@ -117,8 +123,13 @@ export default function CompanyNotificationsScreen() {
           contentContainerStyle={styles.list}
           renderItem={({ item }) => {
             const bookingRoute = routeForNotification(item);
+            const opening = openingId === item.id;
             return (
-              <Pressable onPress={() => onMarkOne(item)} style={[styles.card, !item.read && styles.cardUnread]}>
+              <Pressable
+                onPress={() => onMarkOne(item)}
+                disabled={opening}
+                style={[styles.card, !item.read && styles.cardUnread, opening && styles.disabled]}
+              >
                 <View style={styles.cardIcon}>
                   <Ionicons name={typeIcon(item.type)} size={16} color={COLORS.primary} />
                 </View>
@@ -127,10 +138,12 @@ export default function CompanyNotificationsScreen() {
                   <Text style={styles.cardText}>{item.body}</Text>
                   <Text style={styles.cardWhen}>{formatWhen(item.updatedAtMs || item.createdAtMs)}</Text>
                 </View>
-                {bookingRoute ? (
+                {opening ? (
+                  <ActivityIndicator size="small" color={COLORS.primary} style={styles.cardChevron} />
+                ) : bookingRoute ? (
                   <Ionicons name="chevron-forward-outline" size={16} color={COLORS.primary} style={styles.cardChevron} />
                 ) : null}
-                {!item.read ? <View style={styles.dot} /> : null}
+                {!item.read && !opening ? <View style={styles.dot} /> : null}
               </Pressable>
             );
           }}

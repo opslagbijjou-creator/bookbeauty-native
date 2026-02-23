@@ -22,6 +22,7 @@ import {
   isCommentLiked,
   toggleCommentLike,
 } from "../lib/socialRepo";
+import { confirmAction } from "../lib/confirmAction";
 import type { AppRole } from "../lib/roles";
 import { auth } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
@@ -218,21 +219,23 @@ export default function CommentsSheet({
 
   function onDelete(commentId: string) {
     if (!postId) return;
-    Alert.alert("Reactie verwijderen", "Weet je zeker dat je deze reactie wilt verwijderen?", [
-      { text: "Annuleren", style: "cancel" },
-      {
-        text: "Verwijderen",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deletePostComment(postId, commentId);
-            await load();
-          } catch (error: any) {
-            Alert.alert("Verwijderen mislukt", error?.message ?? "Kon reactie niet verwijderen.");
-          }
-        },
-      },
-    ]);
+    void (async () => {
+      const confirmed = await confirmAction({
+        title: "Reactie verwijderen",
+        message: "Weet je zeker dat je deze reactie wilt verwijderen?",
+        confirmText: "Verwijderen",
+        cancelText: "Annuleren",
+        destructive: true,
+      });
+      if (!confirmed) return;
+
+      try {
+        await deletePostComment(postId, commentId);
+        await load();
+      } catch (error: any) {
+        Alert.alert("Verwijderen mislukt", error?.message ?? "Kon reactie niet verwijderen.");
+      }
+    })();
   }
 
   return (

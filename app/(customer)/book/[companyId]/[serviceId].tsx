@@ -601,7 +601,11 @@ export default function BookServiceScreen() {
                   disabled={!canBook || submitting}
                   style={[styles.bookBtn, (!canBook || submitting) && styles.bookBtnDisabled]}
                 >
-                  <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+                  )}
                   <Text style={styles.bookBtnText}>{submitting ? "Boeken..." : "Boek nu"}</Text>
                 </Pressable>
               </View>

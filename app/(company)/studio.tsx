@@ -42,6 +42,7 @@ import {
   type MediaCropPreset,
   type MediaFilterPreset,
 } from "../../lib/mediaEdit";
+import { confirmAction } from "../../lib/confirmAction";
 import { fetchMyServices, type CompanyService } from "../../lib/serviceRepo";
 import { getPostLikeCount } from "../../lib/socialRepo";
 import { addCompanyStory } from "../../lib/storyRepo";
@@ -832,42 +833,26 @@ export default function CompanyStudioScreen() {
 
   async function onDelete(postId: string) {
     if (busyPostId) return;
+    const confirmed = await confirmAction({
+      title: "Video verwijderen",
+      message: "Weet je zeker dat je deze video wilt verwijderen?",
+      confirmText: "Verwijderen",
+      cancelText: "Annuleren",
+      destructive: true,
+    });
+    if (!confirmed) return;
 
-    const runDelete = async () => {
-      setBusyPostId(postId);
-      try {
-        await deleteMyFeedPost(postId);
-        if (editingPostId === postId) resetForm();
-        if (detailPostId === postId) setDetailPostId(null);
-        await load();
-      } catch (error: any) {
-        Alert.alert("Fout", error?.message ?? "Kon video niet verwijderen.");
-      } finally {
-        setBusyPostId(null);
-      }
-    };
-
-    if (Platform.OS === "web") {
-      const confirmFn = (globalThis as { confirm?: (message?: string) => boolean }).confirm;
-      const confirmed =
-        typeof confirmFn === "function"
-          ? confirmFn("Weet je zeker dat je deze video wilt verwijderen?")
-          : true;
-      if (!confirmed) return;
-      runDelete().catch(() => null);
-      return;
+    setBusyPostId(postId);
+    try {
+      await deleteMyFeedPost(postId);
+      if (editingPostId === postId) resetForm();
+      if (detailPostId === postId) setDetailPostId(null);
+      await load();
+    } catch (error: any) {
+      Alert.alert("Fout", error?.message ?? "Kon video niet verwijderen.");
+    } finally {
+      setBusyPostId(null);
     }
-
-    Alert.alert("Video verwijderen", "Weet je zeker dat je deze video wilt verwijderen?", [
-      { text: "Annuleren", style: "cancel" },
-      {
-        text: "Verwijderen",
-        style: "destructive",
-        onPress: () => {
-          runDelete().catch(() => null);
-        },
-      },
-    ]);
   }
 
   async function onTogglePublish(post: FeedPost, nextActive: boolean) {

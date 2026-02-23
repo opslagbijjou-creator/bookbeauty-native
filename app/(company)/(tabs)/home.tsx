@@ -12,6 +12,7 @@ import { getUserRole, logout } from "../../../lib/authRepo";
 import { CompanyBookingInsights, fetchCompanyBookingInsights } from "../../../lib/bookingRepo";
 import { ensureCompanyDoc } from "../../../lib/companyActions";
 import { fetchCompanyById } from "../../../lib/companyRepo";
+import { confirmAction } from "../../../lib/confirmAction";
 import { auth, db } from "../../../lib/firebase";
 import { captureImageWithCamera, pickImageFromLibrary, uploadUriToStorage } from "../../../lib/mediaRepo";
 import { syncCompanyBrandingInFeed } from "../../../lib/feedRepo";
@@ -326,26 +327,26 @@ export default function CompanyHomeScreen() {
     }
   }
 
-  function onRemoveEmployee(staffId: string, displayName: string) {
+  async function onRemoveEmployee(staffId: string, displayName: string) {
     if (!companyId || !isOwner || teamBusy) return;
-    Alert.alert("Medewerker verwijderen", `Verwijder ${displayName} uit je team?`, [
-      { text: "Annuleer", style: "cancel" },
-      {
-        text: "Verwijderen",
-        style: "destructive",
-        onPress: async () => {
-          setTeamBusy(true);
-          try {
-            await removeCompanyEmployee(companyId, staffId);
-            await loadEmployees();
-          } catch (error: any) {
-            Alert.alert("Verwijderen mislukt", error?.message ?? "Probeer opnieuw.");
-          } finally {
-            setTeamBusy(false);
-          }
-        },
-      },
-    ]);
+    const confirmed = await confirmAction({
+      title: "Medewerker verwijderen",
+      message: `Verwijder ${displayName} uit je team?`,
+      confirmText: "Verwijderen",
+      cancelText: "Annuleer",
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setTeamBusy(true);
+    try {
+      await removeCompanyEmployee(companyId, staffId);
+      await loadEmployees();
+    } catch (error: any) {
+      Alert.alert("Verwijderen mislukt", error?.message ?? "Probeer opnieuw.");
+    } finally {
+      setTeamBusy(false);
+    }
   }
 
   async function onLogout() {

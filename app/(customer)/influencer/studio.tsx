@@ -20,6 +20,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { getUserRole } from "../../../lib/authRepo";
 import { fetchInfluencerCommissionSummary } from "../../../lib/bookingRepo";
 import { fetchCompanies, CompanyPublic } from "../../../lib/companyRepo";
+import { confirmAction } from "../../../lib/confirmAction";
 import {
   addInfluencerFeedPost,
   deleteMyFeedPost,
@@ -306,27 +307,26 @@ export default function InfluencerStudioScreen() {
     }
   }
 
-  function onDeletePost(post: FeedPost) {
+  async function onDeletePost(post: FeedPost) {
     if (deletingPostId) return;
+    const confirmed = await confirmAction({
+      title: "Post verwijderen",
+      message: "Weet je zeker dat je deze post wilt verwijderen?",
+      confirmText: "Verwijderen",
+      cancelText: "Annuleren",
+      destructive: true,
+    });
+    if (!confirmed) return;
 
-    Alert.alert("Post verwijderen", "Weet je zeker dat je deze post wilt verwijderen?", [
-      { text: "Annuleren", style: "cancel" },
-      {
-        text: "Verwijderen",
-        style: "destructive",
-        onPress: async () => {
-          setDeletingPostId(post.id);
-          try {
-            await deleteMyFeedPost(post.id);
-            await loadDashboard();
-          } catch (error: any) {
-            Alert.alert("Verwijderen mislukt", error?.message ?? "Kon deze post niet verwijderen.");
-          } finally {
-            setDeletingPostId(null);
-          }
-        },
-      },
-    ]);
+    setDeletingPostId(post.id);
+    try {
+      await deleteMyFeedPost(post.id);
+      await loadDashboard();
+    } catch (error: any) {
+      Alert.alert("Verwijderen mislukt", error?.message ?? "Kon deze post niet verwijderen.");
+    } finally {
+      setDeletingPostId(null);
+    }
   }
 
   return (
