@@ -29,8 +29,7 @@ exports.handler = async (event) => {
 
   const webPushModuleInstalled = (() => {
     try {
-      require.resolve("web-push");
-      return true;
+      return Boolean(require("web-push"));
     } catch {
       return false;
     }
