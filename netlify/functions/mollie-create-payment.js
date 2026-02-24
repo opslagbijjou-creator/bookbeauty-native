@@ -16,6 +16,9 @@ const {
 const DEFAULT_PLATFORM_FEE_PERCENT = 8;
 
 function pickCompanyApprovalStatus(company) {
+  if (company?.isApproved === true || company?.approved === true) {
+    return "approved";
+  }
   const candidates = [
     company?.status,
     company?.approvalStatus,
@@ -142,7 +145,9 @@ exports.handler = async (event) => {
   const company = companySnap.data() || {};
 
   const companyStatus = pickCompanyApprovalStatus(company);
-  if (companyStatus !== "approved") {
+  // Backward compatibility:
+  // legacy company docs may not have moderation status set yet.
+  if (companyStatus && companyStatus !== "approved") {
     return response(409, {
       ok: false,
       error: `Bedrijf is niet approved (status: ${companyStatus || "missing"}).`,

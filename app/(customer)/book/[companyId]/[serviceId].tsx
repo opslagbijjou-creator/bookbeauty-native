@@ -82,6 +82,17 @@ function splitSlotLabel(label: string): { start: string; end: string } {
   };
 }
 
+function showBookingMessage(title: string, message: string): void {
+  if (Platform.OS === "web") {
+    const win = globalThis as { alert?: (text: string) => void };
+    if (typeof win.alert === "function") {
+      win.alert(`${title}\n\n${message}`);
+      return;
+    }
+  }
+  Alert.alert(title, message);
+}
+
 async function createMollieCheckoutForBooking(bookingId: string): Promise<string> {
   const cleanBookingId = String(bookingId || "").trim();
   if (!cleanBookingId) {
@@ -127,9 +138,20 @@ async function createMollieCheckoutForBooking(bookingId: string): Promise<string
 
 async function openExternalCheckout(checkoutUrl: string): Promise<void> {
   if (Platform.OS === "web") {
-    const win = globalThis as { location?: { assign?: (href: string) => void } };
+    const win = globalThis as {
+      location?: { assign?: (href: string) => void; href?: string };
+      open?: (url?: string, target?: string) => void;
+    };
     if (typeof win.location?.assign === "function") {
       win.location.assign(checkoutUrl);
+      return;
+    }
+    if (win.location) {
+      win.location.href = checkoutUrl;
+      return;
+    }
+    if (typeof win.open === "function") {
+      win.open(checkoutUrl, "_self");
       return;
     }
   }
@@ -377,21 +399,15 @@ export default function BookServiceScreen() {
     } catch (error: any) {
       const fallbackMessage = error?.message ?? "Kon boeking of betaling niet starten.";
       if (createdBookingId) {
-        Alert.alert(
+        showBookingMessage(
           "Boeking geplaatst, betaling niet gestart",
-          `${fallbackMessage}\n\nOpen je boekingen om deze afspraak opnieuw te betalen.`,
-          [
-            {
-              text: "Open boekingen",
-              onPress: () =>
-                router.replace(
-                  `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(createdBookingId)}` as never
-                ),
-            },
-          ]
+          `${fallbackMessage}\n\nOpen je boekingen om deze afspraak opnieuw te betalen.`
+        );
+        router.replace(
+          `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(createdBookingId)}` as never
         );
       } else {
-        Alert.alert("Boeken mislukt", fallbackMessage);
+        showBookingMessage("Boeken mislukt", fallbackMessage);
       }
     } finally {
       setSubmitting(false);
