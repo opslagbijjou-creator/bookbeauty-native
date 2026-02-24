@@ -140,10 +140,10 @@ exports.handler = async (event) => {
   }
   const company = companySnap.data() || {};
   const companyStatus = String(company.status || "").trim().toLowerCase();
-  if (companyStatus && companyStatus !== "approved") {
+  if (companyStatus === "rejected") {
     return response(409, {
       ok: false,
-      error: "Bedrijf is nog niet goedgekeurd voor betalingen.",
+      error: "Bedrijf is afgekeurd voor betalingen.",
       companyStatus,
     });
   }

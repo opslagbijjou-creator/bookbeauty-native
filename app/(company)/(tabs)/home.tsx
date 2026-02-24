@@ -107,7 +107,12 @@ async function callAuthedFunction(path: string, payload: Record<string, unknown>
 
   const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
   const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const fullUrl = path.startsWith("http") ? path : `${baseUrl}${path}`;
+  const fullUrl =
+    path.startsWith("http")
+      ? path
+      : Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
+        ? `${window.location.origin}${path}`
+        : `${baseUrl}${path}`;
 
   // Force token refresh to avoid stale auth on native devices.
   const idToken = await currentUser.getIdToken(true);

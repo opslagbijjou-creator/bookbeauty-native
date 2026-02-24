@@ -107,12 +107,19 @@ async function createMollieCheckoutForBooking(
     throw new Error("Je sessie is verlopen. Log opnieuw in.");
   }
 
-  const idToken = await currentUser.getIdToken().catch(() => "");
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const fullUrl =
+    Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
+      ? `${window.location.origin}/.netlify/functions/mollie-create-payment`
+      : `${baseUrl}/.netlify/functions/mollie-create-payment`;
+
+  const idToken = await currentUser.getIdToken(true).catch(() => "");
   if (!idToken) {
     throw new Error("Kon geen geldige sessie vinden voor betaling.");
   }
 
-  const res = await fetch("/.netlify/functions/mollie-create-payment", {
+  const res = await fetch(fullUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
