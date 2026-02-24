@@ -38,10 +38,16 @@ exports.handler = async (event) => {
   try {
     actorUid = await requireAuthUid(event);
   } catch (error) {
+    const reason = String(error instanceof Error ? error.message : "unknown_error")
+      .replace(/\s+/g, " ")
+      .slice(0, 140);
     console.warn("[mollie-oauth-start] auth failed", {
-      message: error instanceof Error ? error.message : "unknown_error",
+      message: reason,
     });
-    return response(401, { ok: false, error: "Unauthorized. Log opnieuw in en probeer opnieuw." });
+    return response(401, {
+      ok: false,
+      error: `Unauthorized (${reason}). Log opnieuw in en probeer opnieuw.`,
+    });
   }
 
   let companyId = "";

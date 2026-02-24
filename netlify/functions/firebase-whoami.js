@@ -1,8 +1,8 @@
-const { admin } = require("./_firebaseAdmin");
+const { getAdminApp } = require("./_firebaseAdmin");
 
 exports.handler = async () => {
   try {
-    const app = admin.app();
+    const app = getAdminApp();
     const projectId =
       app?.options?.projectId ||
       process.env.GCLOUD_PROJECT ||

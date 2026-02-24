@@ -77,8 +77,14 @@ exports.handler = async (event) => {
   let actorUid = "";
   try {
     actorUid = await requireAuthUid(event);
-  } catch {
-    return response(401, { ok: false, error: "Unauthorized" });
+  } catch (error) {
+    const reason = String(error instanceof Error ? error.message : "unknown_error")
+      .replace(/\s+/g, " ")
+      .slice(0, 140);
+    return response(401, {
+      ok: false,
+      error: `Unauthorized (${reason}). Log opnieuw in en probeer opnieuw.`,
+    });
   }
 
   const body = parseBody(event);

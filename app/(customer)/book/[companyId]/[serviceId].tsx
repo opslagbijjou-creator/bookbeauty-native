@@ -109,10 +109,7 @@ async function createMollieCheckoutForBooking(
 
   const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
   const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const fullUrl =
-    Platform.OS === "web" && typeof window !== "undefined" && window.location?.origin
-      ? `${window.location.origin}/.netlify/functions/mollie-create-payment`
-      : `${baseUrl}/.netlify/functions/mollie-create-payment`;
+  const fullUrl = `${baseUrl}/.netlify/functions/mollie-create-payment`;
 
   const idToken = await currentUser.getIdToken(true).catch(() => "");
   if (!idToken) {
