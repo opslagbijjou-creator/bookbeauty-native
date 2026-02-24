@@ -212,6 +212,12 @@ exports.handler = async (event) => {
           companyKeptCents: breakdown.companyKeptCents,
           refundedCents: breakdown.refundedCents,
         },
+        totalCents,
+        holdCents: breakdown.holdCents,
+        platformKeptCents: breakdown.platformKeptCents,
+        companyKeptCents: breakdown.companyKeptCents,
+        refundedCents: breakdown.refundedCents,
+        mollieRefundId: refundId,
         mollie: {
           ...(booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {}),
           paymentId,

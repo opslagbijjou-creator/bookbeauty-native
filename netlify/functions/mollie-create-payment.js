@@ -94,6 +94,33 @@ exports.handler = async (event) => {
     return response(400, { ok: false, error: "Booking mist companyId." });
   }
 
+  const existingPaymentStatus = String(booking.paymentStatus || "").trim().toLowerCase();
+  const existingPaymentId = String(booking?.mollie?.paymentId || booking.molliePaymentId || "").trim();
+  const existingCheckoutUrl = String(booking?.mollie?.checkoutUrl || "").trim();
+
+  if (existingPaymentStatus === "paid") {
+    return response(409, {
+      ok: false,
+      error: "Deze booking is al betaald.",
+      paymentStatus: "paid",
+      molliePaymentId: existingPaymentId || undefined,
+    });
+  }
+
+  if (
+    existingPaymentStatus === "pending_payment" &&
+    existingPaymentId &&
+    existingCheckoutUrl
+  ) {
+    return response(200, {
+      ok: true,
+      existing: true,
+      checkoutUrl: existingCheckoutUrl,
+      molliePaymentId: existingPaymentId,
+      status: String(booking?.mollie?.status || "open").trim().toLowerCase() || "open",
+    });
+  }
+
   const actorRoleSnap = await db.collection("users").doc(actorUid).get().catch(() => null);
   const actorRole = String(actorRoleSnap?.data()?.role || "").trim().toLowerCase();
   const customerId = String(booking.customerId || "").trim();

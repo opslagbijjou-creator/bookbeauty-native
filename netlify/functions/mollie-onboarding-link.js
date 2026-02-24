@@ -158,6 +158,7 @@ exports.handler = async (event) => {
         {
           mollie: {
             status: "onboarding",
+            clientLinkId: String(clientLink?.id || "").trim(),
             clientLinkUrl: oauthUrl.toString(),
             clientLinkCreatedAt: new Date(),
             updatedAt: new Date(),

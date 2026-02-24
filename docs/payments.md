@@ -56,6 +56,13 @@ Deze implementatie gebruikt **Mollie Connect (OAuth)** voor bedrijven (connected
   - `breakdown.platformKeptCents`
   - `breakdown.companyKeptCents`
   - `breakdown.refundedCents`
+- refund top-level (compat):
+  - `totalCents`
+  - `holdCents`
+  - `platformKeptCents`
+  - `companyKeptCents`
+  - `refundedCents`
+  - `mollieRefundId`
 
 ### `oauthStates/{stateId}` (TTL)
 - `provider`: `"mollie" | "mollie-client-link"`
