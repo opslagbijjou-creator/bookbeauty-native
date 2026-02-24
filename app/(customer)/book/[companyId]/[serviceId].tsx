@@ -4,6 +4,7 @@ import {
   Alert,
   Animated,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -79,6 +80,60 @@ function splitSlotLabel(label: string): { start: string; end: string } {
     start: parts[0] ?? "--:--",
     end: parts[1] ?? "--:--",
   };
+}
+
+async function createMollieCheckoutForBooking(bookingId: string): Promise<string> {
+  const cleanBookingId = String(bookingId || "").trim();
+  if (!cleanBookingId) {
+    throw new Error("bookingId ontbreekt voor betaling.");
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error("Je sessie is verlopen. Log opnieuw in.");
+  }
+
+  const idToken = await currentUser.getIdToken().catch(() => "");
+  if (!idToken) {
+    throw new Error("Kon geen geldige sessie vinden voor betaling.");
+  }
+
+  const res = await fetch("/.netlify/functions/mollie-create-payment", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ bookingId: cleanBookingId }),
+  }).catch(() => null);
+
+  if (!res) {
+    throw new Error("Geen verbinding met betaalserver.");
+  }
+
+  const payload = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok || payload.ok !== true) {
+    const errorMessage = String(payload.error || "").trim();
+    throw new Error(errorMessage || "Kon Mollie betaling niet starten.");
+  }
+
+  const checkoutUrl = String(payload.checkoutUrl || "").trim();
+  if (!checkoutUrl) {
+    throw new Error("Mollie checkout URL ontbreekt.");
+  }
+
+  return checkoutUrl;
+}
+
+async function openExternalCheckout(checkoutUrl: string): Promise<void> {
+  if (Platform.OS === "web") {
+    const win = globalThis as { location?: { assign?: (href: string) => void } };
+    if (typeof win.location?.assign === "function") {
+      win.location.assign(checkoutUrl);
+      return;
+    }
+  }
+  await Linking.openURL(checkoutUrl);
 }
 
 export default function BookServiceScreen() {
@@ -301,6 +356,7 @@ export default function BookServiceScreen() {
     }
     if (!service || !selectedStaff || !selectedSlot || !canBook || submitting) return;
     setSubmitting(true);
+    let createdBookingId = "";
     try {
       const result = await createBooking({
         companyId,
@@ -315,17 +371,28 @@ export default function BookServiceScreen() {
         startAtMs: selectedSlot.startAtMs,
         referralPostId: refPostId || undefined,
       });
-
-      const confirmed = result.status === "confirmed";
-      Alert.alert(
-        "Gelukt",
-        confirmed
-          ? "Je boeking is direct bevestigd."
-          : "Je boeking is geplaatst en wacht op goedkeuring."
-      );
-      router.replace("/(customer)/(tabs)/bookings" as never);
+      createdBookingId = result.bookingId;
+      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId);
+      await openExternalCheckout(checkoutUrl);
     } catch (error: any) {
-      Alert.alert("Boeken mislukt", error?.message ?? "Kon boeking niet opslaan.");
+      const fallbackMessage = error?.message ?? "Kon boeking of betaling niet starten.";
+      if (createdBookingId) {
+        Alert.alert(
+          "Boeking geplaatst, betaling niet gestart",
+          `${fallbackMessage}\n\nOpen je boekingen om deze afspraak opnieuw te betalen.`,
+          [
+            {
+              text: "Open boekingen",
+              onPress: () =>
+                router.replace(
+                  `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(createdBookingId)}` as never
+                ),
+            },
+          ]
+        );
+      } else {
+        Alert.alert("Boeken mislukt", fallbackMessage);
+      }
     } finally {
       setSubmitting(false);
     }
