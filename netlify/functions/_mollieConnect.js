@@ -1,6 +1,6 @@
 const crypto = require("crypto");
 const { createMollieClient } = require("@mollie/api-client");
-const { admin } = require("./_firebaseAdmin");
+const { admin, getAdminApp } = require("./_firebaseAdmin");
 
 const MOLLIE_OAUTH_TOKEN_URL = "https://api.mollie.com/oauth2/tokens";
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
@@ -117,6 +117,8 @@ async function requireAuthUid(event) {
   if (!token) {
     throw new Error("UNAUTHORIZED");
   }
+  // Ensure firebase-admin is initialized before auth verification.
+  getAdminApp();
   const decoded = await admin.auth().verifyIdToken(token);
   const uid = String(decoded?.uid || "").trim();
   if (!uid) throw new Error("UNAUTHORIZED");

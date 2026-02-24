@@ -69,5 +69,6 @@ function getFirestore() {
 
 module.exports = {
   admin,
+  getAdminApp,
   getFirestore,
 };

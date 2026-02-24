@@ -37,8 +37,11 @@ exports.handler = async (event) => {
   let actorUid = "";
   try {
     actorUid = await requireAuthUid(event);
-  } catch {
-    return response(401, { ok: false, error: "Unauthorized" });
+  } catch (error) {
+    console.warn("[mollie-oauth-start] auth failed", {
+      message: error instanceof Error ? error.message : "unknown_error",
+    });
+    return response(401, { ok: false, error: "Unauthorized. Log opnieuw in en probeer opnieuw." });
   }
 
   let companyId = "";
