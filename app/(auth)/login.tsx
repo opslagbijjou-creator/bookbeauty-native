@@ -31,7 +31,10 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       const user = await login(email, password);
-      await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
+      const pushResult = await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
+      if (pushResult && pushResult.ok !== true) {
+        Alert.alert("Push setup", `Push registreren is niet gelukt (${pushResult.reason}).`);
+      }
       const role = await getUserRole(user.uid);
 
       if (role === "company") {

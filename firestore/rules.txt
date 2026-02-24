@@ -105,7 +105,7 @@ service cloud.firestore {
 
     function validPushSubscriptionUpdate(uid) {
       return validPushSubscriptionPayload(uid)
-        && resource.data.uid == uid;
+        && (!("uid" in resource.data) || resource.data.uid == uid);
     }
 
     function ownerCanAssignEmployee(uid) {

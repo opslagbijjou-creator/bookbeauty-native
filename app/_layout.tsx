@@ -71,7 +71,19 @@ function AppBootstrapEffects() {
         return;
       }
       await syncUserSession(user.uid).catch(() => null);
-      registerPushTokenForUser(user.uid, { requestPermission: false }).catch(() => null);
+      registerPushTokenForUser(user.uid, { requestPermission: false })
+        .then((result) => {
+          if (result.ok !== true) {
+            console.warn("[push] auto register failed", { reason: result.reason, platform: result.platform });
+          } else {
+            console.log("[push] auto register success", { channel: result.channel, platform: result.platform });
+          }
+        })
+        .catch((error) => {
+          console.warn("[push] auto register error", {
+            message: error instanceof Error ? error.message : "unknown_error",
+          });
+        });
     });
 
     const appStateSub = AppState.addEventListener("change", (nextState) => {
