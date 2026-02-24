@@ -4,17 +4,21 @@ const {
   buildOauthAuthorizeUrl,
   canManageCompany,
   generateStateId,
+  readInputField,
   requireAuthUid,
   requireEnv,
   response,
 } = require("./_mollieConnect");
 
 exports.handler = async (event) => {
+  const method = String(event.httpMethod || "").toUpperCase();
+  console.log("[mollie-oauth-start] request", { method });
+
   if (event.httpMethod === "OPTIONS") {
     return response(204, { ok: true });
   }
 
-  if (event.httpMethod !== "POST") {
+  if (method !== "POST" && method !== "GET") {
     return response(405, { ok: false, error: "Method not allowed" });
   }
 
@@ -38,13 +42,7 @@ exports.handler = async (event) => {
   }
 
   let companyId = "";
-  try {
-    const bodyRaw = typeof event.body === "string" ? event.body : "{}";
-    const parsed = JSON.parse(bodyRaw);
-    companyId = String(parsed?.companyId || "").trim();
-  } catch {
-    companyId = "";
-  }
+  companyId = String(readInputField(event, "companyId") || "").trim();
 
   if (!companyId) {
     return response(400, { ok: false, error: "companyId is verplicht." });
@@ -74,13 +72,24 @@ exports.handler = async (event) => {
     });
 
     const authUrl = buildOauthAuthorizeUrl({ state });
+    console.log("[mollie-oauth-start] state created", {
+      companyId,
+      actorUid,
+      expiresAtMs,
+    });
 
     return response(200, {
       ok: true,
+      url: authUrl,
       authUrl,
       stateExpiresAtMs: expiresAtMs,
     });
   } catch (error) {
+    console.error("[mollie-oauth-start] failed", {
+      companyId,
+      actorUid,
+      message: error instanceof Error ? error.message : "unknown_error",
+    });
     return response(500, {
       ok: false,
       error: error instanceof Error ? error.message : "Kon OAuth start niet voorbereiden.",

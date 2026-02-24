@@ -34,11 +34,14 @@ function envSummary() {
 }
 
 exports.handler = async (event) => {
+  const method = String(event.httpMethod || "").toUpperCase();
+  console.log("[payments-health] request", { method });
+
   if (event.httpMethod === "OPTIONS") {
     return response(204, { ok: true });
   }
 
-  if (event.httpMethod !== "GET") {
+  if (method !== "GET") {
     return response(405, { ok: false, error: "Method not allowed" });
   }
 
@@ -74,11 +77,30 @@ exports.handler = async (event) => {
     env.MOLLIE_OAUTH_CLIENT_SECRET &&
     env.MOLLIE_OAUTH_REDIRECT_URI;
 
+  const missingPlatformEnv = Object.entries({
+    APP_BASE_URL: env.APP_BASE_URL,
+    MOLLIE_WEBHOOK_URL: env.MOLLIE_WEBHOOK_URL,
+    MOLLIE_MODE: env.MOLLIE_MODE,
+    MOLLIE_API_KEY_PLATFORM: env.MOLLIE_API_KEY_PLATFORM,
+  })
+    .filter(([, present]) => !present)
+    .map(([name]) => name);
+
+  const missingOauthEnv = Object.entries({
+    MOLLIE_OAUTH_CLIENT_ID: env.MOLLIE_OAUTH_CLIENT_ID,
+    MOLLIE_OAUTH_CLIENT_SECRET: env.MOLLIE_OAUTH_CLIENT_SECRET,
+    MOLLIE_OAUTH_REDIRECT_URI: env.MOLLIE_OAUTH_REDIRECT_URI,
+  })
+    .filter(([, present]) => !present)
+    .map(([name]) => name);
+
   return response(200, {
     ok: true,
     envVarsPresent: env,
     platformCore,
     oauthCore,
+    missingPlatformEnv,
+    missingOauthEnv,
     mollieSdkInstalled,
     firebaseAdminInitOk,
     firebaseAdminError,

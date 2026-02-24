@@ -23,10 +23,10 @@ Deze implementatie gebruikt **Mollie Connect (OAuth)** voor bedrijven (connected
   - `status`: `"linked" | "onboarding" | ...`
   - `organizationId`: `string`
   - `organizationName`: `string`
-  - `accessTokenEncrypted?`: `string` (aanbevolen)
-  - `refreshTokenEncrypted?`: `string` (aanbevolen)
-  - `accessToken`: `string` (fallback als je nog geen encryptie opzet)
-  - `refreshToken`: `string` (fallback)
+  - `accessTokenEncrypted`: `string` (`v1:...` encrypted of `b64:...` fallback)
+  - `refreshTokenEncrypted`: `string` (`v1:...` encrypted of `b64:...` fallback)
+  - `accessTokenStorageMode`: `"encrypted" | "base64" | "empty"`
+  - `refreshTokenStorageMode`: `"encrypted" | "base64" | "empty"`
   - `tokenExpiresAtMs`: `number`
   - `tokenExpiresAt`: `timestamp/date`
   - `scope`: `string`
@@ -75,8 +75,10 @@ Deze implementatie gebruikt **Mollie Connect (OAuth)** voor bedrijven (connected
 
 ## Security Notes
 - Log nooit access tokens, refresh tokens, API keys of Authorization headers.
-- `companies/{companyId}.mollie.accessToken/refreshToken` alleen server-side uitleesbaar maken met Firestore Rules.
+- `companies/{companyId}.mollie.accessTokenEncrypted/refreshTokenEncrypted` alleen server-side uitleesbaar maken met Firestore Rules.
 - Expose nooit secrets aan frontend.
+- Zet bij voorkeur `MOLLIE_TOKEN_ENCRYPTION_KEY` (32-byte key in base64/hex/utf8) om tokens server-side te encrypten.
+- Zonder `MOLLIE_TOKEN_ENCRYPTION_KEY` worden tokens alleen base64 opgeslagen (obfuscatie, geen echte encryptie).
 - Gebruik uitsluitend Netlify env vars voor:
   - OAuth credentials
   - platform API key (optioneel)
@@ -106,7 +108,16 @@ Deze implementatie gebruikt **Mollie Connect (OAuth)** voor bedrijven (connected
 1. Klik “Connect Mollie”.
 2. Call `/.netlify/functions/mollie-oauth-start` met `{ companyId }`.
 3. Redirect naar `authUrl`.
-4. Callback zet `linked=1` op `/settings/payments`.
+4. Callback redirect naar `/payments?mollie=connected`.
+
+## Function routes + methods
+- `GET /.netlify/functions/payments-health`
+- `GET|POST /.netlify/functions/mollie-oauth-start` (frontend gebruikt `POST`)
+- `GET /.netlify/functions/mollie-oauth-callback` (Mollie redirect)
+- `POST /.netlify/functions/mollie-create-payment`
+- `POST|GET /.netlify/functions/mollie-webhook` (Mollie gebruikt `POST`)
+- `POST /.netlify/functions/mollie-onboarding-link`
+- `POST|GET /.netlify/functions/mollie-disconnect` (frontend gebruikt `POST`)
 
 ## Netlify ENV (Production)
 - `FIREBASE_SERVICE_ACCOUNT_JSON` (secret) **of** `FIREBASE_SERVICE_ACCOUNT_BASE64` (secret)
@@ -117,6 +128,7 @@ Deze implementatie gebruikt **Mollie Connect (OAuth)** voor bedrijven (connected
 - `MOLLIE_OAUTH_CLIENT_SECRET` (secret)
 - `MOLLIE_OAUTH_REDIRECT_URI=https://www.bookbeauty.nl/.netlify/functions/mollie-oauth-callback`
 - `MOLLIE_API_KEY_PLATFORM` (optioneel; nodig voor client-link flow)
+- `MOLLIE_TOKEN_ENCRYPTION_KEY` (aanbevolen, 32-byte key)
 
 ## Test Stappen (Mollie test mode)
 1. Zet alle env vars en deploy.

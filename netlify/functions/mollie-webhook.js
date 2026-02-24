@@ -1,34 +1,12 @@
-const { createMollieClient } = require("@mollie/api-client");
 const { getFirestore, admin } = require("./_firebaseAdmin");
-const { isTestMode, requireEnv, response } = require("./_mollieConnect");
-
-function parsePaymentIdFromWebhook(event) {
-  const bodyRaw = typeof event.body === "string" ? event.body.trim() : "";
-  const contentType = String(
-    event.headers?.["content-type"] || event.headers?.["Content-Type"] || ""
-  ).toLowerCase();
-
-  if (contentType.includes("application/json")) {
-    try {
-      const parsed = JSON.parse(bodyRaw || "{}");
-      return String(parsed?.id || "").trim();
-    } catch {
-      return "";
-    }
-  }
-
-  if (bodyRaw.includes("=")) {
-    const form = new URLSearchParams(bodyRaw);
-    const fromForm = String(form.get("id") || "").trim();
-    if (fromForm) return fromForm;
-  }
-
-  if (bodyRaw && !bodyRaw.includes("{") && !bodyRaw.includes("=")) {
-    return bodyRaw;
-  }
-
-  return String(event.queryStringParameters?.id || "").trim();
-}
+const {
+  extractBookingIdFromPayment,
+  getConnectedMollieClient,
+  isTestMode,
+  parseWebhookPaymentId,
+  response,
+  withAutoRefresh,
+} = require("./_mollieConnect");
 
 function mapStatus(mollieStatus) {
   const normalized = String(mollieStatus || "").trim().toLowerCase();
@@ -41,52 +19,89 @@ function mapStatus(mollieStatus) {
   return { status: "pending_payment", paymentStatus: "pending_payment", paid: false };
 }
 
+async function findBookingByPaymentId(db, paymentId) {
+  const byTopLevel = await db
+    .collection("bookings")
+    .where("molliePaymentId", "==", paymentId)
+    .limit(1)
+    .get();
+  if (!byTopLevel.empty) {
+    return byTopLevel.docs[0];
+  }
+
+  const byNested = await db
+    .collection("bookings")
+    .where("mollie.paymentId", "==", paymentId)
+    .limit(1)
+    .get()
+    .catch(() => null);
+  if (byNested && !byNested.empty) {
+    return byNested.docs[0];
+  }
+
+  return null;
+}
+
 exports.handler = async (event) => {
-  if (event.httpMethod === "OPTIONS") {
+  const method = String(event.httpMethod || "").toUpperCase();
+  if (method === "OPTIONS") {
     return response(204, { ok: true });
   }
 
-  if (event.httpMethod !== "POST" && event.httpMethod !== "GET") {
+  if (method !== "POST" && method !== "GET") {
     return response(405, { ok: false, error: "Method not allowed" });
   }
 
-  const paymentId = parsePaymentIdFromWebhook(event);
+  const paymentId = parseWebhookPaymentId(event);
+  console.log("[mollie-webhook] request", { method, hasPaymentId: Boolean(paymentId) });
   if (!paymentId) {
     return response(200, { ok: true, received: true, skipped: "missing_payment_id" });
   }
 
   try {
-    const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
-    const mollieClient = createMollieClient({ apiKey });
-    const payment = await mollieClient.payments.get(paymentId, { testmode: isTestMode() });
-
-    const metadata = payment?.metadata && typeof payment.metadata === "object" ? payment.metadata : {};
-    const bookingId = String(metadata.bookingId || "").trim();
-    if (!bookingId) {
+    const db = getFirestore();
+    const bookingDoc = await findBookingByPaymentId(db, paymentId);
+    if (!bookingDoc) {
       return response(200, {
         ok: true,
         received: true,
         paymentId,
-        skipped: "missing_booking_id_in_metadata",
+        skipped: "booking_not_found_for_payment",
       });
     }
 
-    const db = getFirestore();
-    const bookingRef = db.collection("bookings").doc(bookingId);
-    const bookingSnap = await bookingRef.get();
-    if (!bookingSnap.exists) {
+    const bookingId = bookingDoc.id;
+    const current = bookingDoc.data() || {};
+    const companyId = String(current.companyId || "").trim();
+    if (!companyId) {
       return response(200, {
         ok: true,
         received: true,
         paymentId,
         bookingId,
-        skipped: "booking_not_found",
+        skipped: "missing_company_id",
+      });
+    }
+
+    const connected = await getConnectedMollieClient(db, companyId);
+    const payment = await withAutoRefresh(db, companyId, connected.mollie, (mollieClient) =>
+      mollieClient.payments.get(paymentId, { testmode: isTestMode() })
+    );
+
+    const metadataBookingId = extractBookingIdFromPayment(payment);
+    const resolvedBookingId = metadataBookingId || bookingId;
+    if (resolvedBookingId !== bookingId) {
+      return response(200, {
+        ok: true,
+        received: true,
+        paymentId,
+        bookingId,
+        skipped: "booking_id_mismatch",
       });
     }
 
     const paymentStatusRaw = String(payment?.status || "").trim().toLowerCase();
     const mapped = mapStatus(paymentStatusRaw);
-    const current = bookingSnap.data() || {};
     const currentStatus = String(current.status || "").trim().toLowerCase();
     const currentPaymentStatus = String(current.paymentStatus || "").trim().toLowerCase();
     const currentPaid = Boolean(current.paid);
@@ -106,7 +121,7 @@ exports.handler = async (event) => {
     }
 
     const nowTs = admin.firestore.FieldValue.serverTimestamp();
-    await bookingRef.set(
+    await bookingDoc.ref.set(
       {
         status: mapped.status,
         paymentStatus: mapped.paymentStatus,
@@ -127,6 +142,13 @@ exports.handler = async (event) => {
       { merge: true }
     );
 
+    console.log("[mollie-webhook] booking updated", {
+      bookingId,
+      companyId,
+      paymentId,
+      status: mapped.status,
+    });
+
     return response(200, {
       ok: true,
       received: true,
@@ -136,6 +158,10 @@ exports.handler = async (event) => {
       changed: true,
     });
   } catch (error) {
+    console.error("[mollie-webhook] processing error", {
+      paymentId,
+      message: error instanceof Error ? error.message : "unknown_error",
+    });
     return response(200, {
       ok: true,
       received: true,

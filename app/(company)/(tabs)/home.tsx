@@ -1,5 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
@@ -40,6 +51,76 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Overig: "grid-outline",
 };
 
+type MollieConnectionState = "not_connected" | "connected" | "needs_attention";
+
+type MollieUiStatus = {
+  state: MollieConnectionState;
+  label: string;
+  details: string;
+  onboardingUrl: string;
+};
+
+function parseMollieUiStatus(raw: unknown): MollieUiStatus {
+  const node = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const linked = Boolean(node.linked) || String(node.status || "").trim().toLowerCase() === "linked";
+  const onboardingStatus = String(node.onboardingStatus || "").trim().toLowerCase();
+  const canReceivePayments = Boolean(node.canReceivePayments);
+  const canReceiveSettlements = Boolean(node.canReceiveSettlements);
+  const onboardingUrl = String(node.dashboardOnboardingUrl || "").trim();
+
+  if (!linked) {
+    return {
+      state: "not_connected",
+      label: "Niet gekoppeld",
+      details: "Koppel Mollie om betalingen te ontvangen.",
+      onboardingUrl: "",
+    };
+  }
+
+  const needsAttention =
+    (onboardingStatus && onboardingStatus !== "completed") ||
+    !canReceivePayments ||
+    !canReceiveSettlements;
+
+  if (needsAttention) {
+    return {
+      state: "needs_attention",
+      label: "Actie nodig",
+      details: "Account is gekoppeld, maar onboarding/capabilities zijn nog niet volledig.",
+      onboardingUrl,
+    };
+  }
+
+  return {
+    state: "connected",
+    label: "Gekoppeld",
+    details: "Betalingen via Mollie zijn actief.",
+    onboardingUrl,
+  };
+}
+
+async function callAuthedFunction(path: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error("Log opnieuw in om betalingen te beheren.");
+  }
+  const idToken = await currentUser.getIdToken();
+  const res = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok || data.ok !== true) {
+    const message = String(data.error || "").trim();
+    throw new Error(message || "Actie mislukt.");
+  }
+  return data;
+}
+
 export default function CompanyHomeScreen() {
   const uid = auth.currentUser?.uid;
   const router = useRouter();
@@ -72,6 +153,10 @@ export default function CompanyHomeScreen() {
   const [employeeEmail, setEmployeeEmail] = useState("");
   const [employeeName, setEmployeeName] = useState("");
   const [teamBusy, setTeamBusy] = useState(false);
+  const [mollieUiStatus, setMollieUiStatus] = useState<MollieUiStatus>(() =>
+    parseMollieUiStatus(null)
+  );
+  const [mollieBusyAction, setMollieBusyAction] = useState<"" | "connect" | "onboarding" | "disconnect">("");
 
   const canSave = useMemo(
     () => name.trim().length >= 2 && city.trim().length >= 2 && categories.length > 0,
@@ -81,6 +166,13 @@ export default function CompanyHomeScreen() {
   const isOwner = !isEmployee && Boolean(uid && companyId && uid === companyId && ownerId === uid);
   const profileRatingText = ratingCount >= ratingMinReviews ? rating.toFixed(1) : `${ratingCount}/${ratingMinReviews}`;
   const profileRatingSuffix = ratingCount >= ratingMinReviews ? "score" : "reviews";
+  const mollieBusy = mollieBusyAction.length > 0;
+  const mollieStateColor =
+    mollieUiStatus.state === "connected"
+      ? "#1f7a3f"
+      : mollieUiStatus.state === "needs_attention"
+        ? "#9a6600"
+        : "#8a8a8a";
 
   useEffect(() => {
     if (!uid) return;
@@ -152,9 +244,11 @@ export default function CompanyHomeScreen() {
           setKvk(String(d.kvk ?? ""));
           setPhone(String(d.phone ?? ""));
           setEmail(String(d.email ?? auth.currentUser?.email ?? ""));
+          setMollieUiStatus(parseMollieUiStatus(d.mollie));
         } else {
           nextOwnerId = companyId;
           setOwnerId(companyId);
+          setMollieUiStatus(parseMollieUiStatus(null));
         }
 
         setFollowers(followersCount);
@@ -208,6 +302,17 @@ export default function CompanyHomeScreen() {
     }
     const rows = await fetchCompanyEmployees(companyId);
     setEmployees(rows);
+  }
+
+  async function refreshMollieStatus() {
+    if (!companyId || isEmployee) return;
+    const privateSnap = await getDoc(doc(db, "companies", companyId));
+    if (!privateSnap.exists()) {
+      setMollieUiStatus(parseMollieUiStatus(null));
+      return;
+    }
+    const next = privateSnap.data();
+    setMollieUiStatus(parseMollieUiStatus(next.mollie));
   }
 
   async function onPickLogoFromLibrary() {
@@ -346,6 +451,90 @@ export default function CompanyHomeScreen() {
       Alert.alert("Verwijderen mislukt", error?.message ?? "Probeer opnieuw.");
     } finally {
       setTeamBusy(false);
+    }
+  }
+
+  async function onConnectMollie() {
+    if (!companyId || isEmployee || mollieBusyAction) return;
+    setMollieBusyAction("connect");
+    try {
+      const payload = await callAuthedFunction("/.netlify/functions/mollie-oauth-start", {
+        companyId,
+      });
+      const authUrl = String(payload.url || payload.authUrl || "").trim();
+      if (!authUrl) {
+        throw new Error("Kon geen Mollie autorisatie URL ophalen.");
+      }
+      if (Platform.OS === "web") {
+        const win = globalThis as { location?: { assign?: (href: string) => void; href?: string } };
+        if (typeof win.location?.assign === "function") {
+          win.location.assign(authUrl);
+        } else if (win.location) {
+          win.location.href = authUrl;
+        } else {
+          await Linking.openURL(authUrl);
+        }
+      } else {
+        await Linking.openURL(authUrl);
+      }
+    } catch (error: any) {
+      Alert.alert("Mollie koppelen mislukt", error?.message ?? "Probeer opnieuw.");
+    } finally {
+      setMollieBusyAction("");
+    }
+  }
+
+  async function onOpenMollieOnboarding() {
+    if (!companyId || isEmployee || mollieBusyAction) return;
+    setMollieBusyAction("onboarding");
+    try {
+      const payload = await callAuthedFunction("/.netlify/functions/mollie-onboarding-link", {
+        companyId,
+      });
+      const onboardingUrl = String(payload.onboardingUrl || mollieUiStatus.onboardingUrl || "").trim();
+      if (!onboardingUrl) {
+        throw new Error("Kon geen onboarding URL ophalen.");
+      }
+      if (Platform.OS === "web") {
+        const win = globalThis as { location?: { assign?: (href: string) => void; href?: string } };
+        if (typeof win.location?.assign === "function") {
+          win.location.assign(onboardingUrl);
+        } else if (win.location) {
+          win.location.href = onboardingUrl;
+        } else {
+          await Linking.openURL(onboardingUrl);
+        }
+      } else {
+        await Linking.openURL(onboardingUrl);
+      }
+      await refreshMollieStatus();
+    } catch (error: any) {
+      Alert.alert("Onboarding openen mislukt", error?.message ?? "Probeer opnieuw.");
+    } finally {
+      setMollieBusyAction("");
+    }
+  }
+
+  async function onDisconnectMollie() {
+    if (!companyId || isEmployee || mollieBusyAction) return;
+    const confirmed = await confirmAction({
+      title: "Mollie ontkoppelen",
+      message: "Weet je zeker dat je deze Mollie koppeling wilt verwijderen?",
+      confirmText: "Ontkoppelen",
+      cancelText: "Annuleer",
+      destructive: true,
+    });
+    if (!confirmed) return;
+
+    setMollieBusyAction("disconnect");
+    try {
+      await callAuthedFunction("/.netlify/functions/mollie-disconnect", { companyId });
+      await refreshMollieStatus();
+      Alert.alert("Ontkoppeld", "Mollie account is ontkoppeld.");
+    } catch (error: any) {
+      Alert.alert("Ontkoppelen mislukt", error?.message ?? "Probeer opnieuw.");
+    } finally {
+      setMollieBusyAction("");
     }
   }
 
@@ -523,6 +712,58 @@ export default function CompanyHomeScreen() {
             <Pressable style={styles.quickBtn} onPress={() => router.push(`/(customer)/company/${companyId}` as never)}>
               <Ionicons name="eye-outline" size={16} color={COLORS.primary} />
               <Text style={styles.quickText}>Publiek profiel</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.mollieCard}>
+          <View style={styles.mollieHeader}>
+            <View style={styles.mollieTitleRow}>
+              <Ionicons name="card-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.mollieTitle}>Mollie betalingen</Text>
+            </View>
+            <View style={[styles.mollieStatusBadge, { borderColor: mollieStateColor }]}>
+              <Text style={[styles.mollieStatusBadgeText, { color: mollieStateColor }]}>{mollieUiStatus.label}</Text>
+            </View>
+          </View>
+          <Text style={styles.mollieSubtitle}>{mollieUiStatus.details}</Text>
+
+          <View style={styles.mollieActionsRow}>
+            <Pressable
+              style={[styles.primaryBtn, mollieBusy && styles.disabled]}
+              onPress={onConnectMollie}
+              disabled={mollieBusy}
+            >
+              <Ionicons name="link-outline" size={14} color="#fff" />
+              <Text style={styles.primaryBtnText}>
+                {mollieBusyAction === "connect" ? "Openen..." : "Connect met Mollie"}
+              </Text>
+            </Pressable>
+
+            {mollieUiStatus.state !== "not_connected" ? (
+              <Pressable
+                style={[styles.secondaryBtn, mollieBusy && styles.disabled]}
+                onPress={onDisconnectMollie}
+                disabled={mollieBusy}
+              >
+                <Ionicons name="unlink-outline" size={14} color={COLORS.primary} />
+                <Text style={styles.secondaryBtnText}>
+                  {mollieBusyAction === "disconnect" ? "Bezig..." : "Disconnect"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {mollieUiStatus.state === "needs_attention" ? (
+            <Pressable
+              style={[styles.mollieOnboardingBtn, mollieBusy && styles.disabled]}
+              onPress={onOpenMollieOnboarding}
+              disabled={mollieBusy}
+            >
+              <Ionicons name="open-outline" size={14} color={COLORS.primary} />
+              <Text style={styles.mollieOnboardingText}>
+                {mollieBusyAction === "onboarding" ? "Openen..." : "Ga naar onboarding"}
+              </Text>
             </Pressable>
           ) : null}
         </View>
@@ -872,6 +1113,65 @@ const styles = StyleSheet.create({
   quickText: {
     color: COLORS.primary,
     fontWeight: "800",
+    fontSize: 12,
+  },
+  mollieCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+  },
+  mollieHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  mollieTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  mollieTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  mollieStatusBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: "#fff",
+  },
+  mollieStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  mollieSubtitle: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  mollieActionsRow: {
+    gap: 8,
+  },
+  mollieOnboardingBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+    paddingVertical: 9,
+  },
+  mollieOnboardingText: {
+    color: COLORS.primary,
+    fontWeight: "700",
     fontSize: 12,
   },
   teamCard: {

@@ -5,6 +5,9 @@ const { admin } = require("./_firebaseAdmin");
 const MOLLIE_OAUTH_TOKEN_URL = "https://api.mollie.com/oauth2/tokens";
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
 const TOKEN_REFRESH_SKEW_MS = 60 * 1000;
+const TOKEN_ENCRYPTION_VERSION = "v1";
+const TOKEN_ENCRYPTION_ALGO = "aes-256-gcm";
+const TOKEN_ENCRYPTION_IV_BYTES = 12;
 
 function getEnv(name, fallback = "") {
   return String(process.env[name] || fallback).trim();
@@ -53,6 +56,14 @@ function parseBody(event) {
   }
 }
 
+function readInputField(event, field) {
+  const body = parseBody(event);
+  if (Object.prototype.hasOwnProperty.call(body, field)) {
+    return body[field];
+  }
+  return event.queryStringParameters?.[field];
+}
+
 function buildOauthScopes() {
   const fromEnv = getEnv("MOLLIE_OAUTH_SCOPES");
   if (fromEnv) return fromEnv;
@@ -62,6 +73,7 @@ function buildOauthScopes() {
     "refunds.read",
     "refunds.write",
     "organizations.read",
+    "profiles.read",
     "onboarding.read",
     "onboarding.write",
   ].join(" ");
@@ -224,16 +236,109 @@ async function refreshAccessToken(refreshToken) {
   return tokenRes.json();
 }
 
+function resolveTokenEncryptionKey() {
+  const raw = getEnv("MOLLIE_TOKEN_ENCRYPTION_KEY");
+  if (!raw) return null;
+
+  const asBase64 = (() => {
+    try {
+      const node = Buffer.from(raw, "base64");
+      return node.length === 32 ? node : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (asBase64) return asBase64;
+
+  const asHex = (() => {
+    try {
+      const node = Buffer.from(raw, "hex");
+      return node.length === 32 ? node : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (asHex) return asHex;
+
+  const asUtf8 = Buffer.from(raw, "utf8");
+  if (asUtf8.length === 32) return asUtf8;
+  return null;
+}
+
+function encodeTokenForStorage(tokenValue) {
+  const clean = String(tokenValue || "").trim();
+  if (!clean) return { value: "", mode: "empty" };
+
+  const key = resolveTokenEncryptionKey();
+  if (!key) {
+    return {
+      value: `b64:${Buffer.from(clean, "utf8").toString("base64")}`,
+      mode: "base64",
+    };
+  }
+
+  const iv = crypto.randomBytes(TOKEN_ENCRYPTION_IV_BYTES);
+  const cipher = crypto.createCipheriv(TOKEN_ENCRYPTION_ALGO, key, iv);
+  const encrypted = Buffer.concat([cipher.update(clean, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return {
+    value: `${TOKEN_ENCRYPTION_VERSION}:${iv.toString("base64url")}:${tag.toString("base64url")}:${encrypted.toString(
+      "base64url"
+    )}`,
+    mode: "encrypted",
+  };
+}
+
+function decodeTokenFromStorage(rawToken) {
+  const raw = String(rawToken || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("b64:")) {
+    try {
+      return Buffer.from(raw.slice(4), "base64").toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  if (raw.startsWith(`${TOKEN_ENCRYPTION_VERSION}:`)) {
+    const key = resolveTokenEncryptionKey();
+    if (!key) return "";
+
+    const parts = raw.split(":");
+    if (parts.length !== 4) return "";
+    try {
+      const iv = Buffer.from(parts[1], "base64url");
+      const tag = Buffer.from(parts[2], "base64url");
+      const encrypted = Buffer.from(parts[3], "base64url");
+      const decipher = crypto.createDecipheriv(TOKEN_ENCRYPTION_ALGO, key, iv);
+      decipher.setAuthTag(tag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      return decrypted.toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+
+  return raw;
+}
+
 function toMollieConfig(companyDocData) {
   const raw = companyDocData?.mollie && typeof companyDocData.mollie === "object" ? companyDocData.mollie : {};
   const scopeRaw = String(raw.scope || "");
+  const accessToken = decodeTokenFromStorage(raw.accessTokenEncrypted || raw.accessToken);
+  const refreshToken = decodeTokenFromStorage(raw.refreshTokenEncrypted || raw.refreshToken);
+
   return {
     linked: Boolean(raw.linked) || String(raw.status || "").trim().toLowerCase() === "linked",
     status: String(raw.status || "").trim().toLowerCase(),
     model: String(raw.model || "platform").trim(),
     organizationId: String(raw.organizationId || "").trim(),
-    accessToken: String(raw.accessToken || "").trim(),
-    refreshToken: String(raw.refreshToken || "").trim(),
+    organizationName: String(raw.organizationName || "").trim(),
+    profileId: String(raw.profileId || "").trim(),
+    accessToken,
+    refreshToken,
     tokenType: String(raw.tokenType || "").trim(),
     scope: scopeRaw,
     scopeList: scopeRaw
@@ -241,20 +346,33 @@ function toMollieConfig(companyDocData) {
       .map((item) => item.trim())
       .filter(Boolean),
     tokenExpiresAtMs: Number(raw.tokenExpiresAtMs || 0),
+    onboardingStatus: String(raw.onboardingStatus || "").trim().toLowerCase(),
+    canReceivePayments: Boolean(raw.canReceivePayments),
+    canReceiveSettlements: Boolean(raw.canReceiveSettlements),
   };
 }
 
 async function saveCompanyMollieTokens(db, companyId, tokenPayload, extraPatch = {}) {
   const expiresInSec = Number(tokenPayload?.expires_in || 0);
   const tokenExpiresAtMs = expiresInSec > 0 ? Date.now() + expiresInSec * 1000 : 0;
+
+  const encodedAccess = encodeTokenForStorage(String(tokenPayload?.access_token || "").trim());
+  const encodedRefresh = encodeTokenForStorage(String(tokenPayload?.refresh_token || "").trim());
+
   const nextPatch = {
     ...extraPatch,
     mollie: {
-      ...(extraPatch.mollie || {}),
+      model: "platform",
       linked: true,
       status: "linked",
-      accessToken: String(tokenPayload?.access_token || "").trim(),
-      refreshToken: String(tokenPayload?.refresh_token || "").trim(),
+      ...(extraPatch.mollie || {}),
+      accessTokenEncrypted: encodedAccess.value || admin.firestore.FieldValue.delete(),
+      refreshTokenEncrypted: encodedRefresh.value || admin.firestore.FieldValue.delete(),
+      accessTokenStorageMode: encodedAccess.mode,
+      refreshTokenStorageMode: encodedRefresh.mode,
+      // Remove legacy plain token fields once encrypted/base64 fields are stored.
+      accessToken: admin.firestore.FieldValue.delete(),
+      refreshToken: admin.firestore.FieldValue.delete(),
       tokenType: String(tokenPayload?.token_type || "bearer").trim(),
       scope: String(tokenPayload?.scope || "").trim(),
       tokenExpiresAtMs,
@@ -305,6 +423,8 @@ async function getConnectedMollieClient(db, companyId) {
       mollie: {
         model: mollie.model || "platform",
         organizationId: mollie.organizationId || "",
+        organizationName: mollie.organizationName || "",
+        profileId: mollie.profileId || "",
       },
     });
     accessToken = String(refreshed.access_token || "").trim();
@@ -347,6 +467,8 @@ async function withAutoRefresh(db, companyId, mollieConfig, runner) {
       mollie: {
         model: mollieConfig.model || "platform",
         organizationId: mollieConfig.organizationId || "",
+        organizationName: mollieConfig.organizationName || "",
+        profileId: mollieConfig.profileId || "",
       },
     });
     const nextAccessToken = String(refreshed.access_token || "").trim();
@@ -386,6 +508,15 @@ function extractBookingIdFromPayment(payment) {
   return "";
 }
 
+function extractCompanyIdFromPayment(payment) {
+  const metadata = payment?.metadata;
+  if (metadata && typeof metadata === "object") {
+    const direct = String(metadata.companyId || "").trim();
+    if (direct) return direct;
+  }
+  return "";
+}
+
 module.exports = {
   OAUTH_STATE_TTL_MS,
   amountToCents,
@@ -393,6 +524,7 @@ module.exports = {
   canManageCompany,
   exchangeAuthorizationCode,
   extractBookingIdFromPayment,
+  extractCompanyIdFromPayment,
   generateStateId,
   getAppBaseUrl,
   getConnectedMollieClient,
@@ -403,6 +535,7 @@ module.exports = {
   normalizePercent,
   parseBody,
   parseWebhookPaymentId,
+  readInputField,
   redirect,
   refreshAccessToken,
   requireAuthUid,
