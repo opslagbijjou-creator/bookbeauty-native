@@ -30,6 +30,7 @@ export type PushRegistrationReason =
   | "missing_vapid_public_key"
   | "service_worker_failed"
   | "subscription_failed"
+  | "backend_save_failed"
   | "token_failed"
   | "unknown_error";
 
@@ -48,6 +49,7 @@ export type RegisterPushOptions = {
 const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const PUSH_PROXY_ENDPOINT = "/.netlify/functions/send-expo-push";
 const WEB_PUSH_PUBLIC_KEY_ENDPOINT = "/.netlify/functions/web-push-public-key";
+const WEB_PUSH_SAVE_ENDPOINT = "/.netlify/functions/web-push-save-subscription";
 const BOOKING_SOUND_CHANNEL_ID = "booking-alerts";
 const SILENT_CHANNEL_ID = "silent-updates";
 const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
@@ -100,20 +102,6 @@ function normalizeWebPushSubscription(value: unknown): WebPushSubscriptionShape 
     expirationTime,
     keys: { p256dh, auth },
   };
-}
-
-function normalizeWebPushSubscriptions(value: unknown): WebPushSubscriptionShape[] {
-  if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  const output: WebPushSubscriptionShape[] = [];
-  value.forEach((row) => {
-    const normalized = normalizeWebPushSubscription(row);
-    if (!normalized) return;
-    if (seen.has(normalized.endpoint)) return;
-    seen.add(normalized.endpoint);
-    output.push(normalized);
-  });
-  return output;
 }
 
 function base64UrlToUint8Array(value: string): Uint8Array {
@@ -354,7 +342,7 @@ async function registerWebPushSubscriptionForUser(
     };
   }
 
-  const registration = await nav.serviceWorker.register("/web-push-sw.js").catch(() => null);
+  const registration = await nav.serviceWorker.register("/sw.js").catch(() => null);
   if (!registration) {
     return {
       ok: false,
@@ -413,22 +401,15 @@ async function registerWebPushSubscriptionForUser(
     };
   }
 
-  const ref = doc(db, "push_subscriptions", cleanUid);
-  const existingSnap = await getDoc(ref).catch(() => null);
-  const existing = normalizeWebPushSubscriptions(existingSnap?.data()?.webSubscriptions);
-  const merged = [payload, ...existing.filter((row) => row.endpoint !== payload.endpoint)].slice(0, 15);
-
-  await setDoc(
-    ref,
-    {
-      uid: cleanUid,
-      webSubscriptions: merged,
-      platform: Platform.OS,
-      updatedAt: serverTimestamp(),
-      webPushUpdatedAtMs: Date.now(),
-    },
-    { merge: true }
-  );
+  const savedViaBackend = await saveWebPushSubscriptionViaBackend(cleanUid, payload, permission);
+  if (!savedViaBackend) {
+    return {
+      ok: false,
+      platform: "web",
+      reason: "backend_save_failed",
+      permission,
+    };
+  }
 
   return {
     ok: true,
@@ -437,6 +418,46 @@ async function registerWebPushSubscriptionForUser(
     reason: "ok",
     permission,
   };
+}
+
+async function saveWebPushSubscriptionViaBackend(
+  uid: string,
+  subscription: WebPushSubscriptionShape,
+  permission: string
+): Promise<boolean> {
+  const cleanUid = String(uid ?? "").trim();
+  if (!cleanUid || Platform.OS !== "web") return false;
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return false;
+  const actorUid = String(currentUser.uid ?? "").trim();
+  if (!actorUid || actorUid !== cleanUid) return false;
+
+  const idToken = await currentUser.getIdToken().catch(() => "");
+  if (!idToken) return false;
+
+  const nav = (globalThis as { navigator?: Navigator }).navigator;
+  const userAgent = String(nav?.userAgent ?? "").trim();
+
+  const response = await fetch(WEB_PUSH_SAVE_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      uid: cleanUid,
+      permission,
+      subscription,
+      source: "pwa",
+      userAgent,
+    }),
+  }).catch(() => null);
+
+  if (!response?.ok) return false;
+
+  const payload = await response.json().catch(() => null);
+  return Boolean((payload as { ok?: unknown } | null)?.ok === true);
 }
 
 export async function registerPushTokenForUser(

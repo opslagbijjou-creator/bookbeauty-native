@@ -69,6 +69,41 @@ service cloud.firestore {
         || (request.resource.data.photoUrls is list && request.resource.data.photoUrls.size() <= 3);
     }
 
+    function pushSubscriptionKeysAllowed(data) {
+      return data.keys().hasOnly([
+        "uid",
+        "tokens",
+        "webSubscriptions",
+        "platform",
+        "createdAt",
+        "updatedAt",
+        "webPushUpdatedAtMs",
+        "webPushPermission",
+        "lastUserAgent",
+        "lastSource"
+      ]);
+    }
+
+    function validPushSubscriptionPayload(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.uid == request.auth.uid
+        && pushSubscriptionKeysAllowed(request.resource.data)
+        && (!("tokens" in request.resource.data) || request.resource.data.tokens is list)
+        && (!("webSubscriptions" in request.resource.data) || request.resource.data.webSubscriptions is list)
+        && (!("platform" in request.resource.data) || request.resource.data.platform is string)
+        && (!("createdAt" in request.resource.data) || request.resource.data.createdAt is timestamp)
+        && (!("updatedAt" in request.resource.data) || request.resource.data.updatedAt is timestamp)
+        && (!("webPushUpdatedAtMs" in request.resource.data) || request.resource.data.webPushUpdatedAtMs is number)
+        && (!("webPushPermission" in request.resource.data) || request.resource.data.webPushPermission is string)
+        && (!("lastUserAgent" in request.resource.data) || request.resource.data.lastUserAgent is string)
+        && (!("lastSource" in request.resource.data) || request.resource.data.lastSource is string);
+    }
+
+    function validPushSubscriptionUpdate(uid) {
+      return validPushSubscriptionPayload(uid)
+        && resource.data.uid == uid;
+    }
+
     function ownerCanAssignEmployee(uid) {
       return hasRole("company")
         && request.auth.uid != uid
@@ -279,8 +314,18 @@ service cloud.firestore {
     }
 
     match /push_subscriptions/{uid} {
-      allow read: if signedIn();
-      allow create, update, delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn()
+        && (
+          isAdmin()
+          || (request.auth.uid == uid && validPushSubscriptionPayload(uid))
+        );
+      allow update: if signedIn()
+        && (
+          isAdmin()
+          || (request.auth.uid == uid && validPushSubscriptionUpdate(uid))
+        );
+      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
     }
 
     match /support_threads/{threadId} {
