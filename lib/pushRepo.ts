@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { Platform } from "react-native";
-import { arrayUnion, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { Alert, Platform } from "react-native";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 
 type PushMessage = {
@@ -55,6 +55,15 @@ const SILENT_CHANNEL_ID = "silent-updates";
 const SOUND_NOTIFICATION_TYPES = new Set(["booking_request", "booking_created", "booking_confirmed"]);
 let pushConfigured = false;
 let cachedVapidPublicKey = "";
+
+function showPushWriteAlert(title: string, message: string, enabled: boolean): void {
+  if (!enabled) return;
+  try {
+    Alert.alert(title, message);
+  } catch {
+    // Ignore alert failures in non-visual environments.
+  }
+}
 
 type WebPushSubscriptionShape = {
   endpoint: string;
@@ -506,16 +515,54 @@ export async function registerPushTokenForUser(
     };
   }
 
-  await setDoc(
-    doc(db, "push_subscriptions", cleanUid),
-    {
+  const showDebugAlert = options.requestPermission === true;
+
+  try {
+    const pushRef = doc(db, "push_subscriptions", cleanUid);
+    const existingSnap = await getDoc(pushRef);
+    const existingData = (existingSnap.exists() ? (existingSnap.data() as PushSubscriptionDoc) : {}) ?? {};
+    const existingTokens = normalizeTokens(existingData.tokens);
+    const mergedTokens = Array.from(new Set([...existingTokens, pushToken]));
+
+    await setDoc(
+      pushRef,
+      {
+        uid: cleanUid,
+        tokens: mergedTokens,
+        platform: Platform.OS,
+        ...(existingSnap.exists() ? {} : { createdAt: serverTimestamp() }),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    console.log("[pushRepo] push_subscriptions write success", {
       uid: cleanUid,
-      tokens: arrayUnion(pushToken),
-      platform: Platform.OS,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+      tokenCount: mergedTokens.length,
+      created: !existingSnap.exists(),
+    });
+    showPushWriteAlert(
+      "Push opgeslagen",
+      `push_subscriptions/${cleanUid} opgeslagen met ${mergedTokens.length} token(s).`,
+      showDebugAlert
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown_error";
+    console.warn("[pushRepo] push_subscriptions write failed", {
+      uid: cleanUid,
+      message,
+    });
+    showPushWriteAlert(
+      "Push opslaan mislukt",
+      `Kon push_subscriptions/${cleanUid} niet opslaan: ${message}`,
+      true
+    );
+    return {
+      ok: false,
+      platform: "native",
+      reason: "backend_save_failed",
+    };
+  }
 
   return {
     ok: true,
