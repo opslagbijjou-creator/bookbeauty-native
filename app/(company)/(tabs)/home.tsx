@@ -61,8 +61,23 @@ type MollieUiStatus = {
 };
 
 function parseMollieUiStatus(raw: unknown): MollieUiStatus {
+  // ✅ TEST override: in test-mode blokkeren we niet op onboarding/KYC
+  // Zet in je Expo app .env: EXPO_PUBLIC_MOLLIE_MODE=test
+  const isTest =
+    String(process.env.EXPO_PUBLIC_MOLLIE_MODE || "").trim().toLowerCase() === "test";
+
+  if (isTest) {
+    return {
+      state: "connected",
+      label: "Test actief",
+      details: "Testbetalingen werken via het platform (geen onboarding nodig).",
+      onboardingUrl: "",
+    };
+  }
+
   const node = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const linked = Boolean(node.linked) || String(node.status || "").trim().toLowerCase() === "linked";
+  const linked =
+    Boolean(node.linked) || String(node.status || "").trim().toLowerCase() === "linked";
   const onboardingStatus = String(node.onboardingStatus || "").trim().toLowerCase();
   const canReceivePayments = Boolean(node.canReceivePayments);
   const canReceiveSettlements = Boolean(node.canReceiveSettlements);
