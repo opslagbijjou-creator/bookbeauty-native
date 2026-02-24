@@ -18,6 +18,40 @@ function buildRedirectUrl(baseUrl, params) {
   return url.toString();
 }
 
+async function fetchMollieOrganizationMe(accessToken) {
+  try {
+    // Node 18+ heeft fetch global (Netlify meestal ook). Als niet: fail zacht.
+    if (typeof fetch !== "function") return null;
+
+    const res = await fetch("https://api.mollie.com/v2/organizations/me", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      console.warn("[mollie-oauth-callback] org/me fetch not ok", {
+        status: res.status,
+        body: txt.slice(0, 200),
+      });
+      return null;
+    }
+
+    const org = await res.json().catch(() => null);
+    if (!org || typeof org !== "object") return null;
+
+    return org;
+  } catch (err) {
+    console.warn("[mollie-oauth-callback] org/me fetch failed", {
+      message: err instanceof Error ? err.message : "unknown_error",
+    });
+    return null;
+  }
+}
+
 exports.handler = async (event) => {
   const method = String(event.httpMethod || "").toUpperCase();
   console.log("[mollie-oauth-callback] request", { method });
@@ -131,6 +165,7 @@ exports.handler = async (event) => {
       actorUid,
       provider,
     });
+
     const tokenPayload = await exchangeAuthorizationCode(code);
     const accessToken = String(tokenPayload?.access_token || "").trim();
     if (!accessToken) {
@@ -138,8 +173,12 @@ exports.handler = async (event) => {
     }
 
     const connectedClient = createMollieClient({ accessToken });
+
+    // ✅ FIX: org/me via raw HTTP, niet via SDK .get("me")
+    const organizationPromise = fetchMollieOrganizationMe(accessToken);
+
     const [organizationResult, onboardingResult, profilesResult] = await Promise.allSettled([
-      connectedClient.organizations.get("me"),
+      organizationPromise,
       connectedClient.onboarding.get({ testmode: isTestMode() }),
       connectedClient.profiles.page({ limit: 1 }),
     ]);
@@ -148,10 +187,12 @@ exports.handler = async (event) => {
       organizationResult.status === "fulfilled" && organizationResult.value
         ? organizationResult.value
         : null;
+
     const onboarding =
       onboardingResult.status === "fulfilled" && onboardingResult.value
         ? onboardingResult.value
         : null;
+
     const profileId = (() => {
       if (profilesResult.status !== "fulfilled") return "";
       const page = profilesResult.value;
@@ -167,19 +208,27 @@ exports.handler = async (event) => {
       return "";
     })();
 
+    // Als onboarding/profiles/org faalt: we slaan alsnog tokens op + linked=true
     await saveCompanyMollieTokens(db, companyId, tokenPayload, {
       mollie: {
         model: "platform",
         organizationId: String(organization?.id || "").trim(),
         organizationName: String(organization?.name || "").trim(),
         profileId,
-        onboardingStatus: String(onboarding?.status || "").trim(),
+        onboardingStatus: String(onboarding?.status || (organization ? "unknown" : "")).trim(),
         canReceivePayments: Boolean(onboarding?.canReceivePayments),
         canReceiveSettlements: Boolean(onboarding?.canReceiveSettlements),
         dashboardOnboardingUrl: String(onboarding?._links?.dashboard?.href || "").trim(),
         linkedByUid: actorUid || admin.firestore.FieldValue.delete(),
         linkedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
+    });
+
+    console.log("[mollie-oauth-callback] firestore saved", {
+      companyId,
+      orgId: String(organization?.id || ""),
+      hasOnboarding: Boolean(onboarding),
+      profileId: profileId ? "yes" : "no",
     });
 
     await stateRef.set(
@@ -201,6 +250,7 @@ exports.handler = async (event) => {
       hasState: Boolean(state),
       message: error instanceof Error ? error.message : "unknown_error",
     });
+
     await stateRef
       .set(
         {
