@@ -95,11 +95,16 @@ function showBookingMessage(title: string, message: string): void {
 
 async function createMollieCheckoutForBooking(
   bookingId: string,
+  companyId: string,
   amountCents: number
 ): Promise<string> {
   const cleanBookingId = String(bookingId || "").trim();
+  const cleanCompanyId = String(companyId || "").trim();
   if (!cleanBookingId) {
     throw new Error("bookingId ontbreekt voor betaling.");
+  }
+  if (!cleanCompanyId) {
+    throw new Error("companyId ontbreekt voor betaling.");
   }
 
   const currentUser = auth.currentUser;
@@ -124,6 +129,7 @@ async function createMollieCheckoutForBooking(
     },
     body: JSON.stringify({
       bookingId: cleanBookingId,
+      companyId: cleanCompanyId,
       amountCents: Math.max(0, Math.floor(Number(amountCents) || 0)),
     }),
   }).catch(() => null);
@@ -405,7 +411,7 @@ export default function BookServiceScreen() {
         referralPostId: refPostId || undefined,
       });
       createdBookingId = result.bookingId;
-      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId, amountCents);
+      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId, companyId, amountCents);
       await openExternalCheckout(checkoutUrl);
     } catch (error: any) {
       const fallbackMessage = error?.message ?? "Kon boeking of betaling niet starten.";

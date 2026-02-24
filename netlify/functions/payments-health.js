@@ -71,6 +71,13 @@ exports.handler = async (event) => {
     env.MOLLIE_MODE &&
     env.MOLLIE_API_KEY_PLATFORM;
 
+  const platformTestReady = Boolean(
+    env.MOLLIE_MODE &&
+      env.MOLLIE_API_KEY_PLATFORM &&
+      env.MOLLIE_WEBHOOK_URL &&
+      env.APP_BASE_URL
+  );
+
   // OAuth core (marketplace connect flow)
   const oauthCore =
     env.MOLLIE_OAUTH_CLIENT_ID &&
@@ -98,6 +105,7 @@ exports.handler = async (event) => {
     ok: true,
     envVarsPresent: env,
     platformCore,
+    platformTestReady,
     oauthCore,
     missingPlatformEnv,
     missingOauthEnv,

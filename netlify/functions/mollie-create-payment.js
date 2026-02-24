@@ -1,3 +1,4 @@
+const { createMollieClient } = require("@mollie/api-client");
 const { getFirestore, admin } = require("./_firebaseAdmin");
 const {
   getAppBaseUrl,
@@ -13,6 +14,10 @@ const {
 } = require("./_mollieConnect");
 
 const DEFAULT_PLATFORM_FEE_PERCENT = 8;
+
+function isExplicitTestMode() {
+  return String(process.env.MOLLIE_MODE || "").trim().toLowerCase() === "test";
+}
 
 function pickBookingAmountCents(booking) {
   const explicit = Number(booking?.amountCents || 0);
@@ -89,6 +94,8 @@ exports.handler = async (event) => {
 
   const body = parseBody(event);
   const bookingId = String(body.bookingId || "").trim();
+  const requestedCompanyId = String(body.companyId || "").trim();
+
   if (!bookingId) {
     return response(400, { ok: false, error: "bookingId is verplicht." });
   }
@@ -101,9 +108,19 @@ exports.handler = async (event) => {
   }
 
   const booking = bookingSnap.data() || {};
-  const companyId = String(booking.companyId || "").trim();
-  if (!companyId) {
+  const bookingCompanyId = String(booking.companyId || "").trim();
+  if (!bookingCompanyId) {
     return response(400, { ok: false, error: "Booking mist companyId." });
+  }
+
+  if (!requestedCompanyId) {
+    return response(400, { ok: false, error: "companyId is verplicht." });
+  }
+  if (requestedCompanyId !== bookingCompanyId) {
+    return response(400, {
+      ok: false,
+      error: "companyId komt niet overeen met booking.companyId.",
+    });
   }
 
   const actorRoleSnap = await db.collection("users").doc(actorUid).get().catch(() => null);
@@ -113,7 +130,7 @@ exports.handler = async (event) => {
   const canPay =
     actorRole === "admin" ||
     actorUid === customerId ||
-    actorUid === companyId ||
+    actorUid === bookingCompanyId ||
     String(booking.createdBy || "").trim() === actorUid;
   if (!canPay) {
     return response(403, { ok: false, error: "Geen toegang om deze betaling te starten." });
@@ -135,12 +152,100 @@ exports.handler = async (event) => {
       ok: true,
       existing: true,
       checkoutUrl: existingCheckoutUrl,
+      paymentId: existingPaymentId,
       molliePaymentId: existingPaymentId,
       status: String(booking?.mollie?.status || "open").trim().toLowerCase() || "open",
     });
   }
 
-  const companySnap = await db.collection("companies").doc(companyId).get();
+  const amountCents = pickAmountCentsFromInput(body.amountCents, booking);
+  if (amountCents <= 0) {
+    return response(400, {
+      ok: false,
+      error: "Booking amountCents/servicePrice is ongeldig.",
+    });
+  }
+
+  const appBaseUrl = getAppBaseUrl();
+  const webhookUrl = requireEnv("MOLLIE_WEBHOOK_URL");
+  const explicitTestMode = isExplicitTestMode();
+
+  // Option 1: platform-only test mode. No OAuth/Connect/KYC required.
+  if (explicitTestMode) {
+    try {
+      const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
+      const platformFeeCents = Math.round(amountCents * 0.08);
+      const companyNetCents = amountCents - platformFeeCents;
+      const redirectUrl = `${appBaseUrl}/payments?bookingId=${encodeURIComponent(bookingId)}`;
+
+      const mollieClient = createMollieClient({ apiKey });
+      const payment = await mollieClient.payments.create({
+        amount: {
+          currency: "EUR",
+          value: toAmountValueFromCents(amountCents),
+        },
+        description: "BookBeauty test booking",
+        redirectUrl,
+        webhookUrl,
+        metadata: {
+          bookingId,
+          companyId: bookingCompanyId,
+          mode: "platform_test",
+          platformFeeCents,
+          companyNetCents,
+        },
+      });
+
+      const paymentId = String(payment?.id || "").trim();
+      const checkoutUrl = resolveCheckoutUrl(payment);
+      if (!paymentId || !checkoutUrl) {
+        return response(502, {
+          ok: false,
+          error: "Mollie payment response mist id of checkout url.",
+        });
+      }
+
+      const nowTs = admin.firestore.FieldValue.serverTimestamp();
+      await bookingRef.set(
+        {
+          paymentProvider: "mollie",
+          paymentStatus: "pending_payment",
+          status: "pending_payment",
+          molliePaymentId: paymentId,
+          mollie: {
+            paymentId,
+            mode: "platform_test",
+            status: "open",
+            checkoutUrl,
+            createdAt: nowTs,
+            updatedAt: nowTs,
+          },
+          breakdown: {
+            amountCents,
+            platformFeeCents,
+            companyNetCents,
+          },
+          updatedAt: nowTs,
+        },
+        { merge: true }
+      );
+
+      return response(200, {
+        ok: true,
+        checkoutUrl,
+        paymentId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Payment aanmaken mislukt.";
+      return response(502, {
+        ok: false,
+        error: message.slice(0, 500),
+      });
+    }
+  }
+
+  // Non-test mode: keep existing Connect behavior.
+  const companySnap = await db.collection("companies").doc(bookingCompanyId).get();
   if (!companySnap.exists) {
     return response(404, { ok: false, error: "Bedrijf niet gevonden." });
   }
@@ -163,30 +268,14 @@ exports.handler = async (event) => {
     });
   }
 
-  const amountCents = pickAmountCentsFromInput(body.amountCents, booking);
-  if (amountCents <= 0) {
-    return response(400, {
-      ok: false,
-      error: "Booking amountCents/servicePrice is ongeldig.",
-    });
-  }
-
   const platformFeePercent = resolvePlatformFeePercent(company);
   const applicationFeeCents = Math.max(0, Math.floor((amountCents * platformFeePercent) / 100));
-  const appBaseUrl = getAppBaseUrl();
   const redirectUrl = `${appBaseUrl}/pay/return?bookingId=${encodeURIComponent(bookingId)}`;
-  const webhookUrl = requireEnv("MOLLIE_WEBHOOK_URL");
   const modeTest = isTestMode();
 
   try {
-    const connected = await getConnectedMollieClient(db, companyId);
-    /**
-     * Mollie Connect platform fee model:
-     * - Payment wordt aangemaakt met het connected-account access token.
-     * - `applicationFee` zorgt dat de platform commissie automatisch naar BookBeauty gaat.
-     * - Restbedrag wordt automatisch aan de connected salon uitbetaald.
-     */
-    const payment = await withAutoRefresh(db, companyId, connected.mollie, (mollieClient) =>
+    const connected = await getConnectedMollieClient(db, bookingCompanyId);
+    const payment = await withAutoRefresh(db, bookingCompanyId, connected.mollie, (mollieClient) =>
       mollieClient.payments.create({
         amount: {
           currency: "EUR",
@@ -197,7 +286,7 @@ exports.handler = async (event) => {
         webhookUrl,
         metadata: {
           bookingId,
-          companyId,
+          companyId: bookingCompanyId,
           customerId,
           platformFeePercent: String(platformFeePercent),
           applicationFeeCents: String(applicationFeeCents),
@@ -259,16 +348,10 @@ exports.handler = async (event) => {
       { merge: true }
     );
 
-    console.log("[mollie-create-payment] created", {
-      bookingId,
-      companyId,
-      paymentId,
-      amountCents,
-    });
-
     return response(200, {
       ok: true,
       checkoutUrl,
+      paymentId,
       molliePaymentId: paymentId,
       status: paymentStatus,
       amountCents,
@@ -279,7 +362,7 @@ exports.handler = async (event) => {
     const message = error instanceof Error ? error.message : "Payment aanmaken mislukt.";
     console.error("[mollie-create-payment] failed", {
       bookingId,
-      companyId,
+      companyId: bookingCompanyId,
       message,
     });
     return response(502, {
