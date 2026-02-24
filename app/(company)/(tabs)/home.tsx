@@ -104,8 +104,14 @@ async function callAuthedFunction(path: string, payload: Record<string, unknown>
   if (!currentUser) {
     throw new Error("Log opnieuw in om betalingen te beheren.");
   }
-  const idToken = await currentUser.getIdToken();
-  const res = await fetch(path, {
+
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const fullUrl = path.startsWith("http") ? path : `${baseUrl}${path}`;
+
+  // Force token refresh to avoid stale auth on native devices.
+  const idToken = await currentUser.getIdToken(true);
+  const res = await fetch(fullUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -113,11 +119,19 @@ async function callAuthedFunction(path: string, payload: Record<string, unknown>
     },
     body: JSON.stringify(payload),
   });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    data = {};
+  }
+
   if (!res.ok || data.ok !== true) {
     const message = String(data.error || "").trim();
-    throw new Error(message || "Actie mislukt.");
+    throw new Error(message || `Actie mislukt (${res.status}): ${text.slice(0, 300)}`);
   }
+
   return data;
 }
 
@@ -458,9 +472,11 @@ export default function CompanyHomeScreen() {
     if (!companyId || isEmployee || mollieBusyAction) return;
     setMollieBusyAction("connect");
     try {
+      Alert.alert("Connect", "Ik ga nu mollie-oauth-start callen...");
       const payload = await callAuthedFunction("/.netlify/functions/mollie-oauth-start", {
         companyId,
       });
+      Alert.alert("OAuth start response", JSON.stringify(payload).slice(0, 600));
       const authUrl = String(payload.url || payload.authUrl || "").trim();
       if (!authUrl) {
         throw new Error("Kon geen Mollie autorisatie URL ophalen.");
