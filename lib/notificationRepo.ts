@@ -28,6 +28,9 @@ export type CompanyNotificationType =
   | "service_rating"
   | "company_rating"
   | "booking_request"
+  | "booking_checked_in"
+  | "booking_completed"
+  | "booking_no_show"
   | "booking_cancelled"
   | "booking_proposal_accepted"
   | "booking_proposal_declined"
@@ -37,7 +40,10 @@ export type CompanyNotificationType =
 export type CustomerNotificationType =
   | "booking_created"
   | "booking_confirmed"
-  | "booking_declined"
+  | "booking_cancelled"
+  | "booking_checked_in"
+  | "booking_completed"
+  | "booking_no_show"
   | "booking_time_proposed"
   | "booking_reschedule_approved"
   | "booking_reschedule_declined"
@@ -109,7 +115,10 @@ function toMillis(value: unknown): number {
 
 function normalizeCompanyNotificationType(value: unknown): CompanyNotificationType {
   const typeRaw = String(value ?? "post_like");
-  return typeRaw === "post_comment" ||
+  return typeRaw === "booking_checked_in" ||
+    typeRaw === "booking_completed" ||
+    typeRaw === "booking_no_show" ||
+    typeRaw === "post_comment" ||
     typeRaw === "comment_like" ||
     typeRaw === "service_rating" ||
     typeRaw === "company_rating" ||
@@ -126,7 +135,10 @@ function normalizeCompanyNotificationType(value: unknown): CompanyNotificationTy
 function normalizeCustomerNotificationType(value: unknown): CustomerNotificationType {
   const typeRaw = String(value ?? "booking_created");
   return typeRaw === "booking_confirmed" ||
-    typeRaw === "booking_declined" ||
+    typeRaw === "booking_cancelled" ||
+    typeRaw === "booking_checked_in" ||
+    typeRaw === "booking_completed" ||
+    typeRaw === "booking_no_show" ||
     typeRaw === "booking_time_proposed" ||
     typeRaw === "booking_reschedule_approved" ||
     typeRaw === "booking_reschedule_declined" ||
@@ -631,7 +643,7 @@ export async function notifyCustomerOnBookingStatusByCompany(params: {
   serviceId: string;
   serviceName?: string;
   bookingId: string;
-  status: "confirmed" | "declined";
+  status: "confirmed" | "cancelled";
   actorId?: string;
   actorRole?: AppRole;
 }): Promise<void> {
@@ -645,12 +657,12 @@ export async function notifyCustomerOnBookingStatusByCompany(params: {
   await createCustomerNotification(customerId, {
     actorId: actorIdToStore,
     actorRole: actorRoleToStore,
-    type: status === "confirmed" ? "booking_confirmed" : "booking_declined",
-    title: status === "confirmed" ? "Afspraak goedgekeurd" : "Afspraak afgewezen",
+    type: status === "confirmed" ? "booking_confirmed" : "booking_cancelled",
+    title: status === "confirmed" ? "Afspraak goedgekeurd" : "Afspraak geannuleerd",
     body:
       status === "confirmed"
         ? `${companyLabel} heeft ${serviceLabel} bevestigd.`
-        : `${companyLabel} heeft ${serviceLabel} afgewezen.`,
+        : `${companyLabel} heeft ${serviceLabel} geannuleerd.`,
     companyId,
     companyName,
     serviceId,
@@ -717,6 +729,148 @@ export async function notifyCustomerOnRescheduleDecisionByCompany(params: {
       decision === "approved"
         ? `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} goedgekeurd.`
         : `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} afgewezen.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnBookingCheckedIn(params: {
+  companyId: string;
+  customerId: string;
+  customerName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { companyId, customerId, customerName, serviceId, serviceName, bookingId } = params;
+  if (!companyId || !customerId || !bookingId) return;
+  const name = customerName?.trim() ? customerName.trim() : "Een klant";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_checked_in",
+    title: "Klant heeft ingecheckt",
+    body: `${name} heeft ingecheckt voor ${serviceLabel}.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingCheckedIn(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId } = params;
+  if (!customerId || !bookingId) return;
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+
+  await createCustomerNotification(customerId, {
+    actorId: companyId,
+    actorRole: "company",
+    type: "booking_checked_in",
+    title: "Aankomst bevestigd",
+    body: `Je bent ingecheckt voor ${serviceLabel} bij ${companyLabel}.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnBookingCompleted(params: {
+  companyId: string;
+  customerId: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { companyId, customerId, serviceId, serviceName, bookingId } = params;
+  if (!companyId || !bookingId) return;
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_completed",
+    title: "Behandeling afgerond",
+    body: `${serviceLabel} is afgerond en klaar voor afronding in je administratie.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingCompleted(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId } = params;
+  if (!customerId || !bookingId) return;
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  await createCustomerNotification(customerId, {
+    actorId: companyId,
+    actorRole: "company",
+    type: "booking_completed",
+    title: "Afspraak afgerond",
+    body: `${serviceLabel} bij ${companyLabel} is afgerond. Bedankt voor je bezoek.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCompanyOnBookingNoShow(params: {
+  companyId: string;
+  customerId: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { companyId, customerId, serviceId, serviceName, bookingId } = params;
+  if (!companyId || !bookingId) return;
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+  await createCompanyNotification(companyId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_no_show",
+    title: "No-show geregistreerd",
+    body: `No-show gemeld voor ${serviceLabel}.`,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingNoShow(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId } = params;
+  if (!customerId || !bookingId) return;
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  await createCustomerNotification(customerId, {
+    actorId: companyId,
+    actorRole: "company",
+    type: "booking_no_show",
+    title: "No-show gemeld",
+    body: `Er is een no-show gemeld voor ${serviceLabel} bij ${companyLabel}.`,
     companyId,
     companyName,
     serviceId,

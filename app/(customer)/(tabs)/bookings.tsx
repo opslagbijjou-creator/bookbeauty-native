@@ -27,11 +27,11 @@ type BookingSections = {
 
 function statusLabel(status: Booking["status"]): string {
   if (status === "confirmed") return "Bevestigd";
-  if (status === "proposed_by_company") return "Nieuw voorstel";
-  if (status === "pending_reschedule_approval") return "Verplaatsen in behandeling";
-  if (status === "declined") return "Niet geaccepteerd";
-  if (status === "cancelled_with_fee") return "Geannuleerd (15% fee)";
-  if (status === "cancelled_by_customer") return "Geannuleerd";
+  if (status === "reschedule_requested") return "Wijziging aangevraagd";
+  if (status === "checked_in") return "Aangekomen";
+  if (status === "completed") return "Afgerond";
+  if (status === "no_show") return "Niet komen opdagen";
+  if (status === "cancelled") return "Geannuleerd";
   return "Aanvraag verstuurd";
 }
 
@@ -47,11 +47,11 @@ function formatDateTime(startAtMs: number): string {
 
 function statusPalette(status: Booking["status"]): { bg: string; text: string; border: string } {
   if (status === "confirmed") return { bg: "#e5f7ea", text: "#1f7a3f", border: "#b7e6c6" };
-  if (status === "proposed_by_company") return { bg: "#e8f0ff", text: "#2a5fcf", border: "#c6d8ff" };
-  if (status === "pending_reschedule_approval") return { bg: "#eaf6ff", text: "#0f6d99", border: "#c7e8fa" };
-  if (status === "declined") return { bg: "#ffecef", text: "#c63957", border: "#f4c7d2" };
-  if (status === "cancelled_with_fee") return { bg: "#fff1e8", text: "#af552a", border: "#f3d2be" };
-  if (status === "cancelled_by_customer") return { bg: "#f2f2f2", text: "#666", border: "#ddd" };
+  if (status === "reschedule_requested") return { bg: "#eaf6ff", text: "#0f6d99", border: "#c7e8fa" };
+  if (status === "checked_in") return { bg: "#e8f4ff", text: "#1d5fa7", border: "#c9ddf8" };
+  if (status === "completed") return { bg: "#e8fff3", text: "#147547", border: "#b9f0d2" };
+  if (status === "no_show") return { bg: "#fff1e8", text: "#af552a", border: "#f3d2be" };
+  if (status === "cancelled") return { bg: "#f2f2f2", text: "#666", border: "#ddd" };
   return { bg: "#fff4df", text: "#9a6600", border: "#f1d29a" };
 }
 
@@ -76,8 +76,7 @@ function isSameDay(dateKey: string): boolean {
 function canCancelBooking(status: Booking["status"]): boolean {
   return (
     status === "pending" ||
-    status === "proposed_by_company" ||
-    status === "pending_reschedule_approval" ||
+    status === "reschedule_requested" ||
     status === "confirmed"
   );
 }
@@ -191,12 +190,11 @@ function bookingSection(booking: Booking, now: number): CustomerSectionKey {
   if (paymentNeedsAction(booking)) return "action";
   if (
     booking.status === "pending" ||
-    booking.status === "proposed_by_company" ||
-    booking.status === "pending_reschedule_approval"
+    booking.status === "reschedule_requested"
   ) {
     return "action";
   }
-  if (booking.status === "confirmed" && booking.startAtMs >= now) return "upcoming";
+  if ((booking.status === "confirmed" || booking.status === "checked_in") && booking.startAtMs >= now) return "upcoming";
   return "history";
 }
 
@@ -318,7 +316,7 @@ export default function CustomerBookingsScreen() {
           row.id === bookingId
             ? {
                 ...row,
-                status: result.feePercent > 0 ? "cancelled_with_fee" : "cancelled_by_customer",
+                status: "cancelled",
                 cancellationFeePercent: result.feePercent,
                 cancellationFeeAmount: result.feeAmount,
               }
@@ -385,7 +383,7 @@ export default function CustomerBookingsScreen() {
     setBusyAction("decline_proposal");
     try {
       await declineCompanyProposalByCustomer(bookingId, uid);
-      setItems((prev) => prev.map((row) => (row.id === bookingId ? { ...row, status: "declined" } : row)));
+      setItems((prev) => prev.map((row) => (row.id === bookingId ? { ...row, status: "cancelled" } : row)));
       Alert.alert("Voorstel geweigerd", "Het voorstel is geweigerd.");
     } catch (error: any) {
       Alert.alert("Kon voorstel niet weigeren", error?.message ?? "Probeer het opnieuw.");
@@ -411,7 +409,7 @@ export default function CustomerBookingsScreen() {
           row.id === bookingId
             ? {
                 ...row,
-                status: "pending_reschedule_approval",
+                status: "reschedule_requested",
                 proposalBy: "customer",
                 proposedStartAtMs: res.proposedStartAtMs,
               }
@@ -460,12 +458,13 @@ export default function CustomerBookingsScreen() {
     const paymentRetryable = isPaymentRetryable(item);
     const paymentActionRequired = paymentNeedsAction(item);
     const bookingFlowLocked = paymentActionRequired;
-    const proposal = !bookingFlowLocked && item.status === "proposed_by_company";
-    const reschedulePending = !bookingFlowLocked && item.status === "pending_reschedule_approval";
+    const proposal = !bookingFlowLocked && item.status === "reschedule_requested" && item.proposalBy === "company";
+    const reschedulePending =
+      !bookingFlowLocked && item.status === "reschedule_requested" && item.proposalBy === "customer";
     const cancellable = canCancelBooking(item.status);
     const canMoveSameDay =
       !bookingFlowLocked &&
-      item.status === "confirmed" &&
+      (item.status === "confirmed" || item.status === "checked_in") &&
       isSameDay(item.bookingDate) &&
       (item.customerRescheduleCount || 0) < 1;
     const palette = statusPalette(item.status);
@@ -526,7 +525,9 @@ export default function CustomerBookingsScreen() {
           </View>
         ) : null}
 
-        {item.status === "confirmed" ? <Text style={styles.countdown}>{formatCountdown(item.startAtMs)}</Text> : null}
+        {item.status === "confirmed" || item.status === "checked_in" ? (
+          <Text style={styles.countdown}>{formatCountdown(item.startAtMs)}</Text>
+        ) : null}
 
         {proposal && item.proposedStartAtMs ? (
           <Text style={styles.proposalMeta}>
@@ -576,10 +577,21 @@ export default function CustomerBookingsScreen() {
           </View>
         ) : null}
 
-        {item.status === "cancelled_with_fee" ? (
+        {item.status === "cancelled" && (item.cancellationFeePercent || 0) > 0 ? (
           <Text style={styles.feeText}>
             Ingehouden: {item.cancellationFeePercent || 0}% ({Number(item.cancellationFeeAmount || 0).toFixed(2)} EUR)
           </Text>
+        ) : null}
+
+        {item.status === "cancelled" ? (
+          <Pressable
+            style={[styles.moveBtn, isBusy && styles.disabled]}
+            onPress={() => router.push("/(customer)/(tabs)/discover" as never)}
+            disabled={isBusy}
+          >
+            <Ionicons name="search-outline" size={14} color={COLORS.primary} />
+            <Text style={styles.moveText}>Bekijk alternatieve professionals</Text>
+          </Pressable>
         ) : null}
 
         {(paymentPending || paymentRetryable) ? (

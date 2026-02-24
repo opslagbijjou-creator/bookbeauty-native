@@ -45,7 +45,8 @@ function isPaidBooking(data: Record<string, unknown>): boolean {
     .trim()
     .toLowerCase();
   const status = String(data.status ?? "").trim().toLowerCase();
-  return paymentStatus === "paid" || mollieStatus === "paid" || status === "paid";
+  const paid = paymentStatus === "paid" || mollieStatus === "paid" || status === "paid";
+  return paid && status === "completed";
 }
 
 function parseRevenueRow(id: string, data: Record<string, unknown>): PaidBookingRevenue {

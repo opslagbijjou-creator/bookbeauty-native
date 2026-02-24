@@ -187,7 +187,7 @@ exports.handler = async (event) => {
     }
 
     const nowTs = admin.firestore.FieldValue.serverTimestamp();
-    const nextMainStatus = breakdown.holdCents > 0 ? "cancelled" : "refunded";
+    const nextMainStatus = "cancelled";
     const legacyCancellationStatus = breakdown.holdCents > 0 ? "cancelled_with_fee" : "cancelled_by_customer";
 
     await bookingRef.set(

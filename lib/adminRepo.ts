@@ -23,11 +23,12 @@ export type AdminUserBreakdown = {
 export type AdminBookingBreakdown = {
   total: number;
   pending: number;
-  proposedByCompany: number;
-  pendingRescheduleApproval: number;
+  rescheduleRequested: number;
   confirmed: number;
-  declined: number;
+  checkedIn: number;
+  completed: number;
   cancelled: number;
+  noShow: number;
 };
 
 export type AdminNotificationInsights = {
@@ -65,12 +66,12 @@ export async function fetchAdminPlatformMetrics(onlineWindowMinutes = 5): Promis
     onlineNowSnap,
     bookingsTotalSnap,
     pendingSnap,
-    proposedByCompanySnap,
-    pendingRescheduleSnap,
+    rescheduleRequestedSnap,
     confirmedSnap,
-    declinedSnap,
-    cancelledByCustomerSnap,
-    cancelledWithFeeSnap,
+    checkedInSnap,
+    completedSnap,
+    cancelledSnap,
+    noShowSnap,
     notificationsTotalSnap,
     bookingNotificationsSnap,
     supportSummary,
@@ -87,12 +88,12 @@ export async function fetchAdminPlatformMetrics(onlineWindowMinutes = 5): Promis
     ),
     getCountFromServer(collection(db, "bookings")),
     getCountFromServer(query(collection(db, "bookings"), where("status", "==", "pending"))),
-    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "proposed_by_company"))),
-    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "pending_reschedule_approval"))),
+    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "reschedule_requested"))),
     getCountFromServer(query(collection(db, "bookings"), where("status", "==", "confirmed"))),
-    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "declined"))),
-    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "cancelled_by_customer"))),
-    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "cancelled_with_fee"))),
+    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "checked_in"))),
+    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "completed"))),
+    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "cancelled"))),
+    getCountFromServer(query(collection(db, "bookings"), where("status", "==", "no_show"))),
     getCountFromServer(collectionGroup(db, "notifications")),
     getCountFromServer(query(collectionGroup(db, "notifications"), where("bookingId", ">=", ""))),
     fetchSupportSummary(),
@@ -115,11 +116,12 @@ export async function fetchAdminPlatformMetrics(onlineWindowMinutes = 5): Promis
     bookings: {
       total: totalBookings,
       pending: pendingSnap.data().count,
-      proposedByCompany: proposedByCompanySnap.data().count,
-      pendingRescheduleApproval: pendingRescheduleSnap.data().count,
+      rescheduleRequested: rescheduleRequestedSnap.data().count,
       confirmed: confirmedSnap.data().count,
-      declined: declinedSnap.data().count,
-      cancelled: cancelledByCustomerSnap.data().count + cancelledWithFeeSnap.data().count,
+      checkedIn: checkedInSnap.data().count,
+      completed: completedSnap.data().count,
+      cancelled: cancelledSnap.data().count,
+      noShow: noShowSnap.data().count,
     },
     notifications: {
       total: notificationsTotalSnap.data().count,

@@ -209,8 +209,7 @@ function shouldCancelBookingForPaymentStatus(paymentStatus) {
 function isBookingActiveStatus(bookingStatus) {
   return (
     bookingStatus === "pending" ||
-    bookingStatus === "proposed_by_company" ||
-    bookingStatus === "pending_reschedule_approval" ||
+    bookingStatus === "reschedule_requested" ||
     bookingStatus === "confirmed"
   );
 }
@@ -475,7 +474,7 @@ exports.handler = async (event) => {
         bookingDoc.ref,
         {
           ...basePatch,
-          status: "cancelled_by_customer",
+          status: "cancelled",
           cancellationFeePercent: Number(booking.cancellationFeePercent || 0) || 0,
           cancellationFeeAmount: Number(booking.cancellationFeeAmount || 0) || 0,
           proposalBy: "",

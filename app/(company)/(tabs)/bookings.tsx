@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,8 +27,11 @@ import {
   fetchEmployeeBookings,
   fetchBookings,
   formatDateKey,
+  generateBookingCheckInCodeByCompany,
+  markBookingCompletedByCompany,
   proposeBookingTimeByCompany,
   rejectBooking,
+  reportBookingNoShowByCompany,
   respondToCustomerRescheduleByCompany,
   subscribeEmployeeBookings,
   subscribeBookings,
@@ -43,11 +47,12 @@ type CalendarFilter = "active" | "all";
 type DayCounts = {
   total: number;
   pending: number;
-  proposed: number;
-  reschedulePending: number;
+  rescheduleRequested: number;
   confirmed: number;
-  declined: number;
+  checkedIn: number;
+  completed: number;
   cancelled: number;
+  noShow: number;
 };
 
 type MonthCell = {
@@ -63,26 +68,27 @@ const BLUE = {
   text: "#244f9e",
 };
 const DAY_ROW_HEIGHT = 64;
+const NO_SHOW_GRACE_MIN = 20;
 
 function statusLabel(status: BookingStatus): string {
   if (status === "pending") return "Aanvraag";
-  if (status === "proposed_by_company") return "Wacht op klant";
-  if (status === "pending_reschedule_approval") return "Verplaatsen?";
+  if (status === "reschedule_requested") return "Wijziging aangevraagd";
   if (status === "confirmed") return "Geaccepteerd";
-  if (status === "declined") return "Geweigerd";
-  if (status === "cancelled_with_fee") return "Geannuleerd (fee)";
-  if (status === "cancelled_by_customer") return "Geannuleerd";
+  if (status === "checked_in") return "Aangekomen";
+  if (status === "completed") return "Afgerond";
+  if (status === "cancelled") return "Geannuleerd";
+  if (status === "no_show") return "No-show";
   return "Status";
 }
 
 function statusPalette(status: BookingStatus): { bg: string; text: string; border: string } {
   if (status === "pending") return { bg: "#fff4df", text: "#9a6600", border: "#f1d29a" };
-  if (status === "proposed_by_company") return { bg: "#e8f0ff", text: "#2a5fcf", border: "#c6d8ff" };
-  if (status === "pending_reschedule_approval") return { bg: "#eaf6ff", text: "#0f6d99", border: "#c7e8fa" };
+  if (status === "reschedule_requested") return { bg: "#eaf6ff", text: "#0f6d99", border: "#c7e8fa" };
   if (status === "confirmed") return { bg: "#e6f7ec", text: "#1f7a3f", border: "#b6e3c2" };
-  if (status === "declined") return { bg: "#ffedf1", text: "#c63957", border: "#f7c8d4" };
-  if (status === "cancelled_with_fee") return { bg: "#fff1e8", text: "#af552a", border: "#f3d2be" };
-  if (status === "cancelled_by_customer") return { bg: "#f4f4f4", text: "#6b6b6b", border: "#d8d8d8" };
+  if (status === "checked_in") return { bg: "#e8f4ff", text: "#1d5fa7", border: "#c9ddf8" };
+  if (status === "completed") return { bg: "#e8fff3", text: "#147547", border: "#b9f0d2" };
+  if (status === "no_show") return { bg: "#fff1e8", text: "#af552a", border: "#f3d2be" };
+  if (status === "cancelled") return { bg: "#f4f4f4", text: "#6b6b6b", border: "#d8d8d8" };
   return { bg: "#f4f4f4", text: "#6b6b6b", border: "#d8d8d8" };
 }
 
@@ -104,6 +110,38 @@ function formatTime(ms: number): string {
 
 function formatTimeRange(startAtMs: number, endAtMs: number): string {
   return `${formatTime(startAtMs)} - ${formatTime(endAtMs)}`;
+}
+
+type CompanyPaymentState = {
+  label: string;
+  tone: "neutral" | "danger";
+};
+
+function normalizeCompanyPaymentStatus(booking: Booking): string {
+  const direct = String(booking.paymentStatus ?? "").trim().toLowerCase();
+  if (direct) return direct === "cancelled" ? "canceled" : direct;
+  const mollie = String(booking.mollieStatus ?? "").trim().toLowerCase();
+  if (mollie) return mollie === "cancelled" ? "canceled" : mollie;
+  return "";
+}
+
+function isCompanyPaymentSettled(booking: Booking): boolean {
+  const paymentStatus = normalizeCompanyPaymentStatus(booking);
+  if (!paymentStatus) return true; // legacy bookings
+  return paymentStatus === "paid";
+}
+
+function companyPaymentState(booking: Booking): CompanyPaymentState | null {
+  const paymentStatus = normalizeCompanyPaymentStatus(booking);
+  if (!paymentStatus) return null;
+  if (paymentStatus === "paid") return { label: "Betaling gelukt", tone: "neutral" };
+  if (paymentStatus === "open" || paymentStatus === "pending_payment") {
+    return { label: "Wacht op betaling van klant", tone: "neutral" };
+  }
+  if (paymentStatus === "failed") return { label: "Betaling mislukt", tone: "danger" };
+  if (paymentStatus === "canceled") return { label: "Betaling geannuleerd", tone: "danger" };
+  if (paymentStatus === "expired") return { label: "Betaling verlopen", tone: "danger" };
+  return { label: `Betaalstatus: ${paymentStatus}`, tone: "neutral" };
 }
 
 function toFriendlyError(error: unknown): string {
@@ -208,11 +246,12 @@ function createEmptyCounts(): DayCounts {
   return {
     total: 0,
     pending: 0,
-    proposed: 0,
-    reschedulePending: 0,
+    rescheduleRequested: 0,
     confirmed: 0,
-    declined: 0,
+    checkedIn: 0,
+    completed: 0,
     cancelled: 0,
+    noShow: 0,
   };
 }
 
@@ -262,9 +301,11 @@ function BookingSection({
         <View style={styles.sectionList}>
           {items.map((booking) => {
             const palette = statusPalette(booking.status);
+            const paymentSettled = isCompanyPaymentSettled(booking);
+            const paymentState = companyPaymentState(booking);
             const isPending = booking.status === "pending";
-            const isReschedulePending = booking.status === "pending_reschedule_approval";
-            const needsDecision = isPending || isReschedulePending;
+            const isReschedulePending = booking.status === "reschedule_requested" && booking.proposalBy === "customer";
+            const needsDecision = paymentSettled && (isPending || isReschedulePending);
             const isBusy = busyBookingId === booking.id;
             const isSelected = selectedBookingId === booking.id;
 
@@ -294,8 +335,25 @@ function BookingSection({
                 <Text style={styles.bookingMeta}>{booking.customerName}</Text>
                 <Text style={styles.bookingMeta}>Medewerker: {booking.staffName}</Text>
                 <Text style={styles.bookingMeta}>{formatDateTime(booking.startAtMs)}</Text>
+                {paymentState && !paymentSettled ? (
+                  <View style={styles.bookingPaymentHint}>
+                    <Ionicons
+                      name={paymentState.tone === "danger" ? "alert-circle-outline" : "card-outline"}
+                      size={13}
+                      color={paymentState.tone === "danger" ? COLORS.danger : BLUE.primary}
+                    />
+                    <Text
+                      style={[
+                        styles.bookingPaymentHintText,
+                        paymentState.tone === "danger" && styles.bookingPaymentHintTextDanger,
+                      ]}
+                    >
+                      {paymentState.label}
+                    </Text>
+                  </View>
+                ) : null}
 
-                {booking.status === "proposed_by_company" && booking.proposedStartAtMs ? (
+                {booking.status === "reschedule_requested" && booking.proposalBy === "company" && booking.proposedStartAtMs ? (
                   <View style={styles.proposalPreview}>
                     <Ionicons name="time-outline" size={13} color={BLUE.primary} />
                     <Text style={styles.proposalPreviewText}>
@@ -303,7 +361,7 @@ function BookingSection({
                     </Text>
                   </View>
                 ) : null}
-                {booking.status === "proposed_by_company" && booking.proposalNote ? (
+                {booking.status === "reschedule_requested" && booking.proposalBy === "company" && booking.proposalNote ? (
                   <View style={styles.proposalNoteCard}>
                     <Ionicons name="chatbubble-ellipses-outline" size={13} color="#3861bf" />
                     <Text style={styles.proposalNoteText}>{booking.proposalNote}</Text>
@@ -344,7 +402,7 @@ function BookingSection({
                   </View>
                 ) : null}
 
-                {isPending ? (
+                {paymentSettled && (isPending || booking.status === "confirmed") ? (
                   <Pressable
                     style={[styles.proposeBtn, isBusy && styles.disabled]}
                     onPress={() => onPropose(booking)}
@@ -355,7 +413,7 @@ function BookingSection({
                     ) : (
                       <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
                     )}
-                    <Text style={styles.proposeBtnText}>{isBusy ? "Bezig..." : "Nieuwe tijd kiezen + bericht"}</Text>
+                    <Text style={styles.proposeBtnText}>{isBusy ? "Bezig..." : "Andere tijd voorstellen"}</Text>
                   </Pressable>
                 ) : null}
               </Pressable>
@@ -416,6 +474,9 @@ export default function BookingDashboardScreen() {
   const [proposeError, setProposeError] = useState<string | null>(null);
   const [selectedProposedStartAtMs, setSelectedProposedStartAtMs] = useState<number | null>(null);
   const [proposalNote, setProposalNote] = useState("");
+  const [checkInModalBooking, setCheckInModalBooking] = useState<Booking | null>(null);
+  const [checkInCode, setCheckInCode] = useState("");
+  const [checkInExpiresAtMs, setCheckInExpiresAtMs] = useState(0);
 
   const [calendarView, setCalendarView] = useState<CalendarViewMode>("day");
   const [calendarFilter, setCalendarFilter] = useState<CalendarFilter>("active");
@@ -427,25 +488,49 @@ export default function BookingDashboardScreen() {
 
   const calendarAnim = useRef(new Animated.Value(1)).current;
 
-  const actionRequiredBookings = useMemo(
+  const paymentReadyBookings = useMemo(
+    () => bookings.filter((row) => isCompanyPaymentSettled(row)),
+    [bookings]
+  );
+  const awaitingPaymentBookings = useMemo(
     () =>
       sortByStart(
-        bookings.filter((row) => row.status === "pending" || row.status === "pending_reschedule_approval")
+        bookings.filter(
+          (row) =>
+            !isCompanyPaymentSettled(row) &&
+            row.status !== "completed" &&
+            row.status !== "cancelled" &&
+            row.status !== "no_show"
+        )
       ),
     [bookings]
   );
+  const actionRequiredBookings = useMemo(
+    () =>
+      sortByStart(
+        paymentReadyBookings.filter(
+          (row) => row.status === "pending" || (row.status === "reschedule_requested" && row.proposalBy === "customer")
+        )
+      ),
+    [paymentReadyBookings]
+  );
   const waitingCustomerBookings = useMemo(
-    () => sortByStart(bookings.filter((row) => row.status === "proposed_by_company")),
-    [bookings]
+    () => sortByStart(paymentReadyBookings.filter((row) => row.status === "reschedule_requested" && row.proposalBy === "company")),
+    [paymentReadyBookings]
   );
   const upcomingBookings = useMemo(() => {
     const now = Date.now();
-    return sortByStart(bookings.filter((row) => row.status === "confirmed" && row.startAtMs >= now));
-  }, [bookings]);
-  const rejectedBookings = useMemo(() => sortByStart(bookings.filter((row) => row.status === "declined")), [bookings]);
+    return sortByStart(
+      paymentReadyBookings.filter((row) => (row.status === "confirmed" || row.status === "checked_in") && row.startAtMs >= now)
+    );
+  }, [paymentReadyBookings]);
+  const completedBookings = useMemo(
+    () => sortByStart(paymentReadyBookings.filter((row) => row.status === "completed")),
+    [paymentReadyBookings]
+  );
+  const noShowBookings = useMemo(() => sortByStart(paymentReadyBookings.filter((row) => row.status === "no_show")), [paymentReadyBookings]);
   const cancelledBookings = useMemo(
-    () =>
-      sortByStart(bookings.filter((row) => row.status === "cancelled_by_customer" || row.status === "cancelled_with_fee")),
+    () => sortByStart(bookings.filter((row) => row.status === "cancelled")),
     [bookings]
   );
 
@@ -453,14 +538,14 @@ export default function BookingDashboardScreen() {
 
   const filteredCalendarBookings = useMemo(() => {
     if (calendarFilter === "all") return bookings;
-    return bookings.filter(
+    return paymentReadyBookings.filter(
       (booking) =>
         booking.status === "pending" ||
-        booking.status === "pending_reschedule_approval" ||
-        booking.status === "proposed_by_company" ||
-        booking.status === "confirmed"
+        booking.status === "reschedule_requested" ||
+        booking.status === "confirmed" ||
+        booking.status === "checked_in"
     );
-  }, [bookings, calendarFilter]);
+  }, [bookings, calendarFilter, paymentReadyBookings]);
 
   const bookingsByDate = useMemo(() => {
     const map: Record<string, Booking[]> = {};
@@ -487,11 +572,12 @@ export default function BookingDashboardScreen() {
       const next = map[booking.bookingDate];
       next.total += 1;
       if (booking.status === "pending") next.pending += 1;
-      if (booking.status === "proposed_by_company") next.proposed += 1;
-      if (booking.status === "pending_reschedule_approval") next.reschedulePending += 1;
+      if (booking.status === "reschedule_requested") next.rescheduleRequested += 1;
       if (booking.status === "confirmed") next.confirmed += 1;
-      if (booking.status === "declined") next.declined += 1;
-      if (booking.status === "cancelled_by_customer" || booking.status === "cancelled_with_fee") next.cancelled += 1;
+      if (booking.status === "checked_in") next.checkedIn += 1;
+      if (booking.status === "completed") next.completed += 1;
+      if (booking.status === "cancelled") next.cancelled += 1;
+      if (booking.status === "no_show") next.noShow += 1;
     });
 
     return map;
@@ -502,6 +588,14 @@ export default function BookingDashboardScreen() {
   const selectedBooking = useMemo(
     () => bookings.find((row) => row.id === selectedBookingId) ?? null,
     [bookings, selectedBookingId]
+  );
+  const selectedBookingPaymentSettled = useMemo(
+    () => (selectedBooking ? isCompanyPaymentSettled(selectedBooking) : true),
+    [selectedBooking]
+  );
+  const selectedBookingPaymentState = useMemo(
+    () => (selectedBooking ? companyPaymentState(selectedBooking) : null),
+    [selectedBooking]
   );
   const hasRouteMatch = useMemo(
     () => Boolean(routeBookingId && bookings.some((booking) => booking.id === routeBookingId)),
@@ -546,10 +640,16 @@ export default function BookingDashboardScreen() {
   }, [timelineBounds]);
 
   const hasBookings = bookings.length > 0;
+  const appBaseUrl = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl")
+    .trim()
+    .replace(/\/+$/, "");
+  const checkInUrl = checkInModalBooking && checkInCode
+    ? `${appBaseUrl}/check-in?bookingId=${encodeURIComponent(checkInModalBooking.id)}&code=${encodeURIComponent(checkInCode)}`
+    : "";
   const totalIncome = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.status === "confirmed")
+        .filter((booking) => booking.status === "completed")
         .reduce((sum, booking) => sum + Number(booking.servicePrice ?? 0), 0),
     [bookings]
   );
@@ -559,7 +659,7 @@ export default function BookingDashboardScreen() {
     const month = now.getMonth();
     return bookings
       .filter((booking) => {
-        if (booking.status !== "confirmed") return false;
+        if (booking.status !== "completed") return false;
         const d = new Date(booking.startAtMs);
         return d.getFullYear() === year && d.getMonth() === month;
       })
@@ -587,6 +687,12 @@ export default function BookingDashboardScreen() {
     setProposeError(null);
     setSelectedProposedStartAtMs(null);
     setProposalNote("");
+  }, []);
+
+  const closeCheckInModal = useCallback(() => {
+    setCheckInModalBooking(null);
+    setCheckInCode("");
+    setCheckInExpiresAtMs(0);
   }, []);
 
   const proposeDateOptions = useMemo(() => {
@@ -800,7 +906,7 @@ export default function BookingDashboardScreen() {
   }, [proposeDate, proposeModalBooking]);
 
   const setStatus = useCallback(
-    async (booking: Booking, nextStatus: "confirmed" | "declined") => {
+    async (booking: Booking, nextStatus: "confirmed" | "cancelled") => {
       if (!viewerId || busyBookingId) return;
 
       const previousStatus = booking.status;
@@ -810,7 +916,7 @@ export default function BookingDashboardScreen() {
       );
 
       try {
-        if (booking.status === "pending_reschedule_approval") {
+        if (booking.status === "reschedule_requested" && booking.proposalBy === "customer") {
           await respondToCustomerRescheduleByCompany(
             booking.id,
             booking.companyId,
@@ -869,7 +975,8 @@ export default function BookingDashboardScreen() {
           row.id === proposeModalBooking.id
             ? {
                 ...row,
-                status: "proposed_by_company",
+                status: "reschedule_requested",
+                proposalBy: "company",
                 proposedStartAtMs: selectedProposedStartAtMs,
                 proposalNote: cleanedNote || undefined,
               }
@@ -901,9 +1008,65 @@ export default function BookingDashboardScreen() {
 
   const onReject = useCallback(
     (booking: Booking) => {
-      setStatus(booking, "declined").catch(() => null);
+      setStatus(booking, "cancelled").catch(() => null);
     },
     [setStatus]
+  );
+
+  const onOpenCheckInQr = useCallback(
+    async (booking: Booking) => {
+      if (busyBookingId) return;
+      setBusyBookingId(booking.id);
+      try {
+        const payload = await generateBookingCheckInCodeByCompany(booking.id, booking.companyId);
+        setCheckInModalBooking(booking);
+        setCheckInCode(payload.code);
+        setCheckInExpiresAtMs(payload.expiresAtMs);
+      } catch (error) {
+        Alert.alert("QR genereren mislukt", toFriendlyError(error));
+      } finally {
+        setBusyBookingId(null);
+      }
+    },
+    [busyBookingId]
+  );
+
+  const onCompleteBooking = useCallback(
+    async (booking: Booking) => {
+      if (busyBookingId) return;
+      setBusyBookingId(booking.id);
+      try {
+        await markBookingCompletedByCompany(booking.id, booking.companyId);
+        setBookings((current) =>
+          current.map((row) => (row.id === booking.id ? { ...row, status: "completed" } : row))
+        );
+        Alert.alert("Afgerond", "Afspraak is gemarkeerd als afgerond.");
+      } catch (error) {
+        Alert.alert("Afsluiten mislukt", toFriendlyError(error));
+      } finally {
+        setBusyBookingId(null);
+      }
+    },
+    [busyBookingId]
+  );
+
+  const onReportNoShow = useCallback(
+    async (booking: Booking) => {
+      if (busyBookingId) return;
+      setBusyBookingId(booking.id);
+      try {
+        await reportBookingNoShowByCompany({ bookingId: booking.id, companyId: booking.companyId });
+        setBookings((current) =>
+          current.map((row) => (row.id === booking.id ? { ...row, status: "no_show" } : row))
+        );
+        Alert.alert("No-show gemeld", "Deze afspraak is als no-show geregistreerd.");
+      } catch (error) {
+        Alert.alert("No-show mislukt", toFriendlyError(error));
+      } finally {
+        setBusyBookingId(null);
+      }
+    },
+    [busyBookingId]
   );
 
   function openBookingFromCalendar(booking: Booking) {
@@ -937,10 +1100,11 @@ export default function BookingDashboardScreen() {
                 <Text style={[styles.weekDayDate, active && styles.weekDayDateActive]}>{parseDateKey(dateKey).getDate()}</Text>
                 <View style={styles.weekCountDotRow}>
                   {counts.pending ? <View style={[styles.weekDot, { backgroundColor: "#f9b73f" }]} /> : null}
-                  {counts.reschedulePending ? <View style={[styles.weekDot, { backgroundColor: "#5ca3e5" }]} /> : null}
-                  {counts.proposed ? <View style={[styles.weekDot, { backgroundColor: "#678cf1" }]} /> : null}
+                  {counts.rescheduleRequested ? <View style={[styles.weekDot, { backgroundColor: "#5ca3e5" }]} /> : null}
                   {counts.confirmed ? <View style={[styles.weekDot, { backgroundColor: "#34b36b" }]} /> : null}
-                  {counts.declined ? <View style={[styles.weekDot, { backgroundColor: "#e45b7f" }]} /> : null}
+                  {counts.checkedIn ? <View style={[styles.weekDot, { backgroundColor: "#4d82cf" }]} /> : null}
+                  {counts.completed ? <View style={[styles.weekDot, { backgroundColor: "#2b9c58" }]} /> : null}
+                  {counts.noShow ? <View style={[styles.weekDot, { backgroundColor: "#d97a3a" }]} /> : null}
                 </View>
               </Pressable>
             );
@@ -1050,12 +1214,12 @@ export default function BookingDashboardScreen() {
                 <View style={styles.weekOverviewMetricRow}>
                   <Text style={styles.weekOverviewMetricLabel}>Actie nodig</Text>
                   <Text style={[styles.weekOverviewMetricValue, { color: "#a66a00" }]}>
-                    {counts.pending + counts.reschedulePending}
+                    {counts.pending + counts.rescheduleRequested}
                   </Text>
                 </View>
                 <View style={styles.weekOverviewMetricRow}>
                   <Text style={styles.weekOverviewMetricLabel}>Wacht op klant</Text>
-                  <Text style={[styles.weekOverviewMetricValue, { color: "#2a5fcf" }]}>{counts.proposed}</Text>
+                  <Text style={[styles.weekOverviewMetricValue, { color: "#2a5fcf" }]}>{counts.rescheduleRequested}</Text>
                 </View>
                 <View style={styles.weekOverviewMetricRow}>
                   <Text style={styles.weekOverviewMetricLabel}>Bevestigd</Text>
@@ -1157,7 +1321,7 @@ export default function BookingDashboardScreen() {
               <Text style={styles.incomeValue}>EUR {thisMonthIncome.toFixed(2)}</Text>
             </View>
             <View style={styles.incomeCard}>
-              <Text style={styles.incomeLabel}>Totale bevestigde omzet</Text>
+              <Text style={styles.incomeLabel}>Totale afgeronde omzet</Text>
               <Text style={styles.incomeValue}>EUR {totalIncome.toFixed(2)}</Text>
             </View>
           </View>
@@ -1287,6 +1451,23 @@ export default function BookingDashboardScreen() {
                   <Text style={styles.selectedBookingMeta}>
                     {formatDateTime(selectedBooking.startAtMs)} • {formatTimeRange(selectedBooking.startAtMs, selectedBooking.endAtMs)}
                   </Text>
+                  {selectedBookingPaymentState ? (
+                    <View style={styles.bookingPaymentHint}>
+                      <Ionicons
+                        name={selectedBookingPaymentState.tone === "danger" ? "alert-circle-outline" : "card-outline"}
+                        size={13}
+                        color={selectedBookingPaymentState.tone === "danger" ? COLORS.danger : BLUE.primary}
+                      />
+                      <Text
+                        style={[
+                          styles.bookingPaymentHintText,
+                          selectedBookingPaymentState.tone === "danger" && styles.bookingPaymentHintTextDanger,
+                        ]}
+                      >
+                        {selectedBookingPaymentState.label}
+                      </Text>
+                    </View>
+                  ) : null}
                   {selectedBooking.proposedStartAtMs ? (
                     <Text style={styles.selectedBookingMeta}>
                       Voorstel:{" "}
@@ -1304,18 +1485,28 @@ export default function BookingDashboardScreen() {
                       <Text style={styles.proposalNoteText}>{selectedBooking.proposalNote}</Text>
                     </View>
                   ) : null}
-                  {selectedBooking.status === "confirmed" ? (
+                  {selectedBookingPaymentSettled &&
+                  (selectedBooking.status === "confirmed" ||
+                    selectedBooking.status === "checked_in" ||
+                    selectedBooking.status === "completed" ||
+                    selectedBooking.status === "no_show") ? (
                     <>
                       <Text style={styles.selectedBookingMeta}>Tel: {selectedBooking.customerPhone || "-"}</Text>
                       <Text style={styles.selectedBookingMeta}>E-mail: {selectedBooking.customerEmail || "-"}</Text>
                     </>
+                  ) : !selectedBookingPaymentSettled ? (
+                    <Text style={styles.selectedBookingPrivateHint}>
+                      Contactgegevens worden zichtbaar zodra de betaling is afgerond.
+                    </Text>
                   ) : (
                     <Text style={styles.selectedBookingPrivateHint}>
                       Contactgegevens zichtbaar na definitieve bevestiging.
                     </Text>
                   )}
 
-                  {selectedBooking.status === "pending" || selectedBooking.status === "pending_reschedule_approval" ? (
+                  {selectedBookingPaymentSettled &&
+                  (selectedBooking.status === "pending" ||
+                    (selectedBooking.status === "reschedule_requested" && selectedBooking.proposalBy === "customer")) ? (
                     <View style={styles.pendingActionsRow}>
                       <Pressable
                         style={[styles.acceptBtn, busyBookingId === selectedBooking.id && styles.disabled]}
@@ -1330,7 +1521,7 @@ export default function BookingDashboardScreen() {
                         <Text style={styles.acceptBtnText}>
                           {busyBookingId === selectedBooking.id
                             ? "Bezig..."
-                            : selectedBooking.status === "pending_reschedule_approval"
+                            : selectedBooking.status === "reschedule_requested"
                               ? "Akkoord verplaatsen"
                               : "Accepteren"}
                         </Text>
@@ -1349,7 +1540,7 @@ export default function BookingDashboardScreen() {
                         <Text style={styles.rejectBtnText}>
                           {busyBookingId === selectedBooking.id
                             ? "Bezig..."
-                            : selectedBooking.status === "pending_reschedule_approval"
+                            : selectedBooking.status === "reschedule_requested"
                               ? "Afwijzen"
                               : "Weigeren"}
                         </Text>
@@ -1357,7 +1548,8 @@ export default function BookingDashboardScreen() {
                     </View>
                   ) : null}
 
-                  {selectedBooking.status === "pending" ? (
+                  {selectedBookingPaymentSettled &&
+                  (selectedBooking.status === "pending" || selectedBooking.status === "confirmed") ? (
                     <Pressable
                       style={[styles.proposeBtn, busyBookingId === selectedBooking.id && styles.disabled]}
                       onPress={() => onPropose(selectedBooking)}
@@ -1369,8 +1561,43 @@ export default function BookingDashboardScreen() {
                         <Ionicons name="swap-horizontal-outline" size={14} color={BLUE.primary} />
                       )}
                       <Text style={styles.proposeBtnText}>
-                        {busyBookingId === selectedBooking.id ? "Bezig..." : "Nieuwe tijd kiezen + bericht"}
+                        {busyBookingId === selectedBooking.id ? "Bezig..." : "Andere tijd voorstellen"}
                       </Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedBookingPaymentSettled && selectedBooking.status === "confirmed" ? (
+                    <Pressable
+                      style={[styles.proposeBtn, busyBookingId === selectedBooking.id && styles.disabled]}
+                      onPress={() => onOpenCheckInQr(selectedBooking)}
+                      disabled={busyBookingId === selectedBooking.id}
+                    >
+                      <Ionicons name="qr-code-outline" size={14} color={BLUE.primary} />
+                      <Text style={styles.proposeBtnText}>Toon QR check-in</Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedBookingPaymentSettled && selectedBooking.status === "checked_in" ? (
+                    <Pressable
+                      style={[styles.acceptBtn, busyBookingId === selectedBooking.id && styles.disabled]}
+                      onPress={() => onCompleteBooking(selectedBooking)}
+                      disabled={busyBookingId === selectedBooking.id}
+                    >
+                      <Ionicons name="checkmark-done-outline" size={14} color="#fff" />
+                      <Text style={styles.acceptBtnText}>Markeer als afgerond</Text>
+                    </Pressable>
+                  ) : null}
+
+                  {selectedBookingPaymentSettled &&
+                  selectedBooking.status === "confirmed" &&
+                  Date.now() >= selectedBooking.startAtMs + NO_SHOW_GRACE_MIN * 60_000 ? (
+                    <Pressable
+                      style={[styles.rejectBtn, busyBookingId === selectedBooking.id && styles.disabled]}
+                      onPress={() => onReportNoShow(selectedBooking)}
+                      disabled={busyBookingId === selectedBooking.id}
+                    >
+                      <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
+                      <Text style={styles.rejectBtnText}>No-show melden</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -1387,6 +1614,18 @@ export default function BookingDashboardScreen() {
               />
             ) : (
               <>
+                <BookingSection
+                  title="Wacht op betaling"
+                  items={awaitingPaymentBookings}
+                  emptyText="Geen boekingen die nog op betaling wachten."
+                  busyBookingId={busyBookingId}
+                  selectedBookingId={selectedBookingId}
+                  onAccept={onAccept}
+                  onReject={onReject}
+                  onPropose={onPropose}
+                  onSelect={openBookingFromCalendar}
+                />
+
                 <BookingSection
                   title="Actie nodig"
                   items={actionRequiredBookings}
@@ -1423,11 +1662,11 @@ export default function BookingDashboardScreen() {
                   onSelect={openBookingFromCalendar}
                 />
 
-                {rejectedBookings.length > 0 ? (
+                {completedBookings.length > 0 ? (
                   <BookingSection
-                    title="Geweigerd"
-                    items={rejectedBookings}
-                    emptyText="Nog geen geweigerde aanvragen."
+                    title="Afgerond"
+                    items={completedBookings}
+                    emptyText="Nog geen afgeronde afspraken."
                     busyBookingId={busyBookingId}
                     selectedBookingId={selectedBookingId}
                     onAccept={onAccept}
@@ -1450,11 +1689,72 @@ export default function BookingDashboardScreen() {
                     onSelect={openBookingFromCalendar}
                   />
                 ) : null}
+
+                {noShowBookings.length > 0 ? (
+                  <BookingSection
+                    title="No-show"
+                    items={noShowBookings}
+                    emptyText="Nog geen no-show meldingen."
+                    busyBookingId={busyBookingId}
+                    selectedBookingId={selectedBookingId}
+                    onAccept={onAccept}
+                    onReject={onReject}
+                    onPropose={onPropose}
+                    onSelect={openBookingFromCalendar}
+                  />
+                ) : null}
               </>
             )}
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={Boolean(checkInModalBooking && checkInCode)}
+        transparent
+        animationType="fade"
+        onRequestClose={closeCheckInModal}
+      >
+        <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalBackdropPress} onPress={closeCheckInModal} />
+          <View style={styles.modalSheetWrap}>
+            <View style={styles.modalSheet}>
+              <View style={styles.modalTopRow}>
+                <View style={styles.modalTitleWrap}>
+                  <Text style={styles.modalTitle}>QR check-in</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Laat klant deze code openen en bevestigen
+                  </Text>
+                </View>
+                <Pressable style={styles.modalCloseBtn} onPress={closeCheckInModal}>
+                  <Ionicons name="close" size={16} color={COLORS.muted} />
+                </Pressable>
+              </View>
+              <View style={styles.requestedTimeCard}>
+                <Ionicons name="qr-code-outline" size={14} color={BLUE.primary} />
+                <Text style={styles.requestedTimeText}>Code: {checkInCode || "-"}</Text>
+              </View>
+              {checkInUrl ? (
+                <Image
+                  source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(checkInUrl)}` }}
+                  style={styles.qrPreview}
+                  contentFit="contain"
+                />
+              ) : null}
+              <Text style={styles.selectedBookingMeta}>
+                Geldig tot: {checkInExpiresAtMs ? formatDateTime(checkInExpiresAtMs) : "-"}
+              </Text>
+              <Text style={styles.selectedBookingMeta}>
+                Link: {checkInUrl || "-"}
+              </Text>
+              <Pressable style={styles.modalPrimaryBtn} onPress={closeCheckInModal}>
+                <Ionicons name="checkmark-outline" size={14} color="#fff" />
+                <Text style={styles.modalPrimaryBtnText}>Sluiten</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={Boolean(proposeModalBooking)}
@@ -2069,6 +2369,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  qrPreview: {
+    width: 220,
+    height: 220,
+    alignSelf: "center",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#fff",
+  },
   selectedBookingPrivateHint: {
     color: "#2a5fcf",
     fontSize: 12,
@@ -2219,6 +2528,27 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 12,
     fontWeight: "700",
+  },
+  bookingPaymentHint: {
+    marginTop: 2,
+    minHeight: 30,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: BLUE.border,
+    backgroundColor: "#edf3ff",
+    paddingHorizontal: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  bookingPaymentHintText: {
+    flex: 1,
+    color: BLUE.text,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  bookingPaymentHintTextDanger: {
+    color: COLORS.danger,
   },
   proposalPreview: {
     marginTop: 2,

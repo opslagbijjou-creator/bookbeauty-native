@@ -76,9 +76,9 @@ exports.handler = async (event) => {
 
   const bookingStatus = String(booking.status || "").trim().toLowerCase();
   if (
-    bookingStatus === "declined" ||
-    bookingStatus === "cancelled_by_customer" ||
-    bookingStatus === "cancelled_with_fee"
+    bookingStatus === "cancelled" ||
+    bookingStatus === "no_show" ||
+    bookingStatus === "completed"
   ) {
     return response(409, {
       ok: false,

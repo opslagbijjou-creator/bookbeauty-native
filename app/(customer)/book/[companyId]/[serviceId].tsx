@@ -93,6 +93,39 @@ function showBookingMessage(title: string, message: string): void {
   Alert.alert(title, message);
 }
 
+function parseDoubleBookingWarning(message: string): { bookingId: string; timeLabel: string; text: string } | null {
+  const raw = String(message || "");
+  if (!raw.startsWith("DOUBLE_BOOKING_WARNING::")) return null;
+  const parts = raw.split("::");
+  return {
+    bookingId: String(parts[1] || "").trim(),
+    timeLabel: String(parts[2] || "").trim(),
+    text: String(parts[3] || "Let op: je hebt al een afspraak vandaag.").trim(),
+  };
+}
+
+async function askDoubleBookingAction(payload: { bookingId: string; timeLabel: string; text: string }): Promise<"continue" | "change_date" | "view_booking" | "cancel"> {
+  if (Platform.OS === "web") {
+    const shouldContinue = globalThis.confirm?.(
+      `Let op: je hebt vandaag al een afspraak om ${payload.timeLabel}.\n\nKlik op OK om door te gaan met boeken, of Annuleren om een andere datum te kiezen.`
+    );
+    return shouldContinue ? "continue" : "change_date";
+  }
+
+  return await new Promise((resolve) => {
+    Alert.alert(
+      "Dubbele afspraak",
+      `Let op: je hebt vandaag al een afspraak om ${payload.timeLabel}. Wat wil je doen?`,
+      [
+        { text: "Doorgaan met boeken", onPress: () => resolve("continue") },
+        { text: "Andere datum kiezen", onPress: () => resolve("change_date"), style: "cancel" },
+        { text: "Bekijk mijn afspraak", onPress: () => resolve("view_booking") },
+      ],
+      { cancelable: true, onDismiss: () => resolve("cancel") }
+    );
+  });
+}
+
 async function createMollieCheckoutForBooking(
   bookingId: string,
   companyId: string,
@@ -217,6 +250,8 @@ export default function BookServiceScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const slotAnim = useRef(new Animated.Value(1)).current;
+  const scrollRef = useRef<ScrollView | null>(null);
+  const formAnchorYRef = useRef(0);
 
   const selectedSlot = useMemo(
     () => slots.find((slot) => slot.key === selectedSlotKey) ?? null,
@@ -386,6 +421,16 @@ export default function BookServiceScreen() {
     }).start();
   }, [selectedDate, slotsLoading, slots.length, slotAnim]);
 
+  function onSelectSlot(slotKey: string) {
+    setSelectedSlotKey(slotKey);
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, formAnchorYRef.current - 20),
+        animated: true,
+      });
+    }, 90);
+  }
+
   async function onSubmit() {
     if (!uid) {
       Alert.alert("Login vereist", "Log in om een afspraak te boeken.");
@@ -396,23 +441,54 @@ export default function BookServiceScreen() {
       return;
     }
     if (!service || !selectedStaff || !selectedSlot || !canBook || submitting) return;
+    const serviceRef = service;
+    const staffRef = selectedStaff;
+    const slotRef = selectedSlot;
+    const customerUid = uid;
     setSubmitting(true);
-    const amountCents = Math.max(0, Math.round(Number(service.price || 0) * 100));
+    const amountCents = Math.max(0, Math.round(Number(serviceRef.price || 0) * 100));
     let createdBookingId = "";
-    try {
-      const result = await createBooking({
+
+    async function createBookingDoc(allowDoubleBooking = false) {
+      return createBooking({
         companyId,
-        serviceId: service.id,
-        staffId: selectedStaff.id,
-        staffName: selectedStaff.displayName,
-        customerId: uid,
+        serviceId: serviceRef.id,
+        staffId: staffRef.id,
+        staffName: staffRef.displayName,
+        customerId: customerUid,
         customerName,
         customerPhone,
         customerEmail: auth.currentUser?.email ?? "",
         note,
-        startAtMs: selectedSlot.startAtMs,
+        startAtMs: slotRef.startAtMs,
         referralPostId: refPostId || undefined,
+        allowDoubleBooking,
       });
+    }
+
+    try {
+      let result;
+      try {
+        result = await createBookingDoc(false);
+      } catch (error: any) {
+        const warning = parseDoubleBookingWarning(error?.message ?? "");
+        if (!warning) throw error;
+
+        const action = await askDoubleBookingAction(warning);
+        if (action === "view_booking") {
+          router.push(`/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(warning.bookingId)}` as never);
+          return;
+        }
+        if (action === "change_date" || action === "cancel") {
+          setSelectedSlotKey("");
+          return;
+        }
+        result = await createBookingDoc(true);
+      }
+
+      if (!result) {
+        return;
+      }
       createdBookingId = result.bookingId;
       const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId, companyId, amountCents);
       await openExternalCheckout(checkoutUrl);
@@ -456,10 +532,12 @@ export default function BookServiceScreen() {
           </View>
         ) : (
           <ScrollView
+            ref={scrollRef}
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+            automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
           >
           <View style={styles.heroCard}>
             <Text style={styles.heroOverline}>{companyName}</Text>
@@ -493,7 +571,7 @@ export default function BookServiceScreen() {
                 />
                 <Text style={styles.flowText}>
                   {autoConfirm
-                    ? "Deze salon bevestigt boekingen automatisch."
+                    ? "Deze salon bevestigt boekingen automatisch. Bij automatische acceptatie is de salon volledig verantwoordelijk voor planning en beschikbaarheid."
                     : "Deze salon werkt met goedkeuring: status start als in afwachting."}
                 </Text>
               </View>
@@ -628,7 +706,7 @@ export default function BookServiceScreen() {
                           <Pressable
                             key={slot.key}
                             style={[styles.slotBtn, active && styles.slotBtnActive]}
-                            onPress={() => setSelectedSlotKey(slot.key)}
+                            onPress={() => onSelectSlot(slot.key)}
                           >
                             <Text style={[styles.slotStartText, active && styles.slotStartTextActive]}>
                               {times.start}
@@ -669,7 +747,12 @@ export default function BookServiceScreen() {
                 ) : null}
               </View>
 
-              <View style={styles.card}>
+              <View
+                style={styles.card}
+                onLayout={(event) => {
+                  formAnchorYRef.current = event.nativeEvent.layout.y;
+                }}
+              >
                 <View style={styles.sectionTitleRow}>
                   <Ionicons name="person-outline" size={16} color={COLORS.primary} />
                   <Text style={styles.sectionTitle}>Jouw gegevens</Text>

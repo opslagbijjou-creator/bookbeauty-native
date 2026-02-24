@@ -80,7 +80,7 @@ function mapState(booking: BookingSnapshot | null): PaymentResultState {
     booking.paymentStatus === "cancelled" ||
     booking.mollieStatus === "canceled" ||
     booking.mollieStatus === "cancelled" ||
-    booking.bookingStatus === "cancelled_by_customer"
+    booking.bookingStatus === "cancelled"
   ) {
     return "canceled";
   }

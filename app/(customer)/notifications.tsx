@@ -15,7 +15,10 @@ import { COLORS } from "../../lib/ui";
 
 function typeIcon(type: CustomerNotification["type"]): keyof typeof Ionicons.glyphMap {
   if (type === "booking_confirmed") return "checkmark-circle-outline";
-  if (type === "booking_declined") return "close-circle-outline";
+  if (type === "booking_cancelled") return "close-circle-outline";
+  if (type === "booking_checked_in") return "scan-outline";
+  if (type === "booking_completed") return "checkmark-done-circle-outline";
+  if (type === "booking_no_show") return "alert-circle-outline";
   if (type === "booking_time_proposed") return "time-outline";
   if (type === "booking_reschedule_approved") return "swap-horizontal-outline";
   if (type === "booking_reschedule_declined") return "close-outline";
@@ -40,7 +43,10 @@ function isBookingNotification(type: CustomerNotification["type"]): boolean {
   return (
     type === "booking_created" ||
     type === "booking_confirmed" ||
-    type === "booking_declined" ||
+    type === "booking_cancelled" ||
+    type === "booking_checked_in" ||
+    type === "booking_completed" ||
+    type === "booking_no_show" ||
     type === "booking_time_proposed" ||
     type === "booking_reschedule_approved" ||
     type === "booking_reschedule_declined" ||

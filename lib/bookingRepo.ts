@@ -23,8 +23,14 @@ import { getUserRole } from "./authRepo";
 import { fetchCompanyById } from "./companyRepo";
 import {
   notifyCompanyOnBookingCancelledByCustomer,
+  notifyCompanyOnBookingCheckedIn,
+  notifyCompanyOnBookingCompleted,
+  notifyCompanyOnBookingNoShow,
   notifyCompanyOnBookingProposalDecisionByCustomer,
   notifyCompanyOnRescheduleRequestByCustomer,
+  notifyCustomerOnBookingCheckedIn,
+  notifyCustomerOnBookingCompleted,
+  notifyCustomerOnBookingNoShow,
   notifyCustomerOnBookingPaymentPending,
   notifyCustomerOnBookingProposalByCompany,
   notifyCustomerOnBookingStatusByCompany,
@@ -34,12 +40,12 @@ import {
 export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export type BookingStatus =
   | "pending"
-  | "proposed_by_company"
-  | "pending_reschedule_approval"
   | "confirmed"
-  | "declined"
-  | "cancelled_by_customer"
-  | "cancelled_with_fee";
+  | "reschedule_requested"
+  | "checked_in"
+  | "completed"
+  | "cancelled"
+  | "no_show";
 export type BookingProposalBy = "company" | "customer";
 export type BookingPaymentStatus =
   | "open"
@@ -136,6 +142,16 @@ export type Booking = {
   customerConfirmedAtMs?: number;
   companyConfirmedAtMs?: number;
   confirmedAtMs?: number;
+  checkInCode?: string;
+  checkInCodeExpiresAtMs?: number;
+  checkInQrGeneratedAtMs?: number;
+  checkInConfirmedAtMs?: number;
+  checkInRejectedAtMs?: number;
+  checkInRejectedReason?: string;
+  completedAtMs?: number;
+  noShowReportedAtMs?: number;
+  reminder24hAtMs?: number;
+  reminderSameDayAtMs?: number;
   customerId: string;
   customerName: string;
   customerPhone: string;
@@ -165,6 +181,7 @@ export type CreateBookingPayload = {
   customerEmail?: string;
   note?: string;
   startAtMs: number;
+  allowDoubleBooking?: boolean;
   referralPostId?: string;
 };
 
@@ -209,6 +226,8 @@ const FREE_CANCELLATION_HOURS = 24;
 const LATE_CANCEL_FEE_PERCENT = 15;
 const SAME_DAY_RESCHEDULE_LIMIT = 1;
 const DEFAULT_INFLUENCER_COMMISSION_PERCENT = 5;
+const CHECK_IN_CODE_TTL_MIN = 30;
+const NO_SHOW_GRACE_MIN = 20;
 
 function toMillis(value: unknown): number {
   const v = value as Timestamp | Date | { toMillis?: () => number } | undefined;
@@ -311,18 +330,23 @@ function normalizeInterval(value: unknown): number {
 }
 
 function normalizeStatus(raw: unknown): BookingStatus {
-  const value = String(raw ?? "pending");
+  const value = String(raw ?? "pending").trim().toLowerCase();
   if (
     value === "pending" ||
-    value === "proposed_by_company" ||
-    value === "pending_reschedule_approval" ||
     value === "confirmed" ||
-    value === "declined" ||
-    value === "cancelled_by_customer" ||
-    value === "cancelled_with_fee"
+    value === "reschedule_requested" ||
+    value === "checked_in" ||
+    value === "completed" ||
+    value === "cancelled" ||
+    value === "no_show"
   ) {
     return value;
   }
+  // Backward compatibility with legacy statuses in older bookings.
+  if (value === "proposed_by_company" || value === "pending_reschedule_approval") return "reschedule_requested";
+  if (value === "declined" || value === "cancelled_by_customer" || value === "cancelled_with_fee") return "cancelled";
+  if (value === "checked-in") return "checked_in";
+  if (value === "no-show") return "no_show";
   return "pending";
 }
 
@@ -427,6 +451,14 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
   const customerConfirmedAtMs = toMillis(data.customerConfirmedAt);
   const companyConfirmedAtMs = toMillis(data.companyConfirmedAt);
   const confirmedAtMs = toMillis(data.confirmedAt);
+  const checkInCode = String(data.checkInCode ?? "").trim();
+  const checkInCodeExpiresAtMs = toMillis(data.checkInCodeExpiresAt);
+  const checkInQrGeneratedAtMs = toMillis(data.checkInQrGeneratedAt);
+  const checkInConfirmedAtMs = toMillis(data.checkInConfirmedAt);
+  const checkInRejectedAtMs = toMillis(data.checkInRejectedAt);
+  const checkInRejectedReason = String(data.checkInRejectedReason ?? "").trim();
+  const completedAtMs = toMillis(data.completedAt);
+  const noShowReportedAtMs = toMillis(data.noShowReportedAt);
   const proposalByRaw = String(data.proposalBy ?? "");
   const proposalBy: BookingProposalBy | undefined =
     proposalByRaw === "company" || proposalByRaw === "customer" ? proposalByRaw : undefined;
@@ -489,6 +521,16 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
     customerConfirmedAtMs: customerConfirmedAtMs || undefined,
     companyConfirmedAtMs: companyConfirmedAtMs || undefined,
     confirmedAtMs: confirmedAtMs || undefined,
+    checkInCode: checkInCode || undefined,
+    checkInCodeExpiresAtMs: checkInCodeExpiresAtMs || undefined,
+    checkInQrGeneratedAtMs: checkInQrGeneratedAtMs || undefined,
+    checkInConfirmedAtMs: checkInConfirmedAtMs || undefined,
+    checkInRejectedAtMs: checkInRejectedAtMs || undefined,
+    checkInRejectedReason: checkInRejectedReason || undefined,
+    completedAtMs: completedAtMs || undefined,
+    noShowReportedAtMs: noShowReportedAtMs || undefined,
+    reminder24hAtMs: toMillis(data.reminder24hAt) || undefined,
+    reminderSameDayAtMs: toMillis(data.reminderSameDayAt) || undefined,
     customerId: String(data.customerId ?? ""),
     customerName: String(data.customerName ?? ""),
     customerPhone: String(data.customerPhone ?? ""),
@@ -575,11 +617,11 @@ function isSameCalendarDay(dateKey: string, ms: number): boolean {
 }
 
 function isFinalConfirmed(status: BookingStatus): boolean {
-  return status === "confirmed";
+  return status === "confirmed" || status === "checked_in" || status === "completed";
 }
 
 function isOpenRequest(status: BookingStatus): boolean {
-  return status === "pending" || status === "proposed_by_company" || status === "pending_reschedule_approval";
+  return status === "pending" || status === "reschedule_requested";
 }
 
 function computeCancellationFee(startAtMs: number, servicePrice: number, nowMs: number): { percent: number; amount: number } {
@@ -941,8 +983,8 @@ export async function fetchCompanyBookingInsights(companyId: string, top = 3): P
   let totalBookings = 0;
 
   rows.forEach((row) => {
-    // "declined" is not a successful booking, so we skip it in profile stats.
-    if (row.status === "declined") return;
+    // Cancelled/no-show rows are not counted as successful bookings for profile stats.
+    if (row.status === "cancelled" || row.status === "no_show") return;
     totalBookings += 1;
 
     const serviceId = row.serviceId?.trim() ?? "";
@@ -1003,15 +1045,16 @@ export async function fetchInfluencerCommissionSummary(influencerId: string): Pr
     if (!Number.isFinite(amount) || amount <= 0) return;
 
     estimatedCommissionTotal += amount;
-    if (row.status === "confirmed") {
+    if (row.status === "completed") {
       confirmedBookings += 1;
       confirmedCommissionTotal += amount;
       return;
     }
     if (
       row.status === "pending" ||
-      row.status === "proposed_by_company" ||
-      row.status === "pending_reschedule_approval"
+      row.status === "reschedule_requested" ||
+      row.status === "confirmed" ||
+      row.status === "checked_in"
     ) {
       pendingCommissionTotal += amount;
     }
@@ -1193,12 +1236,14 @@ export async function listAvailableBookingSlots(params: {
 
 function assertStatusTransition(current: BookingStatus, next: BookingStatus, actor: "company" | "customer"): void {
   if (actor === "company") {
-    if (current !== "pending") throw new Error("Alleen aanvragen in afwachting kunnen worden beoordeeld.");
-    if (next !== "confirmed" && next !== "declined") throw new Error("Ongeldige status.");
+    if (current !== "pending" && current !== "reschedule_requested") {
+      throw new Error("Alleen open aanvragen kunnen worden beoordeeld.");
+    }
+    if (next !== "confirmed" && next !== "cancelled") throw new Error("Ongeldige status.");
     return;
   }
 
-  if (next !== "cancelled_by_customer" && next !== "cancelled_with_fee") throw new Error("Ongeldige status.");
+  if (next !== "cancelled") throw new Error("Ongeldige status.");
   if (!isOpenRequest(current) && current !== "confirmed") {
     throw new Error("Deze boeking kan niet meer geannuleerd worden.");
   }
@@ -1229,6 +1274,29 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
   const now = Date.now();
   if (payload.startAtMs < now - 60_000) {
     throw new Error("Dit tijdslot ligt in het verleden.");
+  }
+  const bookingDateForPayload = formatDateKey(new Date(payload.startAtMs));
+
+  if (!payload.allowDoubleBooking) {
+    const customerSameDaySnap = await getDocs(
+      query(
+        collection(db, "bookings"),
+        where("customerId", "==", payload.customerId),
+        where("bookingDate", "==", bookingDateForPayload)
+      )
+    );
+    const existingConflict = customerSameDaySnap.docs
+      .map((row) => toBooking(row.id, row.data()))
+      .find((row) => row.status === "confirmed" || row.status === "checked_in");
+    if (existingConflict) {
+      const conflictTime = new Date(existingConflict.startAtMs).toLocaleTimeString("nl-NL", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      throw new Error(
+        `DOUBLE_BOOKING_WARNING::${existingConflict.id}::${conflictTime}::Je hebt vandaag al een afspraak om ${conflictTime}.`
+      );
+    }
   }
 
   const bookingRef = doc(collection(db, "bookings"));
@@ -1381,6 +1449,11 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
 
     const status: BookingStatus = settings.autoConfirm ? "confirmed" : "pending";
     const nowDate = new Date();
+    const reminder24hAtMs = payload.startAtMs - 24 * 60 * 60 * 1000;
+    const reminderSameDayAtMs = payload.startAtMs - 2 * 60 * 60 * 1000;
+    const reminder24hAt = reminder24hAtMs > now + 60_000 ? new Date(reminder24hAtMs) : null;
+    const reminderSameDayAt =
+      reminderSameDayAtMs > now + 60_000 ? new Date(reminderSameDayAtMs) : null;
 
     lockIds.forEach((lockId, index) => {
       transaction.set(doc(db, "booking_slot_locks", lockId), {
@@ -1428,6 +1501,16 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       customerConfirmedAt: nowDate,
       companyConfirmedAt: status === "confirmed" ? nowDate : null,
       confirmedAt: status === "confirmed" ? nowDate : null,
+      reminder24hAt,
+      reminderSameDayAt,
+      checkInCode: "",
+      checkInCodeExpiresAt: null,
+      checkInQrGeneratedAt: null,
+      checkInConfirmedAt: null,
+      checkInRejectedAt: null,
+      checkInRejectedReason: "",
+      completedAt: null,
+      noShowReportedAt: null,
       customerId: payload.customerId,
       customerName: payload.customerName.trim(),
       customerPhone: payload.customerPhone.trim(),
@@ -1476,7 +1559,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
 export async function setBookingStatusByCompany(
   bookingId: string,
   companyId: string,
-  status: "confirmed" | "declined"
+  status: "confirmed" | "declined" | "cancelled"
 ): Promise<void> {
   let notifyPayload: {
     customerId: string;
@@ -1497,7 +1580,8 @@ export async function setBookingStatusByCompany(
       throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
     }
 
-    assertStatusTransition(row.status, status, "company");
+    const targetStatus: BookingStatus = status === "declined" ? "cancelled" : status;
+    assertStatusTransition(row.status, targetStatus, "company");
     notifyPayload = {
       customerId: row.customerId,
       companyId: row.companyId,
@@ -1506,13 +1590,13 @@ export async function setBookingStatusByCompany(
       serviceName: row.serviceName,
     };
 
-    if (status === "declined") {
+    if (targetStatus === "cancelled") {
       releaseSlotLocks(transaction, getBookingLockIds(row));
     }
 
     transaction.update(ref, {
-      status,
-      ...(status === "confirmed"
+      status: targetStatus,
+      ...(targetStatus === "confirmed"
         ? {
             companyConfirmedAt: serverTimestamp(),
             confirmedAt: serverTimestamp(),
@@ -1542,7 +1626,7 @@ export async function setBookingStatusByCompany(
       serviceId: statusNotifyPayload.serviceId,
       serviceName: statusNotifyPayload.serviceName,
       bookingId,
-      status,
+      status: status === "declined" ? "cancelled" : status,
       actorId,
       actorRole,
     }).catch(() => null);
@@ -1634,7 +1718,9 @@ export async function proposeBookingTimeByCompany(params: {
   if (!canCompanyManageBooking(row)) {
     throw new Error("Deze boeking kan pas worden aangepast nadat de betaling is afgerond.");
   }
-  if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
+  if (row.status !== "pending" && row.status !== "confirmed") {
+    throw new Error("Alleen open of bevestigde afspraken kunnen een alternatief tijdstip krijgen.");
+  }
   if (!Number.isFinite(proposedStartAtMs) || proposedStartAtMs <= Date.now() - 60_000) {
     throw new Error("Kies een geldig toekomstig tijdstip.");
   }
@@ -1662,7 +1748,7 @@ export async function proposeBookingTimeByCompany(params: {
   });
 
   await updateDoc(doc(db, "bookings", bookingId), {
-    status: "proposed_by_company",
+    status: "reschedule_requested",
     proposalBy: "company",
     proposedBookingDate: window.bookingDate,
     proposedStartAt: new Date(window.startAtMs),
@@ -1699,7 +1785,9 @@ export async function proposeNextBookingTimeByCompany(
   if (!canCompanyManageBooking(row)) {
     throw new Error("Deze boeking kan pas worden aangepast nadat de betaling is afgerond.");
   }
-  if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
+  if (row.status !== "pending" && row.status !== "confirmed") {
+    throw new Error("Alleen open of bevestigde afspraken kunnen een alternatief tijdstip krijgen.");
+  }
 
   const nextSlot = await suggestNextSlotForBooking(row);
   if (!nextSlot) throw new Error("Geen alternatief tijdslot beschikbaar op deze dag.");
@@ -1731,7 +1819,7 @@ export async function acceptCompanyProposalByCustomer(bookingId: string, custome
 
     const row = toBooking(snap.id, snap.data());
     if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
-    if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
+    if (row.status !== "reschedule_requested" || row.proposalBy !== "company") {
       throw new Error("Er is geen voorstel van het bedrijf om te bevestigen.");
     }
     notifyPayload = {
@@ -1820,7 +1908,7 @@ export async function declineCompanyProposalByCustomer(bookingId: string, custom
 
     const row = toBooking(snap.id, snap.data());
     if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
-    if (row.status !== "proposed_by_company" || row.proposalBy !== "company") {
+    if (row.status !== "reschedule_requested" || row.proposalBy !== "company") {
       throw new Error("Er is geen voorstel om te weigeren.");
     }
     notifyPayload = {
@@ -1833,7 +1921,7 @@ export async function declineCompanyProposalByCustomer(bookingId: string, custom
 
     releaseSlotLocks(transaction, getBookingLockIds(row));
     transaction.update(ref, {
-      status: "declined",
+      status: "cancelled",
       ...clearProposalPatch(),
       updatedAt: serverTimestamp(),
     });
@@ -1901,7 +1989,7 @@ export async function requestSameDayRescheduleByCustomer(
   });
 
   await updateDoc(doc(db, "bookings", bookingId), {
-    status: "pending_reschedule_approval",
+    status: "reschedule_requested",
     proposalBy: "customer",
     proposedBookingDate: window.bookingDate,
     proposedStartAt: new Date(window.startAtMs),
@@ -1949,7 +2037,7 @@ export async function respondToCustomerRescheduleByCompany(
     if (!canCompanyManageBooking(row)) {
       throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
     }
-    if (row.status !== "pending_reschedule_approval" || row.proposalBy !== "customer") {
+    if (row.status !== "reschedule_requested" || row.proposalBy !== "customer") {
       throw new Error("Er staat geen verplaatsingsaanvraag open.");
     }
     notifyPayload = {
@@ -2064,7 +2152,7 @@ export async function cancelBookingByCustomer(
     const computed = paymentSettled
       ? computeCancellationFee(row.startAtMs, row.servicePrice, nowMs)
       : { percent: 0, amount: 0 };
-    const nextStatus: BookingStatus = computed.percent > 0 ? "cancelled_with_fee" : "cancelled_by_customer";
+    const nextStatus: BookingStatus = "cancelled";
 
     assertStatusTransition(row.status, nextStatus, "customer");
 
@@ -2118,6 +2206,308 @@ export async function cancelBookingByCustomer(
   return feeResult;
 }
 
+function generateCheckInCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export async function generateBookingCheckInCodeByCompany(
+  bookingId: string,
+  companyId: string
+): Promise<{ code: string; expiresAtMs: number }> {
+  const nowMs = Date.now();
+  const expiresAtMs = nowMs + CHECK_IN_CODE_TTL_MIN * 60_000;
+  const code = generateCheckInCode();
+
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+
+    const row = toBooking(snap.id, snap.data());
+    if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (row.status !== "confirmed") throw new Error("Check-in QR kan alleen voor bevestigde afspraken.");
+    if (!canCompanyManageBooking(row)) {
+      throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
+    }
+
+    transaction.update(ref, {
+      checkInCode: code,
+      checkInCodeExpiresAt: new Date(expiresAtMs),
+      checkInQrGeneratedAt: serverTimestamp(),
+      checkInRejectedAt: null,
+      checkInRejectedReason: "",
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  return { code, expiresAtMs };
+}
+
+export async function confirmBookingCheckInByCustomer(params: {
+  bookingId: string;
+  customerId: string;
+  code: string;
+}): Promise<void> {
+  const { bookingId, customerId, code } = params;
+  const cleanCode = String(code || "").trim();
+  if (!cleanCode) throw new Error("Check-in code ontbreekt.");
+
+  const notifyPayload = await runTransaction<
+    | {
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+        customerId: string;
+        customerName: string;
+      }
+    | null
+  >(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+    const row = toBooking(snap.id, snap.data());
+
+    if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze booking.");
+    if (row.status === "checked_in") return null;
+    if (row.status !== "confirmed") throw new Error("Deze afspraak kan nu niet ingecheckt worden.");
+    if (!isPaymentSettledForCompany(row)) {
+      throw new Error("Check-in kan pas nadat de betaling is afgerond.");
+    }
+    if (!row.checkInCode || row.checkInCode !== cleanCode) {
+      throw new Error("Ongeldige check-in code.");
+    }
+    if (row.checkInCodeExpiresAtMs && row.checkInCodeExpiresAtMs < Date.now()) {
+      throw new Error("Deze check-in code is verlopen.");
+    }
+
+    const payload = {
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+      customerId: row.customerId,
+      customerName: row.customerName,
+    };
+
+    transaction.update(ref, {
+      status: "checked_in",
+      checkInConfirmedAt: serverTimestamp(),
+      checkInCode: "",
+      checkInCodeExpiresAt: null,
+      checkInRejectedAt: null,
+      checkInRejectedReason: "",
+      updatedAt: serverTimestamp(),
+    });
+    return payload;
+  });
+
+  if (notifyPayload) {
+    notifyCompanyOnBookingCheckedIn({
+      companyId: notifyPayload.companyId,
+      customerId: notifyPayload.customerId,
+      customerName: notifyPayload.customerName,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+    notifyCustomerOnBookingCheckedIn({
+      customerId: notifyPayload.customerId,
+      companyId: notifyPayload.companyId,
+      companyName: notifyPayload.companyName,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+  }
+}
+
+export async function rejectBookingCheckInByCustomer(params: {
+  bookingId: string;
+  customerId: string;
+  code: string;
+  reason: string;
+}): Promise<void> {
+  const { bookingId, customerId, code, reason } = params;
+  const cleanCode = String(code || "").trim();
+  const cleanReason = String(reason || "").trim().slice(0, 280);
+  if (!cleanCode) throw new Error("Check-in code ontbreekt.");
+  if (cleanReason.length < 3) throw new Error("Geef een reden op.");
+
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+    const row = toBooking(snap.id, snap.data());
+
+    if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze booking.");
+    if (row.status !== "confirmed") throw new Error("Deze afspraak kan nu niet geweigerd worden.");
+    if (!row.checkInCode || row.checkInCode !== cleanCode) {
+      throw new Error("Ongeldige check-in code.");
+    }
+    if (row.checkInCodeExpiresAtMs && row.checkInCodeExpiresAtMs < Date.now()) {
+      throw new Error("Deze check-in code is verlopen.");
+    }
+
+    transaction.update(ref, {
+      checkInRejectedAt: serverTimestamp(),
+      checkInRejectedReason: cleanReason,
+      updatedAt: serverTimestamp(),
+    });
+  });
+
+  await addDoc(collection(db, "admin_reports"), {
+    type: "checkin_rejected",
+    bookingId,
+    customerId,
+    reason: cleanReason,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+}
+
+export async function markBookingCompletedByCompany(
+  bookingId: string,
+  companyId: string
+): Promise<void> {
+  const notifyPayload = await runTransaction<
+    | {
+        customerId: string;
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null
+  >(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+    const row = toBooking(snap.id, snap.data());
+
+    if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze booking.");
+    if (!canCompanyManageBooking(row)) {
+      throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
+    }
+    if (row.status !== "checked_in") {
+      throw new Error("Alleen ingecheckte afspraken kunnen worden afgerond.");
+    }
+
+    const payload = {
+      customerId: row.customerId,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
+
+    transaction.update(ref, {
+      status: "completed",
+      completedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return payload;
+  });
+
+  if (notifyPayload) {
+    notifyCompanyOnBookingCompleted({
+      companyId: notifyPayload.companyId,
+      customerId: notifyPayload.customerId,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+    notifyCustomerOnBookingCompleted({
+      customerId: notifyPayload.customerId,
+      companyId: notifyPayload.companyId,
+      companyName: notifyPayload.companyName,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+  }
+}
+
+export async function reportBookingNoShowByCompany(params: {
+  bookingId: string;
+  companyId: string;
+  reason?: string;
+}): Promise<void> {
+  const { bookingId, companyId, reason } = params;
+  const cleanReason = String(reason || "").trim().slice(0, 240);
+
+  const notifyPayload = await runTransaction<
+    | {
+        customerId: string;
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null
+  >(db, async (transaction) => {
+    const ref = doc(db, "bookings", bookingId);
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) throw new Error("Boeking niet gevonden.");
+    const row = toBooking(snap.id, snap.data());
+
+    if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze booking.");
+    if (!canCompanyManageBooking(row)) {
+      throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
+    }
+    if (row.status !== "confirmed") {
+      throw new Error("No-show kan alleen op bevestigde afspraken.");
+    }
+    if (Date.now() < row.startAtMs + NO_SHOW_GRACE_MIN * 60_000) {
+      throw new Error(`No-show kan pas ${NO_SHOW_GRACE_MIN} minuten na de starttijd gemeld worden.`);
+    }
+
+    const payload = {
+      customerId: row.customerId,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
+
+    releaseSlotLocks(transaction, getBookingLockIds(row));
+    transaction.update(ref, {
+      status: "no_show",
+      noShowReportedAt: serverTimestamp(),
+      noShowReason: cleanReason,
+      updatedAt: serverTimestamp(),
+    });
+    return payload;
+  });
+
+  if (notifyPayload) {
+    notifyCompanyOnBookingNoShow({
+      companyId: notifyPayload.companyId,
+      customerId: notifyPayload.customerId,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+    notifyCustomerOnBookingNoShow({
+      customerId: notifyPayload.customerId,
+      companyId: notifyPayload.companyId,
+      companyName: notifyPayload.companyName,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+  }
+
+  await addDoc(collection(db, "admin_reports"), {
+    type: "booking_no_show",
+    bookingId,
+    companyId,
+    reason: cleanReason,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }).catch(() => null);
+}
+
 export async function fetchCompanyBookingSlotsForDate(params: {
   companyId: string;
   staffId?: string;
@@ -2153,5 +2543,5 @@ export async function acceptBooking(bookingId: string, businessId: string): Prom
 }
 
 export async function rejectBooking(bookingId: string, businessId: string): Promise<void> {
-  return setBookingStatusByCompany(bookingId, businessId, "declined");
+  return setBookingStatusByCompany(bookingId, businessId, "cancelled");
 }
