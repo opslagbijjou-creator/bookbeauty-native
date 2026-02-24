@@ -415,6 +415,107 @@ async function fetchPaymentWithPlatformKey(paymentId) {
   return client.payments.get(paymentId, { testmode: isTestMode() });
 }
 
+async function syncPaymentById(db, paymentId, options = {}) {
+  const source = String(options.source || "webhook").trim() || "webhook";
+  const cleanPaymentId = String(paymentId || "").trim();
+  if (!cleanPaymentId) {
+    return {
+      ok: false,
+      source,
+      paymentId: "",
+      error: "missing_payment_id",
+    };
+  }
+
+  const bookingDoc = await findBookingByPaymentId(db, cleanPaymentId);
+  if (!bookingDoc) {
+    return {
+      ok: true,
+      source,
+      paymentId: cleanPaymentId,
+      bookingFound: false,
+    };
+  }
+
+  const booking = bookingDoc.data() || {};
+  const payment = await fetchPaymentWithPlatformKey(cleanPaymentId);
+  const statusRaw = String(payment?.status || "").trim().toLowerCase();
+  const mapped = mapStatus(statusRaw);
+  const previousPaymentStatus = normalizeStatus(booking.paymentStatus || booking?.mollie?.status);
+  const bookingStatus = String(booking.status || "").trim().toLowerCase();
+
+  const nowTs = nowServerTs();
+  const bookingId = bookingDoc.id;
+  const basePatch = {
+    paymentStatus: mapped.paymentStatus,
+    molliePaymentId: cleanPaymentId,
+    mollie: {
+      ...(booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {}),
+      paymentId: cleanPaymentId,
+      status: statusRaw,
+      paidAt: payment?.paidAt ? new Date(payment.paidAt) : booking?.mollie?.paidAt || null,
+      updatedAt: nowTs,
+      lastWebhookAt: nowTs,
+    },
+    updatedAt: nowTs,
+  };
+
+  if (shouldCancelBookingForPaymentStatus(mapped.paymentStatus) && isBookingActiveStatus(bookingStatus)) {
+    const batch = db.batch();
+    const lockIds = Array.isArray(booking.lockIds)
+      ? booking.lockIds.map((row) => String(row || "").trim()).filter(Boolean)
+      : [];
+    lockIds.forEach((lockId) => {
+      batch.delete(db.collection("booking_slot_locks").doc(lockId));
+    });
+    batch.set(
+      bookingDoc.ref,
+      {
+        ...basePatch,
+        status: "cancelled",
+        cancellationFeePercent: Number(booking.cancellationFeePercent || 0) || 0,
+        cancellationFeeAmount: Number(booking.cancellationFeeAmount || 0) || 0,
+        proposalBy: "",
+        proposedBookingDate: "",
+        proposedStartAt: null,
+        proposedEndAt: null,
+        proposedOccupiedStartAt: null,
+        proposedOccupiedEndAt: null,
+        proposedAt: null,
+        proposalNote: "",
+        lockIds: [],
+        lockSeat: null,
+      },
+      { merge: true }
+    );
+    await batch.commit();
+  } else {
+    await bookingDoc.ref.set(basePatch, { merge: true });
+  }
+
+  if (mapped.paymentStatus === "paid" && previousPaymentStatus !== "paid") {
+    await notifyOnPaidTransition(db, bookingId, { ...booking, paymentStatus: mapped.paymentStatus });
+  } else if (
+    (mapped.paymentStatus === "failed" || mapped.paymentStatus === "canceled" || mapped.paymentStatus === "expired") &&
+    previousPaymentStatus !== mapped.paymentStatus
+  ) {
+    await notifyCustomerOnPaymentProblem(db, bookingId, booking, mapped.paymentStatus);
+  }
+
+  return {
+    ok: true,
+    source,
+    paymentId: cleanPaymentId,
+    bookingFound: true,
+    bookingId,
+    paymentStatus: mapped.paymentStatus,
+    mollieStatus: statusRaw,
+    previousPaymentStatus,
+  };
+}
+
+exports.syncPaymentById = syncPaymentById;
+
 exports.handler = async (event) => {
   const method = String(event.httpMethod || "").toUpperCase();
   if (method === "OPTIONS") {
@@ -433,83 +534,18 @@ exports.handler = async (event) => {
 
   try {
     const db = getFirestore();
-    const bookingDoc = await findBookingByPaymentId(db, paymentId);
-    if (!bookingDoc) {
+    const result = await syncPaymentById(db, paymentId, { source: "webhook" });
+    if (!result.bookingFound) {
       console.log("[mollie-webhook] booking not found", { paymentId });
       return response(200, { ok: true });
     }
 
-    const booking = bookingDoc.data() || {};
-    const payment = await fetchPaymentWithPlatformKey(paymentId);
-    const statusRaw = String(payment?.status || "").trim().toLowerCase();
-    const mapped = mapStatus(statusRaw);
-    const previousPaymentStatus = normalizeStatus(booking.paymentStatus || booking?.mollie?.status);
-    const bookingStatus = String(booking.status || "").trim().toLowerCase();
-
-    const nowTs = nowServerTs();
-    const bookingId = bookingDoc.id;
-    const basePatch = {
-      paymentStatus: mapped.paymentStatus,
-      molliePaymentId: paymentId,
-      mollie: {
-        ...(booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {}),
-        paymentId,
-        status: statusRaw,
-        paidAt: payment?.paidAt ? new Date(payment.paidAt) : booking?.mollie?.paidAt || null,
-        updatedAt: nowTs,
-        lastWebhookAt: nowTs,
-      },
-      updatedAt: nowTs,
-    };
-
-    if (shouldCancelBookingForPaymentStatus(mapped.paymentStatus) && isBookingActiveStatus(bookingStatus)) {
-      const batch = db.batch();
-      const lockIds = Array.isArray(booking.lockIds)
-        ? booking.lockIds.map((row) => String(row || "").trim()).filter(Boolean)
-        : [];
-      lockIds.forEach((lockId) => {
-        batch.delete(db.collection("booking_slot_locks").doc(lockId));
-      });
-      batch.set(
-        bookingDoc.ref,
-        {
-          ...basePatch,
-          status: "cancelled",
-          cancellationFeePercent: Number(booking.cancellationFeePercent || 0) || 0,
-          cancellationFeeAmount: Number(booking.cancellationFeeAmount || 0) || 0,
-          proposalBy: "",
-          proposedBookingDate: "",
-          proposedStartAt: null,
-          proposedEndAt: null,
-          proposedOccupiedStartAt: null,
-          proposedOccupiedEndAt: null,
-          proposedAt: null,
-          proposalNote: "",
-          lockIds: [],
-          lockSeat: null,
-        },
-        { merge: true }
-      );
-      await batch.commit();
-    } else {
-      await bookingDoc.ref.set(basePatch, { merge: true });
-    }
-
-    if (mapped.paymentStatus === "paid" && previousPaymentStatus !== "paid") {
-      await notifyOnPaidTransition(db, bookingId, { ...booking, paymentStatus: mapped.paymentStatus });
-    } else if (
-      (mapped.paymentStatus === "failed" || mapped.paymentStatus === "canceled" || mapped.paymentStatus === "expired") &&
-      previousPaymentStatus !== mapped.paymentStatus
-    ) {
-      await notifyCustomerOnPaymentProblem(db, bookingId, booking, mapped.paymentStatus);
-    }
-
     console.log("[mollie-webhook] processed", {
-      bookingId,
-      paymentId,
-      mollieStatus: statusRaw,
-      paymentStatus: mapped.paymentStatus,
-      previousPaymentStatus,
+      bookingId: result.bookingId,
+      paymentId: result.paymentId,
+      mollieStatus: result.mollieStatus,
+      paymentStatus: result.paymentStatus,
+      previousPaymentStatus: result.previousPaymentStatus,
     });
 
     return response(200, { ok: true });

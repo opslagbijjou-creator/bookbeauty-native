@@ -1,6 +1,7 @@
 const { createMollieClient } = require("@mollie/api-client");
 const { getFirestore, admin } = require("./_firebaseAdmin");
 const { parseBody, requireEnv, response, toAmountValueFromCents } = require("./_mollieConnect");
+const { syncPaymentById } = require("./mollie-webhook");
 
 function toSafeInt(value) {
   const numeric = Number(value);
@@ -60,12 +61,12 @@ exports.handler = async (event) => {
 
   const db = getFirestore();
   const bookingRef = db.collection("bookings").doc(bookingId);
-  const bookingSnap = await bookingRef.get();
+  let bookingSnap = await bookingRef.get();
   if (!bookingSnap.exists) {
     return response(404, { ok: false, error: "Booking niet gevonden." });
   }
 
-  const booking = bookingSnap.data() || {};
+  let booking = bookingSnap.data() || {};
   const bookingCompanyId = String(booking.companyId || "").trim();
   if (bookingCompanyId && bookingCompanyId !== companyId) {
     return response(400, {
@@ -74,7 +75,28 @@ exports.handler = async (event) => {
     });
   }
 
-  const bookingStatus = String(booking.status || "").trim().toLowerCase();
+  let bookingStatus = String(booking.status || "").trim().toLowerCase();
+  let mollieNode = booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {};
+  let existingPaymentStatus = normalizePaymentStatus(booking.paymentStatus, mollieNode.status);
+  let existingCheckoutUrl = String(mollieNode.checkoutUrl || "").trim();
+  let existingPaymentId = String(mollieNode.paymentId || booking.molliePaymentId || "").trim();
+
+  if (
+    existingPaymentId &&
+    existingPaymentStatus &&
+    existingPaymentStatus !== "paid" &&
+    existingPaymentStatus !== "refunded"
+  ) {
+    await syncPaymentById(db, existingPaymentId, { source: "create-payment" }).catch(() => null);
+    bookingSnap = await bookingRef.get();
+    booking = bookingSnap.data() || booking;
+    bookingStatus = String(booking.status || "").trim().toLowerCase();
+    mollieNode = booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {};
+    existingPaymentStatus = normalizePaymentStatus(booking.paymentStatus, mollieNode.status);
+    existingCheckoutUrl = String(mollieNode.checkoutUrl || "").trim();
+    existingPaymentId = String(mollieNode.paymentId || booking.molliePaymentId || "").trim();
+  }
+
   if (
     bookingStatus === "cancelled" ||
     bookingStatus === "no_show" ||
@@ -85,11 +107,6 @@ exports.handler = async (event) => {
       error: "Deze boeking is geannuleerd of afgewezen. Maak een nieuwe boeking.",
     });
   }
-
-  const mollieNode = booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {};
-  const existingPaymentStatus = normalizePaymentStatus(booking.paymentStatus, mollieNode.status);
-  const existingCheckoutUrl = String(mollieNode.checkoutUrl || "").trim();
-  const existingPaymentId = String(mollieNode.paymentId || booking.molliePaymentId || "").trim();
 
   if (existingPaymentStatus === "paid") {
     return response(409, {

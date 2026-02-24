@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -186,6 +186,27 @@ async function openExternalCheckout(checkoutUrl: string): Promise<void> {
   await Linking.openURL(checkoutUrl);
 }
 
+async function syncBookingPaymentStatus(bookingId: string): Promise<void> {
+  const cleanBookingId = String(bookingId || "").trim();
+  if (!cleanBookingId) return;
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const endpoint =
+    Platform.OS === "web"
+      ? "/.netlify/functions/mollie-sync-payment"
+      : `${baseUrl}/.netlify/functions/mollie-sync-payment`;
+
+  await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bookingId: cleanBookingId,
+    }),
+  }).catch(() => null);
+}
+
 function bookingSection(booking: Booking, now: number): CustomerSectionKey {
   if (paymentNeedsAction(booking)) return "action";
   if (
@@ -215,6 +236,7 @@ export default function CustomerBookingsScreen() {
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [activeSection, setActiveSection] = useState<CustomerSectionKey>("action");
   const [focusedBookingId, setFocusedBookingId] = useState<string | null>(null);
+  const paymentSyncAtRef = useRef<Record<string, number>>({});
 
   const routeBookingId = useMemo(() => normalizeParamValue(params.bookingId), [params.bookingId]);
 
@@ -292,6 +314,28 @@ export default function CustomerBookingsScreen() {
       setActiveSection("history");
     }
   }, [activeSection, sections.action.length, sections.history.length, sections.upcoming.length]);
+
+  useEffect(() => {
+    const now = Date.now();
+    const toSync = items
+      .filter((row) => isPaymentPending(row))
+      .filter((row) => now - Number(paymentSyncAtRef.current[row.id] || 0) > 15_000)
+      .slice(0, 5);
+    if (!toSync.length) return;
+    let cancelled = false;
+
+    (async () => {
+      for (const row of toSync) {
+        if (cancelled) return;
+        paymentSyncAtRef.current[row.id] = Date.now();
+        await syncBookingPaymentStatus(row.id);
+      }
+    })().catch(() => null);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [items]);
 
   const activeItems = sections[activeSection];
   const hasFocusedBooking = Boolean(focusedBookingId && items.some((item) => item.id === focusedBookingId));

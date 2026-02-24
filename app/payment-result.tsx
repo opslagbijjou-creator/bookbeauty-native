@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -131,6 +131,27 @@ function iconColor(state: PaymentResultState): string {
   return "#cc3f59";
 }
 
+async function syncBookingPaymentStatus(bookingId: string): Promise<void> {
+  const cleanBookingId = String(bookingId || "").trim();
+  if (!cleanBookingId) return;
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const endpoint =
+    Platform.OS === "web"
+      ? "/.netlify/functions/mollie-sync-payment"
+      : `${baseUrl}/.netlify/functions/mollie-sync-payment`;
+
+  await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bookingId: cleanBookingId,
+    }),
+  }).catch(() => null);
+}
+
 export default function PaymentResultScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ bookingId?: string | string[] }>();
@@ -224,6 +245,29 @@ export default function PaymentResultScreen() {
       })
       .catch(() => setCompanyLocation(""));
   }, [booking?.companyId]);
+
+  useEffect(() => {
+    if (!bookingId || state !== "processing") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
+    const tick = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      await syncBookingPaymentStatus(bookingId);
+      if (cancelled) return;
+      if (attempts >= 8) return;
+      timer = setTimeout(tick, 2000);
+    };
+
+    timer = setTimeout(tick, 250);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [bookingId, state]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>

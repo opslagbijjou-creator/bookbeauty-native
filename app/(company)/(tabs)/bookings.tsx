@@ -261,6 +261,27 @@ function normalizeParamValue(value: string | string[] | undefined): string | nul
   return null;
 }
 
+async function syncBookingPaymentStatus(bookingId: string): Promise<void> {
+  const cleanBookingId = String(bookingId || "").trim();
+  if (!cleanBookingId) return;
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const endpoint =
+    Platform.OS === "web"
+      ? "/.netlify/functions/mollie-sync-payment"
+      : `${baseUrl}/.netlify/functions/mollie-sync-payment`;
+
+  await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bookingId: cleanBookingId,
+    }),
+  }).catch(() => null);
+}
+
 type BookingSectionProps = {
   title: string;
   items: Booking[];
@@ -487,6 +508,7 @@ export default function BookingDashboardScreen() {
   const routeBookingId = useMemo(() => normalizeParamValue(params.bookingId), [params.bookingId]);
 
   const calendarAnim = useRef(new Animated.Value(1)).current;
+  const paymentSyncAtRef = useRef<Record<string, number>>({});
 
   const paymentReadyBookings = useMemo(
     () => bookings.filter((row) => isCompanyPaymentSettled(row)),
@@ -843,6 +865,27 @@ export default function BookingDashboardScreen() {
     setCalendarView("day");
     setPendingRouteBookingId(null);
   }, [bookings, pendingRouteBookingId]);
+
+  useEffect(() => {
+    const now = Date.now();
+    const toSync = awaitingPaymentBookings
+      .filter((row) => now - Number(paymentSyncAtRef.current[row.id] || 0) > 15_000)
+      .slice(0, 5);
+    if (!toSync.length) return;
+    let cancelled = false;
+
+    (async () => {
+      for (const row of toSync) {
+        if (cancelled) return;
+        paymentSyncAtRef.current[row.id] = Date.now();
+        await syncBookingPaymentStatus(row.id);
+      }
+    })().catch(() => null);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [awaitingPaymentBookings]);
 
   useEffect(() => {
     calendarAnim.setValue(0.35);
