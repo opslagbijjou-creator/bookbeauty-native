@@ -93,7 +93,10 @@ function showBookingMessage(title: string, message: string): void {
   Alert.alert(title, message);
 }
 
-async function createMollieCheckoutForBooking(bookingId: string): Promise<string> {
+async function createMollieCheckoutForBooking(
+  bookingId: string,
+  amountCents: number
+): Promise<string> {
   const cleanBookingId = String(bookingId || "").trim();
   if (!cleanBookingId) {
     throw new Error("bookingId ontbreekt voor betaling.");
@@ -115,7 +118,10 @@ async function createMollieCheckoutForBooking(bookingId: string): Promise<string
       "Content-Type": "application/json",
       Authorization: `Bearer ${idToken}`,
     },
-    body: JSON.stringify({ bookingId: cleanBookingId }),
+    body: JSON.stringify({
+      bookingId: cleanBookingId,
+      amountCents: Math.max(0, Math.floor(Number(amountCents) || 0)),
+    }),
   }).catch(() => null);
 
   if (!res) {
@@ -378,6 +384,7 @@ export default function BookServiceScreen() {
     }
     if (!service || !selectedStaff || !selectedSlot || !canBook || submitting) return;
     setSubmitting(true);
+    const amountCents = Math.max(0, Math.round(Number(service.price || 0) * 100));
     let createdBookingId = "";
     try {
       const result = await createBooking({
@@ -394,7 +401,7 @@ export default function BookServiceScreen() {
         referralPostId: refPostId || undefined,
       });
       createdBookingId = result.bookingId;
-      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId);
+      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId, amountCents);
       await openExternalCheckout(checkoutUrl);
     } catch (error: any) {
       const fallbackMessage = error?.message ?? "Kon boeking of betaling niet starten.";

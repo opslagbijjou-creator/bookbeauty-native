@@ -23,12 +23,7 @@ function envSummary() {
     APP_BASE_URL: hasEnv("APP_BASE_URL"),
     MOLLIE_WEBHOOK_URL: hasEnv("MOLLIE_WEBHOOK_URL"),
     MOLLIE_MODE: hasEnv("MOLLIE_MODE"),
-    MOLLIE_OAUTH_CLIENT_ID: hasEnv("MOLLIE_OAUTH_CLIENT_ID"),
-    MOLLIE_OAUTH_CLIENT_SECRET: hasEnv("MOLLIE_OAUTH_CLIENT_SECRET"),
-    MOLLIE_OAUTH_REDIRECT_URI: hasEnv("MOLLIE_OAUTH_REDIRECT_URI"),
     MOLLIE_API_KEY_PLATFORM: hasEnv("MOLLIE_API_KEY_PLATFORM"),
-    FIREBASE_SERVICE_ACCOUNT_JSON: hasEnv("FIREBASE_SERVICE_ACCOUNT_JSON"),
-    FIREBASE_SERVICE_ACCOUNT_BASE64: hasEnv("FIREBASE_SERVICE_ACCOUNT_BASE64"),
   };
 }
 
@@ -42,8 +37,6 @@ exports.handler = async (event) => {
   }
 
   const env = envSummary();
-  const firebaseEnvPresent = env.FIREBASE_SERVICE_ACCOUNT_JSON || env.FIREBASE_SERVICE_ACCOUNT_BASE64;
-
   const mollieSdkInstalled = (() => {
     try {
       return Boolean(require("@mollie/api-client"));
@@ -61,21 +54,17 @@ exports.handler = async (event) => {
     firebaseAdminError = error instanceof Error ? error.message : "unknown_error";
   }
 
-  const oauthEnvOk =
+  const requiredEnvOk =
     env.APP_BASE_URL &&
     env.MOLLIE_WEBHOOK_URL &&
     env.MOLLIE_MODE &&
-    env.MOLLIE_OAUTH_CLIENT_ID &&
-    env.MOLLIE_OAUTH_CLIENT_SECRET &&
-    env.MOLLIE_OAUTH_REDIRECT_URI;
+    env.MOLLIE_API_KEY_PLATFORM;
 
   return response(200, {
     ok: true,
-    envVarsPresent: {
-      ...env,
-      firebaseAny: firebaseEnvPresent,
-      oauthCore: oauthEnvOk,
-    },
+    envVarsPresent: env,
+    platformCore: requiredEnvOk,
+    oauthCore: false,
     mollieSdkInstalled,
     firebaseAdminInitOk,
     firebaseAdminError,

@@ -1,48 +1,44 @@
+const { createMollieClient } = require("@mollie/api-client");
 const { getFirestore, admin } = require("./_firebaseAdmin");
-const {
-  extractBookingIdFromPayment,
-  getConnectedMollieClient,
-  isTestMode,
-  parseWebhookPaymentId,
-  response,
-  withAutoRefresh,
-} = require("./_mollieConnect");
+const { isTestMode, requireEnv, response } = require("./_mollieConnect");
 
-function mapMollieToPaymentStatus(mollieStatus) {
-  const value = String(mollieStatus || "").trim().toLowerCase();
-  if (value === "paid") return "paid";
-  if (value === "failed") return "failed";
-  if (value === "canceled") return "canceled";
-  if (value === "expired") return "failed";
-  if (value === "authorized") return "pending_payment";
-  if (value === "pending") return "pending_payment";
-  if (value === "open") return "pending_payment";
-  return "pending_payment";
+function parsePaymentIdFromWebhook(event) {
+  const bodyRaw = typeof event.body === "string" ? event.body.trim() : "";
+  const contentType = String(
+    event.headers?.["content-type"] || event.headers?.["Content-Type"] || ""
+  ).toLowerCase();
+
+  if (contentType.includes("application/json")) {
+    try {
+      const parsed = JSON.parse(bodyRaw || "{}");
+      return String(parsed?.id || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  if (bodyRaw.includes("=")) {
+    const form = new URLSearchParams(bodyRaw);
+    const fromForm = String(form.get("id") || "").trim();
+    if (fromForm) return fromForm;
+  }
+
+  if (bodyRaw && !bodyRaw.includes("{") && !bodyRaw.includes("=")) {
+    return bodyRaw;
+  }
+
+  return String(event.queryStringParameters?.id || "").trim();
 }
 
-function maybeUpdateMainStatus(currentStatus, mappedPaymentStatus) {
-  if (mappedPaymentStatus === "paid") return "paid";
-  if (mappedPaymentStatus === "failed") return "failed";
-  if (mappedPaymentStatus === "canceled") return "canceled";
-  return "pending_payment";
-}
-
-async function findBookingByPaymentId(db, paymentId) {
-  const snap = await db
-    .collection("bookings")
-    .where("molliePaymentId", "==", paymentId)
-    .limit(1)
-    .get();
-  if (!snap.empty) return snap.docs[0];
-
-  const nestedSnap = await db
-    .collection("bookings")
-    .where("mollie.paymentId", "==", paymentId)
-    .limit(1)
-    .get()
-    .catch(() => null);
-  if (nestedSnap && !nestedSnap.empty) return nestedSnap.docs[0];
-  return null;
+function mapStatus(mollieStatus) {
+  const normalized = String(mollieStatus || "").trim().toLowerCase();
+  if (normalized === "paid") {
+    return { status: "paid", paymentStatus: "paid", paid: true };
+  }
+  if (normalized === "failed" || normalized === "canceled" || normalized === "expired") {
+    return { status: "failed", paymentStatus: "failed", paid: false };
+  }
+  return { status: "pending_payment", paymentStatus: "pending_payment", paid: false };
 }
 
 exports.handler = async (event) => {
@@ -54,122 +50,97 @@ exports.handler = async (event) => {
     return response(405, { ok: false, error: "Method not allowed" });
   }
 
-  const paymentId = parseWebhookPaymentId(event);
+  const paymentId = parsePaymentIdFromWebhook(event);
   if (!paymentId) {
-    // Mollie verwacht snelle 200 responses; geen error terugsturen voor lege payloads.
     return response(200, { ok: true, received: true, skipped: "missing_payment_id" });
   }
 
-  const db = getFirestore();
-
   try {
-    const bookingDoc = await findBookingByPaymentId(db, paymentId);
-    if (!bookingDoc) {
+    const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
+    const mollieClient = createMollieClient({ apiKey });
+    const payment = await mollieClient.payments.get(paymentId, { testmode: isTestMode() });
+
+    const metadata = payment?.metadata && typeof payment.metadata === "object" ? payment.metadata : {};
+    const bookingId = String(metadata.bookingId || "").trim();
+    if (!bookingId) {
       return response(200, {
         ok: true,
         received: true,
-        skipped: "booking_not_found",
         paymentId,
+        skipped: "missing_booking_id_in_metadata",
       });
     }
 
-    const bookingId = bookingDoc.id;
-    const booking = bookingDoc.data() || {};
-    const companyId = String(booking.companyId || "").trim();
-    if (!companyId) {
+    const db = getFirestore();
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists) {
       return response(200, {
         ok: true,
         received: true,
-        skipped: "booking_missing_company",
         paymentId,
         bookingId,
+        skipped: "booking_not_found",
       });
     }
 
-    const connected = await getConnectedMollieClient(db, companyId);
-    const payment = await withAutoRefresh(db, companyId, connected.mollie, (mollieClient) =>
-      mollieClient.payments.get(paymentId, { testmode: isTestMode() })
-    );
+    const paymentStatusRaw = String(payment?.status || "").trim().toLowerCase();
+    const mapped = mapStatus(paymentStatusRaw);
+    const current = bookingSnap.data() || {};
+    const currentStatus = String(current.status || "").trim().toLowerCase();
+    const currentPaymentStatus = String(current.paymentStatus || "").trim().toLowerCase();
+    const currentPaid = Boolean(current.paid);
 
-    const mollieStatus = String(payment?.status || "").trim().toLowerCase();
-    const mappedPaymentStatus = mapMollieToPaymentStatus(mollieStatus);
-    const metadataBookingId = extractBookingIdFromPayment(payment);
-    if (metadataBookingId && metadataBookingId !== bookingId) {
+    const sameState =
+      currentStatus === mapped.status &&
+      currentPaymentStatus === mapped.paymentStatus &&
+      currentPaid === mapped.paid;
+    if (sameState) {
       return response(200, {
         ok: true,
         received: true,
-        skipped: "metadata_booking_mismatch",
         paymentId,
+        bookingId,
+        changed: false,
       });
     }
 
-    let changed = false;
-    await db.runTransaction(async (tx) => {
-      const ref = db.collection("bookings").doc(bookingId);
-      const snap = await tx.get(ref);
-      if (!snap.exists) return;
-
-      const current = snap.data() || {};
-      const currentMollieStatus = String(current?.mollie?.status || "").trim().toLowerCase();
-      const currentPaymentStatus = String(current?.paymentStatus || "").trim().toLowerCase();
-      const sameStatus =
-        currentMollieStatus === mollieStatus && currentPaymentStatus === mappedPaymentStatus;
-      if (sameStatus) return;
-
-      const nowTs = admin.firestore.FieldValue.serverTimestamp();
-      const patch = {
+    const nowTs = admin.firestore.FieldValue.serverTimestamp();
+    await bookingRef.set(
+      {
+        status: mapped.status,
+        paymentStatus: mapped.paymentStatus,
+        paid: mapped.paid,
         paymentProvider: "mollie",
-        paymentStatus: mappedPaymentStatus,
         molliePaymentId: paymentId,
         mollie: {
           ...(current.mollie && typeof current.mollie === "object" ? current.mollie : {}),
           paymentId,
-          status: mollieStatus,
-          checkoutUrl: String(current?.mollie?.checkoutUrl || payment?._links?.checkout?.href || ""),
+          status: paymentStatusRaw,
           paidAt: payment?.paidAt ? new Date(payment.paidAt) : current?.mollie?.paidAt || null,
-          canceledAt: payment?.canceledAt ? new Date(payment.canceledAt) : current?.mollie?.canceledAt || null,
-          expiredAt: payment?.expiredAt ? new Date(payment.expiredAt) : current?.mollie?.expiredAt || null,
-          amountValue: String(payment?.amount?.value || current?.mollie?.amountValue || ""),
-          amountCurrency: String(payment?.amount?.currency || current?.mollie?.amountCurrency || "EUR"),
           updatedAt: nowTs,
           lastWebhookAt: nowTs,
           lastWebhookAtMs: Date.now(),
-          webhookCount: Number(current?.mollie?.webhookCount || 0) + 1,
         },
         updatedAt: nowTs,
-      };
-
-      const nextMainStatus = maybeUpdateMainStatus(current.status, mappedPaymentStatus);
-      patch.status = nextMainStatus;
-      const previousMainStatus = String(current.status || "").trim();
-      if (
-        !current.bookingWorkflowStatus &&
-        previousMainStatus &&
-        !["pending_payment", "paid", "failed", "canceled", "cancelled"].includes(previousMainStatus.toLowerCase())
-      ) {
-        patch.bookingWorkflowStatus = previousMainStatus;
-      }
-
-      tx.set(ref, patch, { merge: true });
-      changed = true;
-    });
+      },
+      { merge: true }
+    );
 
     return response(200, {
       ok: true,
       received: true,
       paymentId,
       bookingId,
-      mollieStatus,
-      paymentStatus: mappedPaymentStatus,
-      changed,
+      status: mapped.status,
+      changed: true,
     });
   } catch (error) {
-    // Mollie webhook should still return 200 quickly; retry loops are handled by Mollie.
     return response(200, {
       ok: true,
       received: true,
       paymentId,
-      processingError: error instanceof Error ? error.message.slice(0, 300) : "unknown_error",
+      processingError: error instanceof Error ? error.message.slice(0, 320) : "unknown_error",
     });
   }
 };
