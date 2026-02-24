@@ -20,6 +20,7 @@ type BookingSnapshot = {
   customerName: string;
   bookingDate: string;
   startAtMs: number;
+  bookingStatus: string;
   paymentStatus: string;
   mollieStatus: string;
 };
@@ -54,6 +55,7 @@ function formatDateTime(startAtMs: number): string {
 }
 
 function parseBookingData(bookingId: string, raw: Record<string, unknown>): BookingSnapshot {
+  const mollieNode = (raw.mollie as Record<string, unknown> | undefined) ?? {};
   return {
     id: bookingId,
     companyId: String(raw.companyId ?? "").trim(),
@@ -62,9 +64,10 @@ function parseBookingData(bookingId: string, raw: Record<string, unknown>): Book
     serviceName: String(raw.serviceName ?? "").trim(),
     customerName: String(raw.customerName ?? "").trim(),
     bookingDate: String(raw.bookingDate ?? "").trim(),
-    startAtMs: toMillis(raw.startAtMs),
+    startAtMs: toMillis(raw.startAt) || toMillis(raw.startAtMs),
+    bookingStatus: toLower(raw.status),
     paymentStatus: toLower(raw.paymentStatus),
-    mollieStatus: toLower((raw.mollie as Record<string, unknown> | undefined)?.status),
+    mollieStatus: toLower(mollieNode.status),
   };
 }
 
@@ -72,8 +75,16 @@ function mapState(booking: BookingSnapshot | null): PaymentResultState {
   if (!booking) return "processing";
 
   if (booking.paymentStatus === "paid" || booking.mollieStatus === "paid") return "paid";
-  if (booking.mollieStatus === "canceled" || booking.mollieStatus === "cancelled") return "canceled";
-  if (booking.mollieStatus === "expired") return "expired";
+  if (
+    booking.paymentStatus === "canceled" ||
+    booking.paymentStatus === "cancelled" ||
+    booking.mollieStatus === "canceled" ||
+    booking.mollieStatus === "cancelled" ||
+    booking.bookingStatus === "cancelled_by_customer"
+  ) {
+    return "canceled";
+  }
+  if (booking.paymentStatus === "expired" || booking.mollieStatus === "expired") return "expired";
   if (booking.mollieStatus === "failed" || booking.paymentStatus === "failed") return "failed";
   return "processing";
 }

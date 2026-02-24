@@ -19,6 +19,10 @@ function typeIcon(type: CustomerNotification["type"]): keyof typeof Ionicons.gly
   if (type === "booking_time_proposed") return "time-outline";
   if (type === "booking_reschedule_approved") return "swap-horizontal-outline";
   if (type === "booking_reschedule_declined") return "close-outline";
+  if (type === "booking_payment_failed") return "alert-circle-outline";
+  if (type === "booking_payment_cancelled") return "remove-circle-outline";
+  if (type === "booking_payment_expired") return "time-outline";
+  if (type === "comment_like") return "heart-outline";
   return "calendar-outline";
 }
 
@@ -39,7 +43,11 @@ function isBookingNotification(type: CustomerNotification["type"]): boolean {
     type === "booking_declined" ||
     type === "booking_time_proposed" ||
     type === "booking_reschedule_approved" ||
-    type === "booking_reschedule_declined"
+    type === "booking_reschedule_declined" ||
+    type === "booking_payment_pending" ||
+    type === "booking_payment_failed" ||
+    type === "booking_payment_cancelled" ||
+    type === "booking_payment_expired"
   );
 }
 

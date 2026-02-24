@@ -22,11 +22,10 @@ import { auth, db } from "./firebase";
 import { getUserRole } from "./authRepo";
 import { fetchCompanyById } from "./companyRepo";
 import {
-  notifyCompanyOnBookingRequest,
   notifyCompanyOnBookingCancelledByCustomer,
   notifyCompanyOnBookingProposalDecisionByCustomer,
   notifyCompanyOnRescheduleRequestByCustomer,
-  notifyCustomerOnBookingCreated,
+  notifyCustomerOnBookingPaymentPending,
   notifyCustomerOnBookingProposalByCompany,
   notifyCustomerOnBookingStatusByCompany,
   notifyCustomerOnRescheduleDecisionByCompany,
@@ -42,6 +41,13 @@ export type BookingStatus =
   | "cancelled_by_customer"
   | "cancelled_with_fee";
 export type BookingProposalBy = "company" | "customer";
+export type BookingPaymentStatus =
+  | "open"
+  | "pending_payment"
+  | "paid"
+  | "failed"
+  | "canceled"
+  | "expired";
 
 export type TimeRange = {
   start: string;
@@ -114,6 +120,10 @@ export type Booking = {
   occupiedStartAtMs: number;
   occupiedEndAtMs: number;
   status: BookingStatus;
+  paymentStatus: BookingPaymentStatus | "";
+  mollieStatus?: string;
+  amountCents: number;
+  checkoutUrl?: string;
   proposalBy?: BookingProposalBy;
   proposedBookingDate?: string;
   proposedStartAtMs?: number;
@@ -316,6 +326,34 @@ function normalizeStatus(raw: unknown): BookingStatus {
   return "pending";
 }
 
+function normalizePaymentStatus(raw: unknown, mollieRaw?: unknown): BookingPaymentStatus | "" {
+  const direct = String(raw ?? "").trim().toLowerCase();
+  const mollie = String(mollieRaw ?? "").trim().toLowerCase();
+  const value = direct || mollie;
+  if (
+    value === "open" ||
+    value === "pending_payment" ||
+    value === "paid" ||
+    value === "failed" ||
+    value === "canceled" ||
+    value === "expired"
+  ) {
+    return value;
+  }
+  if (value === "cancelled") return "canceled";
+  if (value === "pending") return "open";
+  return "";
+}
+
+function isPaymentSettledForCompany(row: Booking): boolean {
+  if (!row.paymentStatus) return true; // legacy bookings from before payment flow
+  return row.paymentStatus === "paid";
+}
+
+function canCompanyManageBooking(row: Booking): boolean {
+  return isPaymentSettledForCompany(row);
+}
+
 function buildSlotLockKeys(bookingDate: string, occupiedStartMs: number, occupiedEndMs: number): string[] {
   const { dayStartMs } = buildDayRangeMs(bookingDate);
   const stepMs = SLOT_LOCK_STEP_MIN * 60_000;
@@ -405,6 +443,14 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
   const referralCommissionAmount = Number.isFinite(referralCommissionAmountRaw)
     ? Math.max(0, referralCommissionAmountRaw)
     : 0;
+  const mollieNode = (data.mollie as Record<string, unknown> | undefined) ?? {};
+  const mollieStatus = String(mollieNode.status ?? "").trim().toLowerCase();
+  const paymentStatus = normalizePaymentStatus(data.paymentStatus, mollieStatus);
+  const breakdownNode = (data.breakdown as Record<string, unknown> | undefined) ?? {};
+  const fallbackAmountCents = Math.max(0, Math.round((Number(data.servicePrice ?? 0) || 0) * 100));
+  const amountCentsRaw = Number(breakdownNode.amountCents ?? data.amountCents ?? fallbackAmountCents);
+  const amountCents = Number.isFinite(amountCentsRaw) ? Math.max(0, Math.floor(amountCentsRaw)) : fallbackAmountCents;
+  const checkoutUrl = String(mollieNode.checkoutUrl ?? "").trim();
 
   return {
     id,
@@ -427,6 +473,10 @@ function toBooking(id: string, data: Record<string, unknown>): Booking {
     occupiedStartAtMs: toMillis(data.occupiedStartAt),
     occupiedEndAtMs: toMillis(data.occupiedEndAt),
     status: normalizeStatus(data.status),
+    paymentStatus,
+    mollieStatus: mollieStatus || undefined,
+    amountCents,
+    checkoutUrl: checkoutUrl || undefined,
     proposalBy,
     proposedBookingDate: typeof data.proposedBookingDate === "string" ? data.proposedBookingDate : undefined,
     proposedStartAtMs: proposedStartAtMs || undefined,
@@ -880,12 +930,13 @@ function filterBookings(rows: Booking[], filter?: BookingQueryFilter): Booking[]
 
 export async function fetchCompanyBookings(companyId: string, filter?: BookingQueryFilter): Promise<Booking[]> {
   const rows = await fetchCompanyBookingsRaw(companyId);
-  return sortBookingsByStartAsc(normalizeBookingRows(filterBookings(rows, filter)));
+  const visibleRows = rows.filter((row) => isPaymentSettledForCompany(row));
+  return sortBookingsByStartAsc(normalizeBookingRows(filterBookings(visibleRows, filter)));
 }
 
 export async function fetchCompanyBookingInsights(companyId: string, top = 3): Promise<CompanyBookingInsights> {
   const safeTop = Math.max(1, Math.min(8, Math.floor(top)));
-  const rows = await fetchCompanyBookingsRaw(companyId);
+  const rows = (await fetchCompanyBookingsRaw(companyId)).filter((row) => isPaymentSettledForCompany(row));
   const counters = new Map<string, CompanyTopBookedService>();
   let totalBookings = 0;
 
@@ -978,7 +1029,7 @@ export async function fetchInfluencerCommissionSummary(influencerId: string): Pr
 export async function fetchEmployeeBookings(employeeId: string, filter?: BookingQueryFilter): Promise<Booking[]> {
   const q = query(collection(db, "bookings"), where("staffId", "==", employeeId));
   const snap = await getDocs(q);
-  const rows = snap.docs.map((row) => toBooking(row.id, row.data()));
+  const rows = snap.docs.map((row) => toBooking(row.id, row.data())).filter((row) => isPaymentSettledForCompany(row));
   return sortBookingsByStartAsc(normalizeBookingRows(filterBookings(rows, filter)));
 }
 
@@ -991,7 +1042,9 @@ export function subscribeCompanyBookings(
   return onSnapshot(
     q,
     (snap) => {
-      const rows = snap.docs.map((row: QueryDocumentSnapshot<DocumentData>) => toBooking(row.id, row.data()));
+      const rows = snap.docs
+        .map((row: QueryDocumentSnapshot<DocumentData>) => toBooking(row.id, row.data()))
+        .filter((row) => isPaymentSettledForCompany(row));
       onData(sortBookingsByStartAsc(normalizeBookingRows(rows)));
     },
     (error) => onError?.(error)
@@ -1023,7 +1076,9 @@ export function subscribeEmployeeBookings(
   return onSnapshot(
     q,
     (snap) => {
-      const rows = snap.docs.map((row: QueryDocumentSnapshot<DocumentData>) => toBooking(row.id, row.data()));
+      const rows = snap.docs
+        .map((row: QueryDocumentSnapshot<DocumentData>) => toBooking(row.id, row.data()))
+        .filter((row) => isPaymentSettledForCompany(row));
       onData(sortBookingsByStartAsc(normalizeBookingRows(rows)));
     },
     (error) => onError?.(error)
@@ -1361,6 +1416,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       occupiedStartAt: new Date(occupiedStartAtMs),
       occupiedEndAt: new Date(occupiedEndAtMs),
       status,
+      paymentStatus: "open",
       proposalBy: "",
       proposedBookingDate: "",
       proposedStartAt: null,
@@ -1384,6 +1440,10 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       referralInfluencerName: referralInfo?.influencerName ?? "",
       referralCommissionPercent: referralInfo?.commissionPercent ?? 0,
       referralCommissionAmount: referralInfo?.commissionAmount ?? 0,
+      amountCents: Math.max(0, Math.round(servicePrice * 100)),
+      breakdown: {
+        amountCents: Math.max(0, Math.round(servicePrice * 100)),
+      },
       lockIds,
       lockSeat: chosenSeat,
       createdAt: serverTimestamp(),
@@ -1398,22 +1458,13 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
   });
 
   // Keep user experience stable even if notification write fails.
-  notifyCompanyOnBookingRequest({
-    companyId: payload.companyId,
-    customerId: payload.customerId,
-    customerName: payload.customerName,
-    serviceId: payload.serviceId,
-    bookingId: bookingRef.id,
-    isAutoConfirmed: result.status === "confirmed",
-  }).catch(() => null);
-  notifyCustomerOnBookingCreated({
+  notifyCustomerOnBookingPaymentPending({
     customerId: payload.customerId,
     companyId: payload.companyId,
     companyName: result.companyName,
     serviceId: payload.serviceId,
     serviceName: result.serviceName,
     bookingId: bookingRef.id,
-    status: result.status === "confirmed" ? "confirmed" : "pending",
   }).catch(() => null);
 
   return {
@@ -1442,6 +1493,9 @@ export async function setBookingStatusByCompany(
 
     const row = toBooking(snap.id, snap.data());
     if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (!canCompanyManageBooking(row)) {
+      throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
+    }
 
     assertStatusTransition(row.status, status, "company");
     notifyPayload = {
@@ -1577,6 +1631,9 @@ export async function proposeBookingTimeByCompany(params: {
 
   const row = toBooking(snap.id, snap.data());
   if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+  if (!canCompanyManageBooking(row)) {
+    throw new Error("Deze boeking kan pas worden aangepast nadat de betaling is afgerond.");
+  }
   if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
   if (!Number.isFinite(proposedStartAtMs) || proposedStartAtMs <= Date.now() - 60_000) {
     throw new Error("Kies een geldig toekomstig tijdstip.");
@@ -1639,6 +1696,9 @@ export async function proposeNextBookingTimeByCompany(
   if (!snap.exists()) throw new Error("Boeking niet gevonden.");
   const row = toBooking(snap.id, snap.data());
   if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+  if (!canCompanyManageBooking(row)) {
+    throw new Error("Deze boeking kan pas worden aangepast nadat de betaling is afgerond.");
+  }
   if (row.status !== "pending") throw new Error("Alleen nieuwe aanvragen kunnen een alternatief tijdstip krijgen.");
 
   const nextSlot = await suggestNextSlotForBooking(row);
@@ -1886,6 +1946,9 @@ export async function respondToCustomerRescheduleByCompany(
 
     const row = toBooking(snap.id, snap.data());
     if (row.companyId !== companyId) throw new Error("Je hebt geen toegang tot deze boeking.");
+    if (!canCompanyManageBooking(row)) {
+      throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
+    }
     if (row.status !== "pending_reschedule_approval" || row.proposalBy !== "customer") {
       throw new Error("Er staat geen verplaatsingsaanvraag open.");
     }
@@ -1986,6 +2049,7 @@ export async function cancelBookingByCustomer(
     serviceId: string;
     serviceName: string;
     feePercent: number;
+    notifyCompany: boolean;
   } | null = null;
 
   await runTransaction(db, async (transaction) => {
@@ -1996,7 +2060,10 @@ export async function cancelBookingByCustomer(
     const row = toBooking(snap.id, snap.data());
     if (row.customerId !== customerId) throw new Error("Je hebt geen toegang tot deze boeking.");
 
-    const computed = computeCancellationFee(row.startAtMs, row.servicePrice, nowMs);
+    const paymentSettled = isPaymentSettledForCompany(row);
+    const computed = paymentSettled
+      ? computeCancellationFee(row.startAtMs, row.servicePrice, nowMs)
+      : { percent: 0, amount: 0 };
     const nextStatus: BookingStatus = computed.percent > 0 ? "cancelled_with_fee" : "cancelled_by_customer";
 
     assertStatusTransition(row.status, nextStatus, "customer");
@@ -2013,12 +2080,14 @@ export async function cancelBookingByCustomer(
       serviceId: row.serviceId,
       serviceName: row.serviceName,
       feePercent: computed.percent,
+      notifyCompany: paymentSettled,
     };
 
     transaction.update(ref, {
       status: nextStatus,
       cancellationFeePercent: computed.percent,
       cancellationFeeAmount: computed.amount,
+      ...(row.paymentStatus && row.paymentStatus !== "paid" ? { paymentStatus: "canceled" } : null),
       ...clearProposalPatch(),
       updatedAt: serverTimestamp(),
     });
@@ -2031,9 +2100,10 @@ export async function cancelBookingByCustomer(
         serviceId: string;
         serviceName: string;
         feePercent: number;
+        notifyCompany: boolean;
       }
     | null;
-  if (cancelNotifyPayload) {
+  if (cancelNotifyPayload?.notifyCompany) {
     notifyCompanyOnBookingCancelledByCustomer({
       companyId: cancelNotifyPayload.companyId,
       customerId: cancelNotifyPayload.customerId,

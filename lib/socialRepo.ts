@@ -17,7 +17,9 @@ import {
 import { db } from "./firebase";
 import {
   notifyCompanyOnFollow,
+  notifyCompanyOnPostComment,
   notifyCompanyOnCommentLike,
+  notifyCustomerOnCommentLike,
   notifyCompanyOnCompanyRating,
   notifyCompanyOnPostLike,
   notifyCompanyOnServiceRating,
@@ -144,7 +146,7 @@ export async function addPostComment(
     throw new Error("Typ eerst een reactie.");
   }
 
-  await addDoc(collection(db, "feed_public", postId, "comments"), {
+  const rowRef = await addDoc(collection(db, "feed_public", postId, "comments"), {
     userId: uid,
     role,
     text: clean,
@@ -152,6 +154,13 @@ export async function addPostComment(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  await notifyCompanyOnPostComment({
+    postId,
+    commentId: rowRef.id,
+    actorId: uid,
+    actorRole: role,
+  }).catch(() => null);
 }
 
 export async function deletePostComment(postId: string, commentId: string): Promise<void> {
@@ -201,6 +210,11 @@ export async function toggleCommentLike(
     role,
     createdAt: serverTimestamp(),
   });
+  const commentSnap = await getDoc(doc(db, "feed_public", postId, "comments", commentId)).catch(() => null);
+  const commentData = commentSnap?.exists() ? (commentSnap.data() as Record<string, unknown>) : {};
+  const ownerId = String(commentData.userId ?? "").trim();
+  const ownerRole = String(commentData.role ?? "customer").trim().toLowerCase();
+
   await notifyCompanyOnCommentLike({
     postId,
     commentId,
@@ -208,6 +222,17 @@ export async function toggleCommentLike(
     actorRole: role,
     liked: true,
   }).catch(() => null);
+
+  if (ownerId && ownerId !== uid && ownerRole !== "company") {
+    await notifyCustomerOnCommentLike({
+      customerId: ownerId,
+      actorId: uid,
+      actorRole: role,
+      postId,
+      commentId,
+      liked: true,
+    }).catch(() => null);
+  }
   return true;
 }
 

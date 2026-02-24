@@ -17,6 +17,12 @@ function resolveCheckoutUrl(payment) {
   return "";
 }
 
+function normalizePaymentStatus(raw, mollieRaw) {
+  const value = String(raw || mollieRaw || "").trim().toLowerCase();
+  if (value === "cancelled") return "canceled";
+  return value;
+}
+
 exports.handler = async (event) => {
   const method = String(event.httpMethod || "").toUpperCase();
   console.log("[mollie-create-payment] request", { method });
@@ -68,8 +74,57 @@ exports.handler = async (event) => {
     });
   }
 
-  const platformFeeCents = Math.round(amountCents * 0.08);
-  const salonNetCents = amountCents - platformFeeCents;
+  const bookingStatus = String(booking.status || "").trim().toLowerCase();
+  if (
+    bookingStatus === "declined" ||
+    bookingStatus === "cancelled_by_customer" ||
+    bookingStatus === "cancelled_with_fee"
+  ) {
+    return response(409, {
+      ok: false,
+      error: "Deze boeking is geannuleerd of afgewezen. Maak een nieuwe boeking.",
+    });
+  }
+
+  const mollieNode = booking.mollie && typeof booking.mollie === "object" ? booking.mollie : {};
+  const existingPaymentStatus = normalizePaymentStatus(booking.paymentStatus, mollieNode.status);
+  const existingCheckoutUrl = String(mollieNode.checkoutUrl || "").trim();
+  const existingPaymentId = String(mollieNode.paymentId || booking.molliePaymentId || "").trim();
+
+  if (existingPaymentStatus === "paid") {
+    return response(409, {
+      ok: false,
+      error: "Deze boeking is al betaald.",
+    });
+  }
+
+  if (
+    existingCheckoutUrl &&
+    existingPaymentId &&
+    (existingPaymentStatus === "open" || existingPaymentStatus === "pending_payment")
+  ) {
+    return response(200, {
+      ok: true,
+      checkoutUrl: existingCheckoutUrl,
+      paymentId: existingPaymentId,
+      reused: true,
+    });
+  }
+
+  const breakdown = booking.breakdown && typeof booking.breakdown === "object" ? booking.breakdown : {};
+  const storedAmountCents = toSafeInt(
+    breakdown.amountCents || booking.amountCents || Math.round(Number(booking.servicePrice || 0) * 100)
+  );
+  const finalAmountCents = storedAmountCents > 0 ? storedAmountCents : amountCents;
+  if (finalAmountCents <= 0) {
+    return response(400, {
+      ok: false,
+      error: "Bedrag voor betaling is ongeldig.",
+    });
+  }
+
+  const platformFeeCents = Math.round(finalAmountCents * 0.08);
+  const salonNetCents = finalAmountCents - platformFeeCents;
   const appBaseUrl = requireEnv("APP_BASE_URL").replace(/\/+$/, "");
   const webhookUrl = requireEnv("MOLLIE_WEBHOOK_URL");
   const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
@@ -77,7 +132,7 @@ exports.handler = async (event) => {
   try {
     const mollie = createMollieClient({ apiKey });
     const payment = await mollie.payments.create({
-      amount: { currency: "EUR", value: toAmountValueFromCents(amountCents) },
+      amount: { currency: "EUR", value: toAmountValueFromCents(finalAmountCents) },
       description: "BookBeauty test booking",
       redirectUrl: `${appBaseUrl}/payment-result?bookingId=${encodeURIComponent(bookingId)}`,
       webhookUrl,
@@ -111,7 +166,7 @@ exports.handler = async (event) => {
           updatedAt: nowTs,
         },
         breakdown: {
-          amountCents,
+          amountCents: finalAmountCents,
           platformFeeCents,
           salonNetCents,
         },
@@ -123,7 +178,7 @@ exports.handler = async (event) => {
     console.log("[mollie-create-payment] created", {
       bookingId,
       paymentId,
-      amountCents,
+      amountCents: finalAmountCents,
       platformFeeCents,
       salonNetCents,
     });

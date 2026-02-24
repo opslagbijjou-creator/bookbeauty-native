@@ -23,6 +23,7 @@ import { sendPushToUser } from "./pushRepo";
 
 export type CompanyNotificationType =
   | "post_like"
+  | "post_comment"
   | "comment_like"
   | "service_rating"
   | "company_rating"
@@ -39,7 +40,12 @@ export type CustomerNotificationType =
   | "booking_declined"
   | "booking_time_proposed"
   | "booking_reschedule_approved"
-  | "booking_reschedule_declined";
+  | "booking_reschedule_declined"
+  | "booking_payment_pending"
+  | "booking_payment_failed"
+  | "booking_payment_cancelled"
+  | "booking_payment_expired"
+  | "comment_like";
 
 export type CompanyNotification = {
   id: string;
@@ -71,6 +77,8 @@ export type CustomerNotification = {
   companyName?: string;
   serviceId?: string;
   bookingId?: string;
+  postId?: string;
+  commentId?: string;
   read: boolean;
   createdAtMs: number;
   updatedAtMs: number;
@@ -101,7 +109,8 @@ function toMillis(value: unknown): number {
 
 function normalizeCompanyNotificationType(value: unknown): CompanyNotificationType {
   const typeRaw = String(value ?? "post_like");
-  return typeRaw === "comment_like" ||
+  return typeRaw === "post_comment" ||
+    typeRaw === "comment_like" ||
     typeRaw === "service_rating" ||
     typeRaw === "company_rating" ||
     typeRaw === "booking_request" ||
@@ -120,7 +129,12 @@ function normalizeCustomerNotificationType(value: unknown): CustomerNotification
     typeRaw === "booking_declined" ||
     typeRaw === "booking_time_proposed" ||
     typeRaw === "booking_reschedule_approved" ||
-    typeRaw === "booking_reschedule_declined"
+    typeRaw === "booking_reschedule_declined" ||
+    typeRaw === "booking_payment_pending" ||
+    typeRaw === "booking_payment_failed" ||
+    typeRaw === "booking_payment_cancelled" ||
+    typeRaw === "booking_payment_expired" ||
+    typeRaw === "comment_like"
     ? typeRaw
     : "booking_created";
 }
@@ -166,6 +180,8 @@ function toCustomerNotification(id: string, data: Record<string, unknown>): Cust
     companyName: typeof data.companyName === "string" ? data.companyName : undefined,
     serviceId: typeof data.serviceId === "string" ? data.serviceId : undefined,
     bookingId: typeof data.bookingId === "string" ? data.bookingId : undefined,
+    postId: typeof data.postId === "string" ? data.postId : undefined,
+    commentId: typeof data.commentId === "string" ? data.commentId : undefined,
     read: Boolean(data.read),
     createdAtMs: toMillis(data.createdAt),
     updatedAtMs: toMillis(data.updatedAt),
@@ -234,6 +250,8 @@ async function createCustomerNotification(
     companyName?: string;
     serviceId?: string;
     bookingId?: string;
+    postId?: string;
+    commentId?: string;
   }
 ): Promise<void> {
   const data: Record<string, unknown> = {
@@ -252,6 +270,8 @@ async function createCustomerNotification(
   if (payload.companyName) data.companyName = payload.companyName;
   if (payload.serviceId) data.serviceId = payload.serviceId;
   if (payload.bookingId) data.bookingId = payload.bookingId;
+  if (payload.postId) data.postId = payload.postId;
+  if (payload.commentId) data.commentId = payload.commentId;
 
   const rowRef = await addDoc(collection(db, "users", customerId, "notifications"), data);
   void sendPushToUser(customerId, {
@@ -266,6 +286,8 @@ async function createCustomerNotification(
       companyId: payload.companyId ?? "",
       bookingId: payload.bookingId ?? "",
       serviceId: payload.serviceId ?? "",
+      postId: payload.postId ?? "",
+      commentId: payload.commentId ?? "",
     },
   }).catch(() => null);
 }
@@ -295,6 +317,31 @@ export async function notifyCompanyOnPostLike(params: {
   });
 }
 
+export async function notifyCompanyOnPostComment(params: {
+  postId: string;
+  commentId: string;
+  actorId: string;
+  actorRole: AppRole;
+}): Promise<void> {
+  const { postId, commentId, actorId, actorRole } = params;
+  const postSnap = await getDoc(doc(db, "feed_public", postId));
+  if (!postSnap.exists()) return;
+
+  const post = postSnap.data();
+  const companyId = String(post.companyId ?? "");
+  if (!companyId || companyId === actorId) return;
+
+  await createCompanyNotification(companyId, {
+    actorId,
+    actorRole,
+    type: "post_comment",
+    title: "Nieuwe reactie",
+    body: `${roleLabel(actorRole)} reageerde op je video.`,
+    postId,
+    commentId,
+  });
+}
+
 export async function notifyCompanyOnCommentLike(params: {
   postId: string;
   commentId: string;
@@ -317,6 +364,29 @@ export async function notifyCompanyOnCommentLike(params: {
     actorRole,
     type: "comment_like",
     title: "Comment like",
+    body: `${roleLabel(actorRole)} likete je reactie.`,
+    postId,
+    commentId,
+  });
+}
+
+export async function notifyCustomerOnCommentLike(params: {
+  customerId: string;
+  actorId: string;
+  actorRole: AppRole;
+  postId: string;
+  commentId: string;
+  liked: boolean;
+}): Promise<void> {
+  const { customerId, actorId, actorRole, postId, commentId, liked } = params;
+  if (!liked) return;
+  if (!customerId || customerId === actorId) return;
+
+  await createCustomerNotification(customerId, {
+    actorId,
+    actorRole,
+    type: "comment_like",
+    title: "Je reactie is geliket",
     body: `${roleLabel(actorRole)} likete je reactie.`,
     postId,
     commentId,
@@ -521,6 +591,32 @@ export async function notifyCustomerOnBookingCreated(params: {
       status === "confirmed"
         ? `Je afspraak voor ${serviceLabel} bij ${companyLabel} is direct bevestigd.`
         : `Je afspraak voor ${serviceLabel} bij ${companyLabel} is geplaatst en wacht op goedkeuring.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingPaymentPending(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId } = params;
+  if (!customerId || !bookingId) return;
+
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je dienst";
+  await createCustomerNotification(customerId, {
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_payment_pending",
+    title: "Rond je betaling af",
+    body: `Je boeking voor ${serviceLabel} bij ${companyLabel} staat klaar. Betaal om door te gaan.`,
     companyId,
     companyName,
     serviceId,

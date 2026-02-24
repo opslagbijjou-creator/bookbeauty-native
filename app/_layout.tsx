@@ -33,13 +33,22 @@ function AppBootstrapEffects() {
   const openRouteFromPushData = useCallback((data: Record<string, unknown>) => {
     const role = String(data.role ?? "").trim();
     const bookingId = String(data.bookingId ?? "").trim();
+    const encodedBookingId = bookingId ? encodeURIComponent(bookingId) : "";
 
     if (role === "company") {
-      router.push((bookingId ? "/(company)/(tabs)/bookings" : "/(company)/notifications") as never);
+      router.push(
+        (encodedBookingId
+          ? `/(company)/(tabs)/bookings?bookingId=${encodedBookingId}`
+          : "/(company)/notifications") as never
+      );
       return;
     }
     if (role === "customer") {
-      router.push((bookingId ? "/(customer)/(tabs)/bookings" : "/(customer)/notifications") as never);
+      router.push(
+        (encodedBookingId
+          ? `/(customer)/(tabs)/bookings?bookingId=${encodedBookingId}`
+          : "/(customer)/notifications") as never
+      );
       return;
     }
   }, [router]);

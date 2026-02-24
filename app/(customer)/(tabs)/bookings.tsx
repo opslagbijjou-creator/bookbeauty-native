@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   acceptCompanyProposalByCustomer,
@@ -17,7 +17,7 @@ import { auth } from "../../../lib/firebase";
 import { COLORS } from "../../../lib/ui";
 
 type CustomerSectionKey = "action" | "upcoming" | "history";
-type BusyAction = "cancel" | "accept_proposal" | "decline_proposal" | "request_move";
+type BusyAction = "cancel" | "accept_proposal" | "decline_proposal" | "request_move" | "pay";
 
 type BookingSections = {
   action: Booking[];
@@ -82,7 +82,113 @@ function canCancelBooking(status: Booking["status"]): boolean {
   );
 }
 
+function normalizePaymentStatus(item: Booking): string {
+  const status = String(item.paymentStatus || "").trim().toLowerCase();
+  if (status) return status;
+  const mollie = String(item.mollieStatus || "").trim().toLowerCase();
+  if (mollie === "cancelled") return "canceled";
+  return mollie;
+}
+
+function paymentNeedsAction(item: Booking): boolean {
+  const status = normalizePaymentStatus(item);
+  return (
+    status === "open" ||
+    status === "pending_payment" ||
+    status === "failed" ||
+    status === "canceled" ||
+    status === "expired"
+  );
+}
+
+function isPaymentPending(item: Booking): boolean {
+  const status = normalizePaymentStatus(item);
+  return status === "open" || status === "pending_payment";
+}
+
+function isPaymentRetryable(item: Booking): boolean {
+  const status = normalizePaymentStatus(item);
+  return status === "failed";
+}
+
+function paymentStateLabel(item: Booking): string | null {
+  const status = normalizePaymentStatus(item);
+  if (status === "paid") return "Betaling gelukt";
+  if (status === "open" || status === "pending_payment") return "Wacht op betaling";
+  if (status === "failed") return "Betaling mislukt";
+  if (status === "canceled") return "Betaling geannuleerd";
+  if (status === "expired") return "Betaling verlopen";
+  return null;
+}
+
+async function createMollieCheckoutForBooking(item: Booking): Promise<string> {
+  const bookingId = String(item.id || "").trim();
+  const companyId = String(item.companyId || "").trim();
+  const amountCents = Math.max(0, Math.floor(Number(item.amountCents || Math.round(item.servicePrice * 100)) || 0));
+  if (!bookingId || !companyId || amountCents <= 0) {
+    throw new Error("Onvolledige betaalgegevens voor deze boeking.");
+  }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("Je sessie is verlopen. Log opnieuw in.");
+
+  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
+  const endpoint =
+    Platform.OS === "web"
+      ? "/.netlify/functions/mollie-create-payment"
+      : `${baseUrl}/.netlify/functions/mollie-create-payment`;
+  const idToken = await currentUser.getIdToken(true).catch(() => "");
+  if (!idToken) throw new Error("Kon geen geldige sessie vinden voor betaling.");
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      bookingId,
+      companyId,
+      amountCents,
+    }),
+  }).catch(() => null);
+
+  if (!res) throw new Error("Geen verbinding met betaalserver.");
+  const payload = await res.json().catch(() => ({} as Record<string, unknown>));
+  if (!res.ok || payload.ok !== true) {
+    throw new Error(String(payload.error || "").trim() || "Kon betaling niet starten.");
+  }
+
+  const checkoutUrl = String(payload.checkoutUrl || "").trim();
+  if (!checkoutUrl) throw new Error("Mollie checkout URL ontbreekt.");
+  return checkoutUrl;
+}
+
+async function openExternalCheckout(checkoutUrl: string): Promise<void> {
+  if (Platform.OS === "web") {
+    const win = globalThis as {
+      location?: { assign?: (href: string) => void; href?: string };
+      open?: (url?: string, target?: string) => void;
+    };
+    if (typeof win.location?.assign === "function") {
+      win.location.assign(checkoutUrl);
+      return;
+    }
+    if (win.location) {
+      win.location.href = checkoutUrl;
+      return;
+    }
+    if (typeof win.open === "function") {
+      win.open(checkoutUrl, "_self");
+      return;
+    }
+  }
+  await Linking.openURL(checkoutUrl);
+}
+
 function bookingSection(booking: Booking, now: number): CustomerSectionKey {
+  if (paymentNeedsAction(booking)) return "action";
   if (
     booking.status === "pending" ||
     booking.status === "proposed_by_company" ||
@@ -101,6 +207,7 @@ function normalizeParamValue(value: string | string[] | undefined): string | nul
 }
 
 export default function CustomerBookingsScreen() {
+  const router = useRouter();
   const uid = auth.currentUser?.uid ?? null;
   const params = useLocalSearchParams<{ bookingId?: string | string[] }>();
 
@@ -319,6 +426,21 @@ export default function CustomerBookingsScreen() {
     }
   }
 
+  async function onPayNow(item: Booking) {
+    if (busyId) return;
+    setBusyId(item.id);
+    setBusyAction("pay");
+    try {
+      const checkoutUrl = await createMollieCheckoutForBooking(item);
+      await openExternalCheckout(checkoutUrl);
+    } catch (error: any) {
+      Alert.alert("Betaling starten mislukt", error?.message ?? "Kon betaling niet starten.");
+    } finally {
+      setBusyId(null);
+      setBusyAction(null);
+    }
+  }
+
   function sectionTitle(section: CustomerSectionKey): string {
     if (section === "action") return "Actie nodig";
     if (section === "upcoming") return "Aankomende afspraken";
@@ -332,11 +454,20 @@ export default function CustomerBookingsScreen() {
   }
 
   function renderBookingCard(item: Booking) {
-    const proposal = item.status === "proposed_by_company";
-    const reschedulePending = item.status === "pending_reschedule_approval";
+    const paymentStatus = normalizePaymentStatus(item);
+    const paymentLabel = paymentStateLabel(item);
+    const paymentPending = isPaymentPending(item);
+    const paymentRetryable = isPaymentRetryable(item);
+    const paymentActionRequired = paymentNeedsAction(item);
+    const bookingFlowLocked = paymentActionRequired;
+    const proposal = !bookingFlowLocked && item.status === "proposed_by_company";
+    const reschedulePending = !bookingFlowLocked && item.status === "pending_reschedule_approval";
     const cancellable = canCancelBooking(item.status);
     const canMoveSameDay =
-      item.status === "confirmed" && isSameDay(item.bookingDate) && (item.customerRescheduleCount || 0) < 1;
+      !bookingFlowLocked &&
+      item.status === "confirmed" &&
+      isSameDay(item.bookingDate) &&
+      (item.customerRescheduleCount || 0) < 1;
     const palette = statusPalette(item.status);
     const isFocused = focusedBookingId === item.id;
     const isBusy = busyId === item.id;
@@ -344,6 +475,7 @@ export default function CustomerBookingsScreen() {
     const acceptBusy = isBusy && busyAction === "accept_proposal";
     const declineBusy = isBusy && busyAction === "decline_proposal";
     const moveBusy = isBusy && busyAction === "request_move";
+    const payBusy = isBusy && busyAction === "pay";
 
     return (
       <View key={item.id} style={[styles.bookingCard, isFocused && styles.bookingCardFocused]}>
@@ -375,6 +507,25 @@ export default function CustomerBookingsScreen() {
           <Text style={styles.metaText}>EUR {Number(item.servicePrice || 0).toFixed(2)}</Text>
         </View>
 
+        {paymentLabel ? (
+          <View style={styles.metaRow}>
+            <Ionicons
+              name={
+                paymentStatus === "paid"
+                  ? "checkmark-done-circle-outline"
+                  : paymentStatus === "failed"
+                    ? "alert-circle-outline"
+                    : paymentStatus === "canceled" || paymentStatus === "expired"
+                      ? "close-circle-outline"
+                      : "card-outline"
+              }
+              size={13}
+              color={paymentStatus === "paid" ? "#1f7a3f" : paymentStatus === "failed" ? COLORS.danger : COLORS.primary}
+            />
+            <Text style={styles.metaText}>{paymentLabel}</Text>
+          </View>
+        ) : null}
+
         {item.status === "confirmed" ? <Text style={styles.countdown}>{formatCountdown(item.startAtMs)}</Text> : null}
 
         {proposal && item.proposedStartAtMs ? (
@@ -400,10 +551,61 @@ export default function CustomerBookingsScreen() {
           <Text style={styles.proposalMeta}>Je verplaatsingsverzoek wacht op akkoord van het bedrijf.</Text>
         ) : null}
 
+        {paymentPending ? (
+          <View style={styles.paymentInfoCard}>
+            <Ionicons name="card-outline" size={14} color={COLORS.primary} />
+            <Text style={styles.paymentInfoText}>
+              Open betaling: rond je betaling af om deze boeking te laten doorgaan.
+            </Text>
+          </View>
+        ) : null}
+
+        {paymentRetryable ? (
+          <View style={styles.paymentInfoCard}>
+            <Ionicons name="alert-circle-outline" size={14} color={COLORS.danger} />
+            <Text style={styles.paymentInfoText}>Betaling mislukt. Probeer opnieuw om verder te gaan.</Text>
+          </View>
+        ) : null}
+
+        {paymentStatus === "canceled" || paymentStatus === "expired" ? (
+          <View style={styles.paymentInfoCard}>
+            <Ionicons name="close-circle-outline" size={14} color={COLORS.danger} />
+            <Text style={styles.paymentInfoText}>
+              Deze betaling is gestopt. Maak een nieuwe boeking als je verder wilt.
+            </Text>
+          </View>
+        ) : null}
+
         {item.status === "cancelled_with_fee" ? (
           <Text style={styles.feeText}>
             Ingehouden: {item.cancellationFeePercent || 0}% ({Number(item.cancellationFeeAmount || 0).toFixed(2)} EUR)
           </Text>
+        ) : null}
+
+        {(paymentPending || paymentRetryable) ? (
+          <Pressable style={[styles.payBtn, isBusy && styles.disabled]} onPress={() => onPayNow(item)} disabled={isBusy}>
+            {payBusy ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="card-outline" size={14} color="#fff" />
+            )}
+            <Text style={styles.payBtnText}>
+              {payBusy ? "Openen..." : paymentPending ? "Betaal om door te gaan" : "Probeer betaling opnieuw"}
+            </Text>
+          </Pressable>
+        ) : null}
+
+        {(paymentStatus === "canceled" || paymentStatus === "expired") ? (
+          <Pressable
+            style={[styles.moveBtn, isBusy && styles.disabled]}
+            onPress={() =>
+              router.push(`/(customer)/book/${encodeURIComponent(item.companyId)}/${encodeURIComponent(item.serviceId)}` as never)
+            }
+            disabled={isBusy}
+          >
+            <Ionicons name="refresh-outline" size={14} color={COLORS.primary} />
+            <Text style={styles.moveText}>Boek opnieuw</Text>
+          </Pressable>
         ) : null}
 
         {proposal ? (
@@ -819,6 +1021,41 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: "800",
     fontSize: 12,
+  },
+  payBtn: {
+    marginTop: 2,
+    minHeight: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#d86cb0",
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  payBtnText: {
+    color: "#fff",
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  paymentInfoCard: {
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#d7e4ff",
+    backgroundColor: "#f3f7ff",
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  paymentInfoText: {
+    flex: 1,
+    color: "#3e5b9a",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
   },
   cancelBtn: {
     marginTop: 2,

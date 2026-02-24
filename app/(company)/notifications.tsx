@@ -17,7 +17,7 @@ function typeIcon(type: CompanyNotification["type"]): keyof typeof Ionicons.glyp
   if (type.startsWith("booking_")) return "calendar-outline";
   if (type === "new_follower") return "people-outline";
   if (type === "service_rating" || type === "company_rating") return "star-outline";
-  if (type === "comment_like") return "chatbubble-outline";
+  if (type === "comment_like" || type === "post_comment") return "chatbubble-outline";
   return "heart-outline";
 }
 
