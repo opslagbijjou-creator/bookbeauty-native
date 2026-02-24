@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Stack, useRouter } from "expo-router";
 import { getUserRole, subscribeAuth } from "../../lib/authRepo";
+import { SUPER_ADMIN_UID } from "../../lib/adminAccess";
 
 export default function AdminStackLayout() {
   const router = useRouter();
@@ -11,6 +12,8 @@ export default function AdminStackLayout() {
         router.replace("/(auth)/login" as never);
         return;
       }
+
+      if (user.uid === SUPER_ADMIN_UID) return;
 
       const role = await getUserRole(user.uid);
       if (role === "admin") return;
@@ -24,5 +27,12 @@ export default function AdminStackLayout() {
     return unsub;
   }, [router]);
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="revenue" />
+      <Stack.Screen name="users" />
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
 }

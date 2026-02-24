@@ -739,6 +739,10 @@ export default function CompanyHomeScreen() {
             <Ionicons name="help-circle-outline" size={16} color={COLORS.primary} />
             <Text style={styles.quickText}>Vragen aan team</Text>
           </Pressable>
+          <Pressable style={styles.quickBtn} onPress={() => router.push("/(company)/revenue" as never)}>
+            <Ionicons name="wallet-outline" size={16} color={COLORS.primary} />
+            <Text style={styles.quickText}>Omzet</Text>
+          </Pressable>
           {companyId ? (
             <Pressable style={styles.quickBtn} onPress={() => router.push(`/(customer)/company/${companyId}` as never)}>
               <Ionicons name="eye-outline" size={16} color={COLORS.primary} />

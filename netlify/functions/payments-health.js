@@ -64,12 +64,19 @@ exports.handler = async (event) => {
     firebaseAdminError = error instanceof Error ? error.message : "unknown_error";
   }
 
-  // Platform core (platform API key flow)
+  // Platform-only core (single API key flow)
   const platformCore =
     env.APP_BASE_URL &&
     env.MOLLIE_WEBHOOK_URL &&
     env.MOLLIE_MODE &&
     env.MOLLIE_API_KEY_PLATFORM;
+
+  const platformOnlyReady = Boolean(
+    env.APP_BASE_URL &&
+      env.MOLLIE_WEBHOOK_URL &&
+      env.MOLLIE_MODE &&
+      env.MOLLIE_API_KEY_PLATFORM
+  );
 
   const platformTestReady = Boolean(
     String(process.env.MOLLIE_MODE || "").trim().toLowerCase() === "test" &&
@@ -105,7 +112,9 @@ exports.handler = async (event) => {
     ok: true,
     envVarsPresent: env,
     platformCore,
+    platformOnlyReady,
     platformTestReady,
+    connectBlocking: false,
     oauthCore,
     missingPlatformEnv,
     missingOauthEnv,

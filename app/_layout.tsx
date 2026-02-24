@@ -207,6 +207,7 @@ export default function RootLayout() {
         <Stack.Screen name="(admin)" />
         <Stack.Screen name="pay/return" />
         <Stack.Screen name="payments" />
+        <Stack.Screen name="payment-result" />
       </Stack>
     </>
   );

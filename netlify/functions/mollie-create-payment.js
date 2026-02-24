@@ -31,6 +31,7 @@ exports.handler = async (event) => {
   try {
     requireEnv("APP_BASE_URL");
     requireEnv("MOLLIE_WEBHOOK_URL");
+    requireEnv("MOLLIE_MODE");
     requireEnv("MOLLIE_API_KEY_PLATFORM");
   } catch (error) {
     return response(500, {
@@ -68,7 +69,7 @@ exports.handler = async (event) => {
   }
 
   const platformFeeCents = Math.round(amountCents * 0.08);
-  const companyNetCents = amountCents - platformFeeCents;
+  const salonNetCents = amountCents - platformFeeCents;
   const appBaseUrl = requireEnv("APP_BASE_URL").replace(/\/+$/, "");
   const webhookUrl = requireEnv("MOLLIE_WEBHOOK_URL");
   const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
@@ -78,13 +79,13 @@ exports.handler = async (event) => {
     const payment = await mollie.payments.create({
       amount: { currency: "EUR", value: toAmountValueFromCents(amountCents) },
       description: "BookBeauty test booking",
-      redirectUrl: `${appBaseUrl}/payments?bookingId=${encodeURIComponent(bookingId)}`,
+      redirectUrl: `${appBaseUrl}/payment-result?bookingId=${encodeURIComponent(bookingId)}`,
       webhookUrl,
       metadata: {
         bookingId,
         companyId,
         platformFeeCents,
-        companyNetCents,
+        salonNetCents,
       },
     });
 
@@ -103,19 +104,29 @@ exports.handler = async (event) => {
         paymentStatus: "pending_payment",
         mollie: {
           paymentId,
-          mode: "platform_test",
+          mode: "platform_only",
           status: "open",
+          checkoutUrl,
           createdAt: nowTs,
+          updatedAt: nowTs,
         },
         breakdown: {
           amountCents,
           platformFeeCents,
-          companyNetCents,
+          salonNetCents,
         },
         updatedAt: nowTs,
       },
       { merge: true }
     );
+
+    console.log("[mollie-create-payment] created", {
+      bookingId,
+      paymentId,
+      amountCents,
+      platformFeeCents,
+      salonNetCents,
+    });
 
     return response(200, {
       ok: true,

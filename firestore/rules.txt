@@ -9,18 +9,18 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == companyId;
     }
 
+    function isSuperAdmin() {
+      return signedIn()
+        && request.auth.uid == "XSf53YUdrNMtEXB1UAdLpieoLTi2";
+    }
+
     function hasRole(role) {
       return signedIn()
         && (
-          (
-            role == "admin"
-            && request.auth.uid == "mR3MZu9ankZbckM4HZ4ZLFhP8UV2"
-            && request.auth.token.email == "hamza@bookbeauty.nl"
-          )
+          (role == "admin" && isAdmin())
           || (
             role != "admin"
-            &&
-            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid))
             && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role
           )
         );
@@ -32,7 +32,11 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return hasRole("admin");
+      return isSuperAdmin()
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
+        );
     }
 
     function isInfluencer() {
@@ -136,20 +140,21 @@ service cloud.firestore {
           request.resource.data.role == "customer"
           || request.resource.data.role == "company"
           || request.resource.data.role == "influencer"
-          || (
-            request.resource.data.role == "admin"
-            && request.auth.uid == "mR3MZu9ankZbckM4HZ4ZLFhP8UV2"
-            && request.auth.token.email == "hamza@bookbeauty.nl"
-          )
+          || (request.resource.data.role == "admin" && isSuperAdmin())
         );
       allow update: if signedIn() && (
-        isAdmin()
+        isSuperAdmin()
         || ownerCanAssignEmployee(uid)
         || ownerCanUnassignEmployee(uid)
+        || (
+          isAdmin()
+          && request.resource.data.role != "admin"
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role"])
+        )
         || (request.auth.uid == uid
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["role", "companyId"]))
       );
-      allow delete: if isAdmin();
+      allow delete: if isSuperAdmin();
 
       match /notifications/{notificationId} {
         allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
@@ -163,7 +168,10 @@ service cloud.firestore {
 
     match /user_lookup/{emailKey} {
       allow read: if signedIn() && (isAdmin() || hasRole("company"));
-      allow create, update: if signedIn() && request.auth.uid == request.resource.data.uid;
+      allow create, update: if signedIn() && (
+        request.auth.uid == request.resource.data.uid
+        || isSuperAdmin()
+      );
       allow delete: if isAdmin();
     }
 

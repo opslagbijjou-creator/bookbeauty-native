@@ -35,7 +35,7 @@ function mapStatus(mollieStatus) {
   if (normalized === "failed" || normalized === "canceled" || normalized === "expired") {
     return { paymentStatus: "failed", paid: false };
   }
-  return { paymentStatus: "pending_payment", paid: false };
+  return { paymentStatus: "open", paid: false };
 }
 
 async function findBookingByPaymentId(db, paymentId) {
@@ -77,7 +77,7 @@ exports.handler = async (event) => {
   const paymentId = parsePaymentId(event);
   console.log("[mollie-webhook] request", { method, hasPaymentId: Boolean(paymentId) });
   if (!paymentId) {
-    return response(200, { ok: true, received: true, skipped: "missing_payment_id" });
+    return response(200, { ok: true });
   }
 
   try {
@@ -94,6 +94,7 @@ exports.handler = async (event) => {
     const mapped = mapStatus(statusRaw);
 
     const nowTs = admin.firestore.FieldValue.serverTimestamp();
+    const bookingId = bookingDoc.id;
     await bookingDoc.ref.set(
       {
         paymentStatus: mapped.paymentStatus,
@@ -110,6 +111,13 @@ exports.handler = async (event) => {
       },
       { merge: true }
     );
+
+    console.log("[mollie-webhook] processed", {
+      bookingId,
+      paymentId,
+      mollieStatus: statusRaw,
+      paymentStatus: mapped.paymentStatus,
+    });
 
     return response(200, { ok: true });
   } catch (error) {
