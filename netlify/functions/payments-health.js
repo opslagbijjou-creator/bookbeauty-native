@@ -72,7 +72,7 @@ exports.handler = async (event) => {
     env.MOLLIE_API_KEY_PLATFORM;
 
   const platformTestReady = Boolean(
-    env.MOLLIE_MODE &&
+    String(process.env.MOLLIE_MODE || "").trim().toLowerCase() === "test" &&
       env.MOLLIE_API_KEY_PLATFORM &&
       env.MOLLIE_WEBHOOK_URL &&
       env.APP_BASE_URL
