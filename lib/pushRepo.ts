@@ -134,6 +134,23 @@ function resolveWebPushVapidPublicKeyFromRuntime(): string {
   return String(extra.EXPO_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY ?? "").trim();
 }
 
+function resolveAppBaseUrl(): string {
+  const processNode = (globalThis as { process?: { env?: Record<string, unknown> } }).process;
+  const fromProcess = String(processNode?.env?.EXPO_PUBLIC_APP_BASE_URL ?? "").trim();
+  if (fromProcess) return fromProcess.replace(/\/+$/, "");
+  const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
+  const fromExtra = String(extra.EXPO_PUBLIC_APP_BASE_URL ?? "").trim();
+  if (fromExtra) return fromExtra.replace(/\/+$/, "");
+  return "";
+}
+
+function resolveFunctionUrl(path: string): string {
+  if (Platform.OS === "web") return path;
+  const base = resolveAppBaseUrl();
+  if (!base) return "";
+  return `${base}${path}`;
+}
+
 async function resolveWebPushVapidPublicKey(): Promise<string> {
   if (cachedVapidPublicKey) return cachedVapidPublicKey;
 
@@ -605,14 +622,19 @@ async function sendExpoPush(tokens: string[], message: PushMessage): Promise<voi
 }
 
 async function sendPushViaBackendProxy(uid: string, message: PushMessage): Promise<boolean> {
-  if (Platform.OS !== "web") return false;
   const currentUser = auth.currentUser;
   if (!currentUser) return false;
 
   const idToken = await currentUser.getIdToken().catch(() => "");
   if (!idToken) return false;
 
-  const response = await fetch(PUSH_PROXY_ENDPOINT, {
+  const endpoint = resolveFunctionUrl(PUSH_PROXY_ENDPOINT);
+  if (!endpoint) {
+    console.warn("[pushRepo] Missing EXPO_PUBLIC_APP_BASE_URL for backend push proxy.");
+    return false;
+  }
+
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -627,7 +649,11 @@ async function sendPushViaBackendProxy(uid: string, message: PushMessage): Promi
     }),
   }).catch(() => null);
 
-  if (!response?.ok) return false;
+  if (!response?.ok) {
+    const status = Number(response?.status || 0);
+    console.warn("[pushRepo] Backend push proxy call failed", { status, endpoint });
+    return false;
+  }
 
   const payload = await response.json().catch(() => null);
   if (!payload || typeof payload !== "object") return true;
@@ -665,10 +691,21 @@ export async function sendPushToUser(
     data: message.data,
     playSound: message.playSound,
   }).catch(() => false);
-  if (pushedViaProxy) return;
+  if (pushedViaProxy) {
+    return;
+  }
 
-  const snap = await getDoc(doc(db, "push_subscriptions", cleanUid));
-  if (!snap.exists()) return;
+  const currentUid = String(auth.currentUser?.uid || "").trim();
+  if (!currentUid || currentUid !== cleanUid) {
+    console.warn("[pushRepo] Push fallback skipped because target uid differs and proxy failed.", {
+      targetUid: cleanUid,
+      actorUid: currentUid || "none",
+    });
+    return;
+  }
+
+  const snap = await getDoc(doc(db, "push_subscriptions", cleanUid)).catch(() => null);
+  if (!snap?.exists()) return;
 
   const data = snap.data() as PushSubscriptionDoc;
   const tokens = normalizeTokens(data.tokens);
