@@ -1,5 +1,6 @@
 const webpush = require("web-push");
 const { getFirestore } = require("./_firebaseAdmin");
+const EXPO_PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 
 function pickSafeSubscriptionShape(sub) {
   if (!sub) return null;
@@ -20,12 +21,32 @@ exports.handler = async () => {
       return { statusCode: 400, body: JSON.stringify({ ok: false, error: "no_subscriptions_found" }) };
     }
 
-    // Pak het nieuwste doc dat een endpoint heeft
+    // Pak het nieuwste doc dat een web endpoint of expo token heeft.
     let chosenDoc = null;
     let chosenSub = null;
+    let chosenToken = "";
 
     for (const d of snap.docs) {
       const data = d.data() || {};
+
+      const tokens = Array.isArray(data.tokens)
+        ? data.tokens
+            .map((row) => String(row || "").trim())
+            .filter((row) => row.startsWith("ExponentPushToken[") && row.endsWith("]"))
+        : [];
+      if (tokens.length) {
+        chosenDoc = d;
+        chosenToken = tokens[0];
+        break;
+      }
+
+      const webSubscriptions = Array.isArray(data.webSubscriptions) ? data.webSubscriptions : [];
+      const validWeb = webSubscriptions.find((row) => row && typeof row === "object" && row.endpoint);
+      if (validWeb) {
+        chosenDoc = d;
+        chosenSub = validWeb;
+        break;
+      }
 
       // mogelijke velden die jij zou kunnen hebben:
       const candidates = [
@@ -43,7 +64,7 @@ exports.handler = async () => {
       }
     }
 
-    if (!chosenSub) {
+    if (!chosenSub && !chosenToken) {
       // geef info terug over de eerste doc structuur (zonder secrets)
       const d0 = snap.docs[0];
       const data0 = d0.data() || {};
@@ -68,20 +89,43 @@ exports.handler = async () => {
       };
     }
 
-    webpush.setVapidDetails(
-      "mailto:support@bookbeauty.nl",
-      process.env.WEB_PUSH_VAPID_PUBLIC_KEY,
-      process.env.WEB_PUSH_VAPID_PRIVATE_KEY
-    );
+    if (chosenToken) {
+      await fetch(EXPO_PUSH_ENDPOINT, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Accept-encoding": "gzip, deflate",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify([
+          {
+            to: chosenToken,
+            title: "BookBeauty Test",
+            body: "Push werkt! (expo token)",
+            sound: "default",
+            priority: "high",
+            data: {
+              test: true,
+            },
+          },
+        ]),
+      });
+    } else {
+      webpush.setVapidDetails(
+        "mailto:support@bookbeauty.nl",
+        process.env.WEB_PUSH_VAPID_PUBLIC_KEY,
+        process.env.WEB_PUSH_VAPID_PRIVATE_KEY
+      );
 
-    await webpush.sendNotification(
-      chosenSub,
-      JSON.stringify({
-        title: "BookBeauty Test 🚀",
-        body: "Push werkt! (endpoint gevonden)",
-        url: "https://www.bookbeauty.nl",
-      })
-    );
+      await webpush.sendNotification(
+        chosenSub,
+        JSON.stringify({
+          title: "BookBeauty Test 🚀",
+          body: "Push werkt! (web subscription)",
+          url: "https://www.bookbeauty.nl",
+        })
+      );
+    }
 
     return {
       statusCode: 200,
@@ -89,7 +133,8 @@ exports.handler = async () => {
         ok: true,
         sent: true,
         usedDocId: chosenDoc.id,
-        subscriptionShape: pickSafeSubscriptionShape(chosenSub),
+        mode: chosenToken ? "expo_token" : "web_subscription",
+        subscriptionShape: chosenSub ? pickSafeSubscriptionShape(chosenSub) : null,
       }),
     };
   } catch (err) {

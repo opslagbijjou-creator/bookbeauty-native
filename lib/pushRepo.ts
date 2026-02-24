@@ -113,6 +113,13 @@ function normalizeWebPushSubscription(value: unknown): WebPushSubscriptionShape 
   };
 }
 
+function mergeUniqueWebSubscriptions(
+  current: WebPushSubscriptionShape[],
+  next: WebPushSubscriptionShape
+): WebPushSubscriptionShape[] {
+  return [next, ...current.filter((item) => item.endpoint !== next.endpoint)].slice(0, 15);
+}
+
 function base64UrlToUint8Array(value: string): Uint8Array {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
@@ -141,7 +148,7 @@ function resolveAppBaseUrl(): string {
   const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
   const fromExtra = String(extra.EXPO_PUBLIC_APP_BASE_URL ?? "").trim();
   if (fromExtra) return fromExtra.replace(/\/+$/, "");
-  return "";
+  return "https://www.bookbeauty.nl";
 }
 
 function resolveFunctionUrl(path: string): string {
@@ -429,12 +436,19 @@ async function registerWebPushSubscriptionForUser(
 
   const savedViaBackend = await saveWebPushSubscriptionViaBackend(cleanUid, payload, permission);
   if (!savedViaBackend) {
-    return {
-      ok: false,
-      platform: "web",
-      reason: "backend_save_failed",
-      permission,
-    };
+    const savedDirect = await saveWebPushSubscriptionDirect(cleanUid, payload, permission).catch(() => false);
+    if (!savedDirect) {
+      return {
+        ok: false,
+        platform: "web",
+        reason: "backend_save_failed",
+        permission,
+      };
+    }
+    console.log("[pushRepo] Web push subscription saved via direct Firestore fallback", {
+      uid: cleanUid,
+      endpointTail: payload.endpoint.slice(-12),
+    });
   }
 
   return {
@@ -484,6 +498,53 @@ async function saveWebPushSubscriptionViaBackend(
 
   const payload = await response.json().catch(() => null);
   return Boolean((payload as { ok?: unknown } | null)?.ok === true);
+}
+
+async function saveWebPushSubscriptionDirect(
+  uid: string,
+  subscription: WebPushSubscriptionShape,
+  permission: string
+): Promise<boolean> {
+  const cleanUid = String(uid ?? "").trim();
+  if (!cleanUid) return false;
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) return false;
+  const actorUid = String(currentUser.uid ?? "").trim();
+  if (!actorUid || actorUid !== cleanUid) return false;
+
+  const nav = (globalThis as { navigator?: Navigator }).navigator;
+  const userAgent = String(nav?.userAgent ?? "").trim().slice(0, 500);
+
+  const ref = doc(db, "push_subscriptions", cleanUid);
+  const snap = await getDoc(ref).catch(() => null);
+  const existingData = (snap?.exists() ? (snap.data() as PushSubscriptionDoc) : {}) ?? {};
+
+  const existingWeb = Array.isArray(existingData.webSubscriptions)
+    ? existingData.webSubscriptions
+        .map((row) => normalizeWebPushSubscription(row))
+        .filter((row): row is WebPushSubscriptionShape => Boolean(row))
+    : [];
+
+  const mergedWeb = mergeUniqueWebSubscriptions(existingWeb, subscription);
+
+  await setDoc(
+    ref,
+    {
+      uid: cleanUid,
+      platform: "web",
+      webSubscriptions: mergedWeb,
+      webPushPermission: permission,
+      webPushUpdatedAtMs: Date.now(),
+      lastSource: "pwa-direct-fallback",
+      lastUserAgent: userAgent,
+      ...(snap?.exists() ? {} : { createdAt: serverTimestamp() }),
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return true;
 }
 
 export async function registerPushTokenForUser(

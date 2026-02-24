@@ -96,8 +96,12 @@ export default function CompanyNotificationsScreen() {
     setEnablingPush(true);
     try {
       const result = await registerPushTokenForUser(uid, { requestPermission: true });
+      console.log("[company/notifications] registerPushTokenForUser", result);
       if (result.ok) {
-        Alert.alert("Push ingesteld", "Je ontvangt nu meldingen op dit toestel.");
+        Alert.alert(
+          "Push ingesteld",
+          `Je ontvangt nu meldingen op dit toestel.\nchannel=${result.channel ?? "-"}\nplatform=${result.platform}\nreason=${result.reason}`
+        );
         return;
       }
 
@@ -123,7 +127,10 @@ export default function CompanyNotificationsScreen() {
         return;
       }
 
-      Alert.alert("Push niet geactiveerd", "Kon push op dit toestel nog niet activeren.");
+      Alert.alert(
+        "Push niet geactiveerd",
+        `Kon push op dit toestel nog niet activeren.\nplatform=${result.platform}\nreason=${result.reason}\npermission=${result.permission ?? "-"}`
+      );
     } catch {
       Alert.alert("Push mislukt", "Kon push-toestemming niet instellen. Probeer opnieuw.");
     } finally {
