@@ -154,11 +154,25 @@ function normalizeCustomerNotificationType(value: unknown): CustomerNotification
 }
 
 function shouldPlaySoundForCompanyNotification(type: CompanyNotificationType): boolean {
-  return type === "booking_request";
+  return (
+    type === "booking_request" ||
+    type === "booking_reschedule_requested" ||
+    type === "booking_proposal_accepted" ||
+    type === "booking_proposal_declined" ||
+    type === "booking_checked_in"
+  );
 }
 
 function shouldPlaySoundForCustomerNotification(type: CustomerNotificationType): boolean {
-  return type === "booking_created" || type === "booking_confirmed" || type === "booking_checkin_ready";
+  return (
+    type === "booking_created" ||
+    type === "booking_confirmed" ||
+    type === "booking_checkin_ready" ||
+    type === "booking_time_proposed" ||
+    type === "booking_reschedule_approved" ||
+    type === "booking_reschedule_declined" ||
+    type === "booking_checked_in"
+  );
 }
 
 function toNotification(id: string, data: Record<string, unknown>): CompanyNotification {
@@ -508,12 +522,17 @@ export async function notifyCompanyOnBookingProposalDecisionByCustomer(params: {
   serviceName?: string;
   bookingId: string;
   decision: "accepted" | "declined";
+  newStartAtMs?: number;
 }): Promise<void> {
-  const { companyId, customerId, customerName, serviceId, serviceName, bookingId, decision } = params;
+  const { companyId, customerId, customerName, serviceId, serviceName, bookingId, decision, newStartAtMs } = params;
   if (!companyId || !customerId || !bookingId) return;
 
   const name = customerName?.trim() ? customerName.trim() : "De klant";
   const serviceLabel = serviceName?.trim() ? serviceName.trim() : "de afspraak";
+  const nextTimeLabel =
+    decision === "accepted" && Number.isFinite(Number(newStartAtMs))
+      ? ` Nieuwe tijd: ${formatMoment(Number(newStartAtMs))}.`
+      : "";
   await createCompanyNotification(companyId, {
     actorId: customerId,
     actorRole: "customer",
@@ -521,7 +540,7 @@ export async function notifyCompanyOnBookingProposalDecisionByCustomer(params: {
     title: decision === "accepted" ? "Tijdvoorstel geaccepteerd" : "Tijdvoorstel geweigerd",
     body:
       decision === "accepted"
-        ? `${name} heeft je nieuwe tijd voor ${serviceLabel} geaccepteerd.`
+        ? `${name} heeft je nieuwe tijd voor ${serviceLabel} geaccepteerd.${nextTimeLabel}`
         : `${name} heeft je tijdvoorstel voor ${serviceLabel} geweigerd.`,
     serviceId,
     bookingId,
@@ -688,8 +707,8 @@ export async function notifyCustomerOnBookingCheckInReady(params: {
     actorId: companyId,
     actorRole: "company",
     type: "booking_checkin_ready",
-    title: "Check-in is klaar",
-    body: `Je kunt nu inchecken voor ${serviceLabel} bij ${companyLabel}.`,
+    title: "Bevestig je aankomst",
+    body: `${companyLabel} heeft aangegeven dat je er bent voor ${serviceLabel}. Bevestig je aankomst in je boeking.`,
     companyId,
     companyName,
     serviceId,
@@ -737,16 +756,32 @@ export async function notifyCustomerOnRescheduleDecisionByCompany(params: {
   serviceName?: string;
   bookingId: string;
   decision: "approved" | "declined";
+  newStartAtMs?: number;
   actorId?: string;
   actorRole?: AppRole;
 }): Promise<void> {
-  const { customerId, companyId, companyName, serviceId, serviceName, bookingId, decision, actorId, actorRole } = params;
+  const {
+    customerId,
+    companyId,
+    companyName,
+    serviceId,
+    serviceName,
+    bookingId,
+    decision,
+    newStartAtMs,
+    actorId,
+    actorRole,
+  } = params;
   if (!customerId || !companyId || !bookingId) return;
 
   const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
   const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
   const actorIdToStore = actorId?.trim() || companyId;
   const actorRoleToStore = actorRole ?? "company";
+  const nextTimeLabel =
+    decision === "approved" && Number.isFinite(Number(newStartAtMs))
+      ? ` Nieuwe tijd: ${formatMoment(Number(newStartAtMs))}.`
+      : "";
   await createCustomerNotification(customerId, {
     actorId: actorIdToStore,
     actorRole: actorRoleToStore,
@@ -754,7 +789,7 @@ export async function notifyCustomerOnRescheduleDecisionByCompany(params: {
     title: decision === "approved" ? "Verplaatsing goedgekeurd" : "Verplaatsing afgewezen",
     body:
       decision === "approved"
-        ? `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} goedgekeurd.`
+        ? `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} goedgekeurd.${nextTimeLabel}`
         : `${companyLabel} heeft je verplaatsingsverzoek voor ${serviceLabel} afgewezen.`,
     companyId,
     companyName,
