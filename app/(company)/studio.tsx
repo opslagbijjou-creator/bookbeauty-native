@@ -239,6 +239,25 @@ export default function CompanyStudioScreen() {
     () => Math.max(0, effectiveVideoDurationSec - MAX_VIDEO_SECONDS),
     [effectiveVideoDurationSec]
   );
+
+  // --- Trim window % helpers (needed for px conversion) ---
+const trimWindowWidthPercent = useMemo(() => {
+  if (!isTrimEnabledForVideo) return 0;
+
+  // Window length: 15s (MAX_VIDEO_SECONDS)
+  // On short videos we don't show the rail anyway.
+  const width = (MAX_VIDEO_SECONDS / Math.max(0.001, effectiveVideoDurationSec)) * 100;
+  return clamp(width, 0, 100);
+}, [isTrimEnabledForVideo, effectiveVideoDurationSec]);
+
+const trimWindowLeftPercent = useMemo(() => {
+  if (!isTrimEnabledForVideo) return 0;
+
+  // Start position relative to total duration
+  const left = (clipStartSec / Math.max(0.001, effectiveVideoDurationSec)) * 100;
+  return clamp(left, 0, 100);
+}, [isTrimEnabledForVideo, clipStartSec, effectiveVideoDurationSec]);
+
   const hasCustomClipWindow =
     isTrimEnabledForVideo && clipEndSec > clipStartSec + 0.25;
 
@@ -252,16 +271,17 @@ export default function CompanyStudioScreen() {
     [trimMaxStartSec, effectiveVideoDurationSec]
   );
 
-  const trimWindowWidthPercent = useMemo(() => {
-    if (!isTrimEnabledForVideo || effectiveVideoDurationSec <= 0) return 100;
-    return Math.max(10, Math.min(100, (MAX_VIDEO_SECONDS / effectiveVideoDurationSec) * 100));
-  }, [isTrimEnabledForVideo, effectiveVideoDurationSec]);
+  const trimWindowWidthPx = useMemo(() => {
+  if (!isTrimEnabledForVideo || trimRailWidth <= 0) return 0;
+  return Math.max(28, (trimWindowWidthPercent / 100) * trimRailWidth);
+}, [isTrimEnabledForVideo, trimRailWidth, trimWindowWidthPercent]);
 
-  const trimWindowLeftPercent = useMemo(() => {
-    if (!isTrimEnabledForVideo || effectiveVideoDurationSec <= 0) return 0;
-    const left = (clipStartSec / effectiveVideoDurationSec) * 100;
-    return Math.max(0, Math.min(100 - trimWindowWidthPercent, left));
-  }, [isTrimEnabledForVideo, effectiveVideoDurationSec, clipStartSec, trimWindowWidthPercent]);
+const trimWindowLeftPx = useMemo(() => {
+  if (!isTrimEnabledForVideo || trimRailWidth <= 0) return 0;
+  const px = (trimWindowLeftPercent / 100) * trimRailWidth;
+  const maxLeft = Math.max(0, trimRailWidth - trimWindowWidthPx);
+  return Math.max(0, Math.min(maxLeft, px));
+}, [isTrimEnabledForVideo, trimRailWidth, trimWindowLeftPercent, trimWindowWidthPx]);
 
   const trimWindowLabel = useMemo(() => {
     if (!hasCustomClipWindow) return "";
@@ -280,8 +300,8 @@ export default function CompanyStudioScreen() {
         },
         onPanResponderMove: (_, gestureState) => {
           if (!isTrimEnabledForVideo || trimRailWidth <= 0 || effectiveVideoDurationSec <= 0) return;
-          const deltaSec = (gestureState.dx / trimRailWidth) * effectiveVideoDurationSec;
-          setTrimWindowStart(trimDragStartSecRef.current + deltaSec);
+          const deltaSec = (gestureState.dx / trimRailWidth) * trimMaxStartSec;
+setTrimWindowStart(trimDragStartSecRef.current + deltaSec);
         },
       }),
     [
@@ -1001,15 +1021,15 @@ export default function CompanyStudioScreen() {
                             }}
                           >
                             <View
-                              style={[
-                                styles.simpleTrimWindow,
-                                {
-                                  marginLeft: `${trimWindowLeftPercent}%`,
-                                  width: `${trimWindowWidthPercent}%`,
-                                },
-                              ]}
-                              {...trimPanResponder.panHandlers}
-                            >
+  style={[
+    styles.simpleTrimWindow,
+    {
+      marginLeft: trimWindowLeftPx,
+      width: trimWindowWidthPx,
+    },
+  ]}
+  {...trimPanResponder.panHandlers}
+>
                               <View style={styles.simpleTrimHandle} />
                             </View>
                           </Pressable>

@@ -6,9 +6,6 @@ export type MediaEditOptions = {
   filterPreset?: MediaFilterPreset;
 };
 
-/**
- * Normalize helpers
- */
 export function normalizeMediaCropPreset(value: unknown): MediaCropPreset {
   if (value === "9:16" || value === "1:1" || value === "4:5" || value === "16:9") return value;
   return "original";
@@ -19,35 +16,23 @@ export function normalizeMediaFilterPreset(value: unknown): MediaFilterPreset {
   return "none";
 }
 
-/**
- * IMPORTANT:
- * "ar_9:16" + c_pad ALLEEN kan alsnog rare scaling geven (zeker bij video).
- * Daarom: altijd vaste W/H meegeven per preset zodat Cloudinary nooit "raar gaat fitten".
- */
-function getPresetSize(preset: MediaCropPreset): { w: number; h: number; ar: string } | null {
-  if (preset === "9:16") return { w: 720, h: 1280, ar: "9:16" };
-  if (preset === "1:1") return { w: 1080, h: 1080, ar: "1:1" };
-  if (preset === "4:5") return { w: 1080, h: 1350, ar: "4:5" };
-  if (preset === "16:9") return { w: 1280, h: 720, ar: "16:9" };
-  return null;
+function isCloudinaryUrl(url: string): boolean {
+  return url.includes("/upload/");
 }
 
-/**
- * Crop transform:
- * - NO zoom/crop: we use c_pad (not c_fill) + background
- * - g_auto ok, but pad keeps whole frame.
- * - We add w/h so the output is stable.
- */
-function buildCropTransform(cropPreset: MediaCropPreset): string {
+function buildPadToAspectTransform(cropPreset: MediaCropPreset): string {
   if (cropPreset === "original") return "";
 
-  const preset = getPresetSize(cropPreset);
-  if (!preset) return "";
-
-  // b_black -> zwarte balken i.p.v. inzoomen/croppen
-  // c_pad -> behoudt volledige frame (geen zoom)
-  // w/h + ar -> stabiel resultaat
-  return `c_pad,g_auto,ar_${preset.ar},w_${preset.w},h_${preset.h},b_black`;
+  // Force exact aspect WITHOUT zoom-crop:
+  // - c_pad => pad instead of crop
+  // - b_black => black bars if needed
+  // - g_auto => auto gravity for placement
+  // - w/h => ensures Cloudinary actually applies the aspect target reliably
+  if (cropPreset === "9:16") return "c_pad,b_black,g_auto,ar_9:16,w_720,h_1280";
+  if (cropPreset === "1:1") return "c_pad,b_black,g_auto,ar_1:1,w_1080,h_1080";
+  if (cropPreset === "4:5") return "c_pad,b_black,g_auto,ar_4:5,w_1080,h_1350";
+  if (cropPreset === "16:9") return "c_pad,b_black,g_auto,ar_16:9,w_1280,h_720";
+  return "";
 }
 
 function buildFilterTransforms(filterPreset: MediaFilterPreset): string[] {
@@ -58,25 +43,22 @@ function buildFilterTransforms(filterPreset: MediaFilterPreset): string[] {
   return [];
 }
 
-/**
- * Cloudinary edited url builder:
- * - Only inject transforms if:
- *   - url contains /upload/
- *   - transforms actually exist
- * - Keeps querystring
- */
-export function buildCloudinaryEditedUrl(rawUrl: string, options: MediaEditOptions = {}): string {
+export function buildCloudinaryEditedUrl(rawUrl: string, options: MediaEditOptions): string {
   const source = String(rawUrl ?? "").trim();
   if (!source) return "";
+  if (!isCloudinaryUrl(source)) return source;
 
   const cropPreset = normalizeMediaCropPreset(options.cropPreset);
   const filterPreset = normalizeMediaFilterPreset(options.filterPreset);
 
   const transforms: string[] = [];
-  const cropTransform = buildCropTransform(cropPreset);
-  if (cropTransform) transforms.push(cropTransform);
+
+  const cropT = buildPadToAspectTransform(cropPreset);
+  if (cropT) transforms.push(cropT);
+
   transforms.push(...buildFilterTransforms(filterPreset));
 
+  // If nothing to do, return original
   if (!transforms.length) return source;
 
   const [rawPath, rawQuery = ""] = source.split("?");
@@ -87,13 +69,10 @@ export function buildCloudinaryEditedUrl(rawUrl: string, options: MediaEditOptio
   const basePath = rawPath.slice(0, markerIndex + marker.length);
   const suffixPath = rawPath.slice(markerIndex + marker.length);
 
-  // voorkom dubbel transforms stapelen
-  const alreadyHasTransforms = suffixPath.includes("/") && suffixPath.split("/")[0].includes(",");
-  if (alreadyHasTransforms) {
-    // Als je al transforms hebt, laat source met rust (anders stapel je en krijg je zoom / raar gedrag).
-    return source;
-  }
-
+  // IMPORTANT: do NOT stack transforms if already transformed
+  // If the suffix already starts with something like "c_", "e_", "f_", etc.
+  // you can choose to keep stacking, but this keeps it clean:
   const nextPath = `${basePath}${transforms.join(",")}/${suffixPath}`;
+
   return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
 }
