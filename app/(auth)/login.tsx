@@ -22,7 +22,6 @@ import { COLORS } from "../../lib/ui";
 function getEmailError(email: string) {
   const v = email.trim();
   if (!v) return "";
-  // simpele validatie (goed genoeg voor UX)
   if (!v.includes("@") || !v.includes(".")) return "Vul een geldig e-mailadres in.";
   return "";
 }
@@ -60,12 +59,16 @@ export default function LoginScreen() {
 
   const canSubmit = useMemo(() => {
     const e = email.trim();
-    return e.length > 3 && password.length >= 6 && !getEmailError(e) && !getPasswordError(password);
+    return (
+      e.length > 3 &&
+      password.length >= 6 &&
+      !getEmailError(e) &&
+      !getPasswordError(password)
+    );
   }, [email, password]);
 
   async function onLogin() {
     if (!canSubmit || loading) {
-      // zet errors zichtbaar als user te snel klikt
       setTouchedEmail(true);
       setTouchedPassword(true);
       return;
@@ -120,18 +123,32 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
-          {/* Logo (groot & vrij) */}
-          <View style={styles.logoContainer}>
-            <Image source={require("../../assets/logo/logo.png")} style={styles.logo} contentFit="contain" />
+          {/* ===== glossy / 3D background layers ===== */}
+          <View pointerEvents="none" style={styles.bgGlowTop} />
+          <View pointerEvents="none" style={styles.bgGlowBottom} />
+          <View pointerEvents="none" style={styles.bgHighlight} />
+
+          {/* ===== Logo (groot, precies boven card) ===== */}
+          <View style={styles.brandRow}>
+            <Image
+              source={require("../../assets/logo/logo.png")}
+              style={styles.logo}
+              contentFit="contain"
+            />
           </View>
 
+          {/* ===== Glass Card ===== */}
           <View style={styles.card}>
-            <Text style={styles.title}>BookBeauty</Text>
+            {/* subtle glass shine */}
+            <View pointerEvents="none" style={styles.cardShine} />
+
+            {/* Titel weg (zoals je wilde) */}
             <Text style={styles.subtitle}>Log in op je account</Text>
 
-            {/* MUI-achtige field: label + outlined input + helper/error */}
+            {/* Email */}
             <View style={styles.field}>
               <Text style={styles.label}>E-mail</Text>
+
               <View
                 style={[
                   styles.outlined,
@@ -142,7 +159,7 @@ export default function LoginScreen() {
                 <Ionicons name="mail-outline" size={18} color={COLORS.muted} />
                 <TextInput
                   value={email}
-                  onChangeText={(t) => setEmail(t)}
+                  onChangeText={setEmail}
                   placeholder="name@bedrijf.nl"
                   placeholderTextColor={COLORS.placeholder}
                   autoCapitalize="none"
@@ -157,6 +174,7 @@ export default function LoginScreen() {
                     setTouchedEmail(true);
                   }}
                 />
+
                 {email.length > 0 ? (
                   <Pressable
                     onPress={() => setEmail("")}
@@ -168,13 +186,16 @@ export default function LoginScreen() {
                   </Pressable>
                 ) : null}
               </View>
+
               <Text style={[styles.helper, !!emailError && styles.helperError]}>
                 {emailError ? emailError : "Gebruik het e-mailadres van je account."}
               </Text>
             </View>
 
+            {/* Password */}
             <View style={styles.field}>
               <Text style={styles.label}>Wachtwoord</Text>
+
               <View
                 style={[
                   styles.outlined,
@@ -185,7 +206,7 @@ export default function LoginScreen() {
                 <Ionicons name="lock-closed-outline" size={18} color={COLORS.muted} />
                 <TextInput
                   value={password}
-                  onChangeText={(t) => setPassword(t)}
+                  onChangeText={setPassword}
                   placeholder="••••••••"
                   placeholderTextColor={COLORS.placeholder}
                   secureTextEntry={!showPassword}
@@ -200,6 +221,7 @@ export default function LoginScreen() {
                     setTouchedPassword(true);
                   }}
                 />
+
                 <Pressable
                   onPress={() => setShowPassword((v) => !v)}
                   hitSlop={10}
@@ -213,12 +235,13 @@ export default function LoginScreen() {
                   />
                 </Pressable>
               </View>
+
               <Text style={[styles.helper, !!passwordError && styles.helperError]}>
                 {passwordError ? passwordError : "Minimaal 6 tekens."}
               </Text>
             </View>
 
-            {/* Primary action (MUI contained-gevoel) */}
+            {/* Button */}
             <Pressable
               onPress={onLogin}
               disabled={!canSubmit || loading}
@@ -249,11 +272,18 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.socialRow}>
-              <Pressable style={({ pressed }) => [styles.socialBtn, pressed && styles.softPressed]} onPress={() => onSocialLogin("apple")}>
+              <Pressable
+                style={({ pressed }) => [styles.socialBtn, pressed && styles.softPressed]}
+                onPress={() => onSocialLogin("apple")}
+              >
                 <Ionicons name="logo-apple" size={16} color={COLORS.text} />
                 <Text style={styles.socialBtnText}>Apple</Text>
               </Pressable>
-              <Pressable style={({ pressed }) => [styles.socialBtn, pressed && styles.softPressed]} onPress={() => onSocialLogin("google")}>
+
+              <Pressable
+                style={({ pressed }) => [styles.socialBtn, pressed && styles.softPressed]}
+                onPress={() => onSocialLogin("google")}
+              >
                 <Ionicons name="logo-google" size={16} color={COLORS.text} />
                 <Text style={styles.socialBtnText}>Google</Text>
               </Pressable>
@@ -268,72 +298,110 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: COLORS.bg, // jouw kleur blijft
     padding: 20,
   },
   scrollContent: {
     flexGrow: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 14,
   },
 
-  // Logo “vrij” boven de card
-  logoContainer: {
+  /* ===== Background: glossy / 3D (zonder kleuren te veranderen) ===== */
+  bgGlowTop: {
+    position: "absolute",
+    top: -40,
+    left: -60,
+    width: 260,
+    height: 260,
+    borderRadius: 260,
+    backgroundColor: "#ffffff",
+    opacity: 0.22,
+  },
+  bgGlowBottom: {
+    position: "absolute",
+    bottom: -60,
+    right: -80,
+    width: 320,
+    height: 320,
+    borderRadius: 320,
+    backgroundColor: "#ffffff",
+    opacity: 0.16,
+  },
+  bgHighlight: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+    opacity: 0.10,
+    backgroundColor: "#ffffff",
+    borderBottomLeftRadius: 80,
+    borderBottomRightRadius: 80,
+  },
+
+  /* ===== Logo ===== */
+  brandRow: {
     alignItems: "center",
-    marginBottom: -56,
-    zIndex: 10,
+    marginBottom: 14,
   },
   logo: {
-    width: 170,
-    height: 170,
+    width: 210,  // groter
+    height: 70,  // brede logo look (pas aan als je logo vierkant is)
   },
 
+  /* ===== Glass card ===== */
   card: {
     width: "100%",
     maxWidth: 420,
-    backgroundColor: COLORS.card,
+    backgroundColor: "rgba(255,255,255,0.72)", // glass effect
     borderRadius: 26,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: "rgba(255,255,255,0.7)",
     padding: 20,
-    paddingTop: 78,
     gap: 12,
 
     shadowColor: "#000",
     shadowOpacity: 0.10,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 8,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+    overflow: "hidden",
+  },
+  cardShine: {
+    position: "absolute",
+    top: -120,
+    left: -80,
+    width: 260,
+    height: 260,
+    borderRadius: 260,
+    backgroundColor: "#fff",
+    opacity: 0.35,
+    transform: [{ rotate: "20deg" }],
   },
 
-  title: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: COLORS.text,
-    textAlign: "center",
-  },
   subtitle: {
     color: COLORS.muted,
     textAlign: "center",
-    marginBottom: 2,
+    marginBottom: 6,
+    fontWeight: "700",
   },
 
-  field: {
-    gap: 6,
-  },
+  field: { gap: 6 },
   label: {
     color: COLORS.muted,
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 12,
     letterSpacing: 0.3,
   },
 
   outlined: {
     height: 52,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#fff",
+    borderColor: "rgba(0,0,0,0.10)",
+    backgroundColor: "rgba(255,255,255,0.85)",
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -341,34 +409,42 @@ const styles = StyleSheet.create({
   },
   outlinedFocused: {
     borderColor: COLORS.primary,
+    backgroundColor: "rgba(255,255,255,0.95)",
   },
   outlinedError: {
-    borderColor: "#D32F2F", // alleen error, je algemene kleuren blijven verder hetzelfde
+    borderColor: "#D32F2F",
   },
 
   input: {
     flex: 1,
     color: COLORS.text,
-    fontWeight: "600",
+    fontWeight: "700",
   },
 
   helper: {
     fontSize: 12,
     color: COLORS.muted,
     marginLeft: 2,
+    fontWeight: "600",
   },
   helperError: {
     color: "#D32F2F",
-    fontWeight: "600",
+    fontWeight: "700",
   },
 
   btn: {
-    marginTop: 2,
-    backgroundColor: COLORS.primary,
-    height: 52,
-    borderRadius: 16,
+    marginTop: 4,
+    backgroundColor: COLORS.primary, // jouw kleur blijft
+    height: 54,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
   },
   btnPressed: {
     transform: [{ scale: 0.99 }],
@@ -383,31 +459,32 @@ const styles = StyleSheet.create({
   },
   btnText: {
     color: "#fff",
-    fontWeight: "800",
+    fontWeight: "900",
+    fontSize: 16,
   },
 
   link: {
     marginTop: 6,
     textAlign: "center",
     color: COLORS.primary,
-    fontWeight: "700",
+    fontWeight: "900",
   },
 
   dividerRow: {
     marginTop: 2,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: "rgba(0,0,0,0.10)",
   },
   dividerText: {
     color: COLORS.muted,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
   },
 
   socialRow: {
@@ -416,19 +493,19 @@ const styles = StyleSheet.create({
   },
   socialBtn: {
     flex: 1,
-    height: 46,
-    borderRadius: 14,
+    height: 48,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.surface,
+    borderColor: "rgba(0,0,0,0.10)",
+    backgroundColor: "rgba(255,255,255,0.80)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 8,
   },
   socialBtnText: {
     color: COLORS.text,
-    fontWeight: "800",
+    fontWeight: "900",
   },
   softPressed: {
     transform: [{ scale: 0.99 }],

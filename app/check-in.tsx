@@ -24,41 +24,73 @@ function parseStatus(raw: unknown): string {
 
 export default function CheckInScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ bookingId?: string | string[]; code?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    bookingId?: string | string[];
+    id?: string | string[];
+    code?: string | string[];
+    checkInCode?: string | string[];
+  }>();
   const uid = String(auth.currentUser?.uid || "").trim();
 
   const bookingId = useMemo(() => {
-    const raw = params.bookingId;
+    const raw = params.bookingId ?? params.id;
     if (typeof raw === "string") return raw.trim();
     if (Array.isArray(raw)) return String(raw[0] || "").trim();
     return "";
-  }, [params.bookingId]);
+  }, [params.bookingId, params.id]);
   const code = useMemo(() => {
-    const raw = params.code;
+    const raw = params.code ?? params.checkInCode;
     if (typeof raw === "string") return raw.trim();
     if (Array.isArray(raw)) return String(raw[0] || "").trim();
     return "";
-  }, [params.code]);
+  }, [params.code, params.checkInCode]);
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [booking, setBooking] = useState<BookingLite | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [checkedInDone, setCheckedInDone] = useState(false);
+
+  const loginNextRoute = useMemo(() => {
+    if (!bookingId || !code) return "";
+    return `/check-in?bookingId=${encodeURIComponent(bookingId)}&code=${encodeURIComponent(code)}`;
+  }, [bookingId, code]);
+
+  function goToLogin(): void {
+    const next = loginNextRoute ? `?next=${encodeURIComponent(loginNextRoute)}` : "";
+    router.replace(`/(auth)/login${next}` as never);
+  }
 
   useEffect(() => {
     if (!bookingId) {
       setLoading(false);
       setBooking(null);
+      setLoadError("Geen bookingId gevonden in de QR-link.");
+      return;
+    }
+    if (!code) {
+      setLoading(false);
+      setBooking(null);
+      setLoadError("Geen check-in code gevonden in de QR-link.");
+      return;
+    }
+    if (!uid) {
+      setLoading(false);
+      setBooking(null);
+      setLoadError("Log in met je klantaccount om deze check-in te openen.");
       return;
     }
 
+    setLoadError("");
+    setLoading(true);
     const unsub = onSnapshot(
       doc(db, "bookings", bookingId),
       (snap) => {
         if (!snap.exists()) {
           setBooking(null);
           setLoading(false);
+          setLoadError("Boeking niet gevonden of niet meer beschikbaar.");
           return;
         }
         const data = snap.data() as Record<string, unknown>;
@@ -69,13 +101,21 @@ export default function CheckInScreen() {
           status: parseStatus(data.status),
         });
         setLoading(false);
+        setLoadError("");
       },
-      () => {
+      (error) => {
         setLoading(false);
+        setBooking(null);
+        const codeValue = String((error as { code?: unknown })?.code || "").trim();
+        if (codeValue === "permission-denied") {
+          setLoadError("Je bent niet ingelogd met het juiste klantaccount voor deze boeking.");
+          return;
+        }
+        setLoadError("Kon deze booking niet openen. Probeer opnieuw.");
       }
     );
     return unsub;
-  }, [bookingId]);
+  }, [bookingId, code, uid]);
 
   useEffect(() => {
     if (!checkedInDone) return;
@@ -144,7 +184,22 @@ export default function CheckInScreen() {
           </View>
         ) : !booking ? (
           <View style={styles.card}>
-            <Text style={styles.errorText}>Boeking niet gevonden of niet meer beschikbaar.</Text>
+            <Text style={styles.errorText}>{loadError || "Boeking niet gevonden of niet meer beschikbaar."}</Text>
+            {!uid ? (
+              <Pressable style={styles.primaryBtn} onPress={goToLogin}>
+                <Ionicons name="log-in-outline" size={16} color="#fff" />
+                <Text style={styles.primaryBtnText}>Inloggen en doorgaan</Text>
+              </Pressable>
+            ) : null}
+            {uid ? (
+              <Pressable
+                style={styles.secondaryBtn}
+                onPress={() => router.replace("/(customer)/(tabs)/bookings" as never)}
+              >
+                <Ionicons name="calendar-outline" size={16} color={COLORS.danger} />
+                <Text style={styles.secondaryBtnText}>Naar mijn boekingen</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : (
           <View style={styles.card}>
