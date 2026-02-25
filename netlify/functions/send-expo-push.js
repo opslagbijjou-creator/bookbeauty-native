@@ -80,6 +80,77 @@ function normalizeWebSubscriptions(value) {
   return output;
 }
 
+function mergeUniqueTokens(...groups) {
+  const merged = new Set();
+  groups.forEach((list) => {
+    normalizeTokens(list).forEach((token) => merged.add(token));
+  });
+  return Array.from(merged);
+}
+
+function mergeUniqueWebSubscriptions(...groups) {
+  const seen = new Set();
+  const output = [];
+  groups.forEach((list) => {
+    normalizeWebSubscriptions(list).forEach((sub) => {
+      if (seen.has(sub.endpoint)) return;
+      seen.add(sub.endpoint);
+      output.push(sub);
+    });
+  });
+  return output;
+}
+
+async function resolveRecipientUids(db, targetUid) {
+  const cleanTargetUid = String(targetUid || "").trim();
+  const recipients = new Set([cleanTargetUid]);
+  if (!cleanTargetUid) return [];
+
+  const companySnap = await db.collection("companies").doc(cleanTargetUid).get().catch(() => null);
+  if (companySnap?.exists) {
+    const company = companySnap.data() || {};
+    const ownerId = String(company.ownerId || "").trim();
+    if (ownerId) recipients.add(ownerId);
+
+    const staffSnap = await db
+      .collection("companies")
+      .doc(cleanTargetUid)
+      .collection("staff")
+      .where("isActive", "==", true)
+      .get()
+      .catch(() => null);
+
+    if (staffSnap && !staffSnap.empty) {
+      staffSnap.docs.forEach((staffDoc) => {
+        const staffData = staffDoc.data() || {};
+        const staffUid = String(staffData.userId || staffDoc.id || "").trim();
+        if (staffUid) recipients.add(staffUid);
+      });
+    }
+  }
+
+  return Array.from(recipients).filter(Boolean);
+}
+
+async function loadPushTargetsByRecipient(db, recipientUids) {
+  const cleanUids = Array.from(new Set((recipientUids || []).map((uid) => String(uid || "").trim()).filter(Boolean)));
+  const recipients = [];
+  for (const uid of cleanUids) {
+    const snap = await db.collection("push_subscriptions").doc(uid).get().catch(() => null);
+    if (!snap?.exists) continue;
+    const data = snap.data() || {};
+    const tokens = normalizeTokens(data.tokens);
+    const webSubscriptions = normalizeWebSubscriptions(data.webSubscriptions);
+    if (!tokens.length && !webSubscriptions.length) continue;
+    recipients.push({
+      uid,
+      tokens,
+      webSubscriptions,
+    });
+  }
+  return recipients;
+}
+
 function parseBoolean(value) {
   if (typeof value === "boolean") return value;
   if (typeof value !== "string") return false;
@@ -239,27 +310,20 @@ exports.handler = async (event) => {
 
   try {
     const db = getFirestore();
-    const pushSnap = await db.collection("push_subscriptions").doc(targetUid).get();
-    if (!pushSnap.exists) {
-      return response(200, {
-        ok: true,
-        sent: 0,
-        reason: "no_subscription",
-        uid: targetUid,
-      });
-    }
-
-    const pushData = pushSnap.data() || {};
-    const tokens = normalizeTokens(pushData.tokens);
-    const webSubscriptions = normalizeWebSubscriptions(pushData.webSubscriptions);
-    if (!tokens.length && !webSubscriptions.length) {
+    const recipientUids = await resolveRecipientUids(db, targetUid);
+    const recipients = await loadPushTargetsByRecipient(db, recipientUids);
+    if (!recipients.length) {
       return response(200, {
         ok: true,
         sent: 0,
         reason: "no_push_targets",
         uid: targetUid,
+        recipientUids,
       });
     }
+
+    const tokens = mergeUniqueTokens(...recipients.map((row) => row.tokens));
+    const webSubscriptions = mergeUniqueWebSubscriptions(...recipients.map((row) => row.webSubscriptions));
 
     const message = {
       title,
@@ -272,13 +336,18 @@ exports.handler = async (event) => {
 
     if (webResult.expiredEndpoints.length) {
       const stale = new Set(webResult.expiredEndpoints);
-      const filtered = webSubscriptions.filter((row) => !stale.has(row.endpoint));
-      await db.collection("push_subscriptions").doc(targetUid).set(
-        {
-          webSubscriptions: filtered,
-        },
-        { merge: true }
-      );
+      await Promise.all(
+        recipients.map(async (recipient) => {
+          const filtered = recipient.webSubscriptions.filter((row) => !stale.has(row.endpoint));
+          if (filtered.length === recipient.webSubscriptions.length) return;
+          await db.collection("push_subscriptions").doc(recipient.uid).set(
+            {
+              webSubscriptions: filtered,
+            },
+            { merge: true }
+          );
+        })
+      ).catch(() => null);
     }
 
     return response(200, {
@@ -286,6 +355,7 @@ exports.handler = async (event) => {
       uid: targetUid,
       actorUid,
       sent: expoResult.sent + webResult.sent,
+      recipientUids,
       expo: {
         sent: expoResult.sent,
         chunks: expoResult.chunks,

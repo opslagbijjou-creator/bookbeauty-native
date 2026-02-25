@@ -12,6 +12,8 @@ import {
 import { auth } from "../../lib/firebase";
 import { registerPushTokenForUser } from "../../lib/pushRepo";
 import { COLORS } from "../../lib/ui";
+import { getUserRole } from "../../lib/authRepo";
+import { getEmployeeCompanyId } from "../../lib/staffRepo";
 
 function typeIcon(type: CompanyNotification["type"]): keyof typeof Ionicons.glyphMap {
   if (type.startsWith("booking_")) return "calendar-outline";
@@ -39,6 +41,7 @@ function routeForNotification(item: CompanyNotification): string | null {
 
 export default function CompanyNotificationsScreen() {
   const uid = auth.currentUser?.uid ?? null;
+  const [companyId, setCompanyId] = useState<string | null>(uid);
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [markingAll, setMarkingAll] = useState(false);
@@ -47,10 +50,38 @@ export default function CompanyNotificationsScreen() {
   const [items, setItems] = useState<CompanyNotification[]>([]);
 
   useEffect(() => {
-    if (!uid) return;
+    if (!uid) {
+      setCompanyId(null);
+      return;
+    }
+
+    let mounted = true;
+    getUserRole(uid)
+      .then(async (role) => {
+        if (!mounted) return;
+        if (role === "employee") {
+          const linkedCompanyId = await getEmployeeCompanyId(uid);
+          if (!mounted) return;
+          setCompanyId(linkedCompanyId || uid);
+          return;
+        }
+        setCompanyId(uid);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setCompanyId(uid);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid || !companyId) return;
     setLoading(true);
     const unsub = subscribeMyCompanyNotifications(
-      uid,
+      companyId,
       (rows) => {
         setItems(rows);
         setLoading(false);
@@ -58,17 +89,17 @@ export default function CompanyNotificationsScreen() {
       () => setLoading(false)
     );
     return unsub;
-  }, [uid]);
+  }, [uid, companyId]);
 
   const unreadCount = items.filter((item) => !item.read).length;
 
   async function onMarkOne(item: CompanyNotification) {
-    if (!uid || openingId) return;
+    if (!uid || !companyId || openingId) return;
     setOpeningId(item.id);
     try {
       if (!item.read) {
         setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)));
-        await markNotificationRead(uid, item.id).catch(() => null);
+        await markNotificationRead(companyId, item.id).catch(() => null);
       }
 
       const nextRoute = routeForNotification(item);
@@ -81,10 +112,10 @@ export default function CompanyNotificationsScreen() {
   }
 
   async function onMarkAll() {
-    if (!uid || !unreadCount || markingAll || Boolean(openingId)) return;
+    if (!uid || !companyId || !unreadCount || markingAll || Boolean(openingId)) return;
     setMarkingAll(true);
     try {
-      await markAllNotificationsRead(uid);
+      await markAllNotificationsRead(companyId);
       setItems((prev) => prev.map((row) => ({ ...row, read: true })));
     } finally {
       setMarkingAll(false);

@@ -40,6 +40,7 @@ export type CompanyNotificationType =
 export type CustomerNotificationType =
   | "booking_created"
   | "booking_confirmed"
+  | "booking_checkin_ready"
   | "booking_cancelled"
   | "booking_checked_in"
   | "booking_completed"
@@ -135,6 +136,7 @@ function normalizeCompanyNotificationType(value: unknown): CompanyNotificationTy
 function normalizeCustomerNotificationType(value: unknown): CustomerNotificationType {
   const typeRaw = String(value ?? "booking_created");
   return typeRaw === "booking_confirmed" ||
+    typeRaw === "booking_checkin_ready" ||
     typeRaw === "booking_cancelled" ||
     typeRaw === "booking_checked_in" ||
     typeRaw === "booking_completed" ||
@@ -156,7 +158,7 @@ function shouldPlaySoundForCompanyNotification(type: CompanyNotificationType): b
 }
 
 function shouldPlaySoundForCustomerNotification(type: CustomerNotificationType): boolean {
-  return type === "booking_created" || type === "booking_confirmed";
+  return type === "booking_created" || type === "booking_confirmed" || type === "booking_checkin_ready";
 }
 
 function toNotification(id: string, data: Record<string, unknown>): CompanyNotification {
@@ -663,6 +665,31 @@ export async function notifyCustomerOnBookingStatusByCompany(params: {
       status === "confirmed"
         ? `${companyLabel} heeft ${serviceLabel} bevestigd.`
         : `${companyLabel} heeft ${serviceLabel} geannuleerd.`,
+    companyId,
+    companyName,
+    serviceId,
+    bookingId,
+  });
+}
+
+export async function notifyCustomerOnBookingCheckInReady(params: {
+  customerId: string;
+  companyId: string;
+  companyName?: string;
+  serviceId: string;
+  serviceName?: string;
+  bookingId: string;
+}): Promise<void> {
+  const { customerId, companyId, companyName, serviceId, serviceName, bookingId } = params;
+  if (!customerId || !bookingId) return;
+  const companyLabel = companyName?.trim() ? companyName.trim() : "de salon";
+  const serviceLabel = serviceName?.trim() ? serviceName.trim() : "je afspraak";
+  await createCustomerNotification(customerId, {
+    actorId: companyId,
+    actorRole: "company",
+    type: "booking_checkin_ready",
+    title: "Check-in is klaar",
+    body: `Je kunt nu inchecken voor ${serviceLabel} bij ${companyLabel}.`,
     companyId,
     companyName,
     serviceId,

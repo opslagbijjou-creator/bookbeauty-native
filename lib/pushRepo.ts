@@ -723,7 +723,7 @@ async function sendPushViaBackendProxy(uid: string, message: PushMessage): Promi
   if (Number.isFinite(sent) && sent > 0) return true;
 
   const reason = String((payload as { reason?: unknown }).reason ?? "").trim();
-  if (reason === "no_subscription" || reason === "no_push_targets") return true;
+  if (reason === "no_subscription" || reason === "no_push_targets") return false;
 
   const web = (payload as { web?: { configured?: unknown } }).web;
   if (typeof web?.configured === "boolean" && web.configured === false) {

@@ -15,6 +15,7 @@ import { COLORS } from "../../lib/ui";
 
 function typeIcon(type: CustomerNotification["type"]): keyof typeof Ionicons.glyphMap {
   if (type === "booking_confirmed") return "checkmark-circle-outline";
+  if (type === "booking_checkin_ready") return "qr-code-outline";
   if (type === "booking_cancelled") return "close-circle-outline";
   if (type === "booking_checked_in") return "scan-outline";
   if (type === "booking_completed") return "checkmark-done-circle-outline";
@@ -43,6 +44,7 @@ function isBookingNotification(type: CustomerNotification["type"]): boolean {
   return (
     type === "booking_created" ||
     type === "booking_confirmed" ||
+    type === "booking_checkin_ready" ||
     type === "booking_cancelled" ||
     type === "booking_checked_in" ||
     type === "booking_completed" ||

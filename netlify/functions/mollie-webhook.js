@@ -1,6 +1,6 @@
 const { createMollieClient } = require("@mollie/api-client");
 const { getFirestore, admin } = require("./_firebaseAdmin");
-const { isTestMode, requireEnv, response } = require("./_mollieConnect");
+const { requireEnv, response } = require("./_mollieConnect");
 let webPushModule = null;
 try {
   webPushModule = require("web-push");
@@ -65,6 +65,27 @@ function normalizeWebSubscriptions(value) {
       endpoint,
       expirationTime: Number.isFinite(node.expirationTime) ? Number(node.expirationTime) : null,
       keys: { p256dh, auth },
+    });
+  });
+  return output;
+}
+
+function mergeUniqueTokens(...groups) {
+  const merged = new Set();
+  groups.forEach((list) => {
+    normalizeTokens(list).forEach((token) => merged.add(token));
+  });
+  return Array.from(merged);
+}
+
+function mergeUniqueWebSubscriptions(...groups) {
+  const seen = new Set();
+  const output = [];
+  groups.forEach((list) => {
+    normalizeWebSubscriptions(list).forEach((sub) => {
+      if (seen.has(sub.endpoint)) return;
+      seen.add(sub.endpoint);
+      output.push(sub);
     });
   });
   return output;
@@ -165,14 +186,64 @@ async function sendWebPush(subscriptions, message) {
   }
 }
 
+async function resolveRecipientUids(db, targetUid) {
+  const cleanTargetUid = String(targetUid || "").trim();
+  const recipients = new Set([cleanTargetUid]);
+  if (!cleanTargetUid) return [];
+
+  const companySnap = await db.collection("companies").doc(cleanTargetUid).get().catch(() => null);
+  if (companySnap?.exists) {
+    const company = companySnap.data() || {};
+    const ownerId = String(company.ownerId || "").trim();
+    if (ownerId) recipients.add(ownerId);
+
+    const staffSnap = await db
+      .collection("companies")
+      .doc(cleanTargetUid)
+      .collection("staff")
+      .where("isActive", "==", true)
+      .get()
+      .catch(() => null);
+
+    if (staffSnap && !staffSnap.empty) {
+      staffSnap.docs.forEach((staffDoc) => {
+        const staffData = staffDoc.data() || {};
+        const staffUid = String(staffData.userId || staffDoc.id || "").trim();
+        if (staffUid) recipients.add(staffUid);
+      });
+    }
+  }
+
+  return Array.from(recipients).filter(Boolean);
+}
+
+async function loadPushTargetsByRecipient(db, recipientUids) {
+  const cleanUids = Array.from(new Set((recipientUids || []).map((uid) => String(uid || "").trim()).filter(Boolean)));
+  const recipients = [];
+  for (const uid of cleanUids) {
+    const snap = await db.collection("push_subscriptions").doc(uid).get().catch(() => null);
+    if (!snap?.exists) continue;
+    const data = snap.data() || {};
+    const tokens = normalizeTokens(data.tokens);
+    const webSubscriptions = normalizeWebSubscriptions(data.webSubscriptions);
+    if (!tokens.length && !webSubscriptions.length) continue;
+    recipients.push({
+      uid,
+      tokens,
+      webSubscriptions,
+    });
+  }
+  return recipients;
+}
+
 async function sendPushToUid(db, uid, message) {
   const targetUid = String(uid || "").trim();
   if (!targetUid) return;
-  const snap = await db.collection("push_subscriptions").doc(targetUid).get().catch(() => null);
-  if (!snap?.exists) return;
-  const data = snap.data() || {};
-  const tokens = normalizeTokens(data.tokens);
-  const webSubscriptions = normalizeWebSubscriptions(data.webSubscriptions);
+  const recipientUids = await resolveRecipientUids(db, targetUid);
+  const recipients = await loadPushTargetsByRecipient(db, recipientUids);
+  if (!recipients.length) return;
+  const tokens = mergeUniqueTokens(...recipients.map((row) => row.tokens));
+  const webSubscriptions = mergeUniqueWebSubscriptions(...recipients.map((row) => row.webSubscriptions));
   await Promise.all([sendExpoPush(tokens, message), sendWebPush(webSubscriptions, message)]);
 }
 
@@ -389,6 +460,48 @@ async function notifyCustomerOnPaymentProblem(db, bookingId, bookingData, paymen
   }).catch(() => null);
 }
 
+async function notifyCompanyOnPaymentProblem(db, bookingId, bookingData, paymentStatus) {
+  if (paymentStatus !== "canceled" && paymentStatus !== "expired") return;
+
+  const companyId = String(bookingData.companyId || "").trim();
+  const customerId = String(bookingData.customerId || "").trim();
+  const customerName = String(bookingData.customerName || "Een klant").trim() || "Een klant";
+  const serviceId = String(bookingData.serviceId || "").trim();
+  const serviceName = String(bookingData.serviceName || "de afspraak").trim() || "de afspraak";
+
+  if (!companyId) return;
+
+  const title = paymentStatus === "expired" ? "Betaling verlopen" : "Betaling geannuleerd";
+  const body =
+    paymentStatus === "expired"
+      ? `De betaling van ${customerName} voor ${serviceName} is verlopen.`
+      : `De betaling van ${customerName} voor ${serviceName} is geannuleerd.`;
+
+  await addCompanyNotification(db, {
+    companyId,
+    actorId: customerId,
+    actorRole: "customer",
+    type: "booking_cancelled",
+    title,
+    body,
+    bookingId,
+    serviceId,
+  }).catch(() => null);
+
+  await sendPushToUid(db, companyId, {
+    title,
+    body,
+    playSound: false,
+    data: {
+      role: "company",
+      bookingId,
+      companyId,
+      serviceId,
+      notificationType: "booking_cancelled",
+    },
+  }).catch(() => null);
+}
+
 async function findBookingByPaymentId(db, paymentId) {
   const nested = await db
     .collection("bookings")
@@ -412,7 +525,7 @@ async function findBookingByPaymentId(db, paymentId) {
 async function fetchPaymentWithPlatformKey(paymentId) {
   const apiKey = requireEnv("MOLLIE_API_KEY_PLATFORM");
   const client = createMollieClient({ apiKey });
-  return client.payments.get(paymentId, { testmode: isTestMode() });
+  return client.payments.get(paymentId);
 }
 
 async function syncPaymentById(db, paymentId, options = {}) {
@@ -500,6 +613,7 @@ async function syncPaymentById(db, paymentId, options = {}) {
     previousPaymentStatus !== mapped.paymentStatus
   ) {
     await notifyCustomerOnPaymentProblem(db, bookingId, booking, mapped.paymentStatus);
+    await notifyCompanyOnPaymentProblem(db, bookingId, booking, mapped.paymentStatus);
   }
 
   return {

@@ -28,6 +28,7 @@ import {
   notifyCompanyOnBookingNoShow,
   notifyCompanyOnBookingProposalDecisionByCustomer,
   notifyCompanyOnRescheduleRequestByCustomer,
+  notifyCustomerOnBookingCheckInReady,
   notifyCustomerOnBookingCheckedIn,
   notifyCustomerOnBookingCompleted,
   notifyCustomerOnBookingNoShow,
@@ -2218,7 +2219,16 @@ export async function generateBookingCheckInCodeByCompany(
   const expiresAtMs = nowMs + CHECK_IN_CODE_TTL_MIN * 60_000;
   const code = generateCheckInCode();
 
-  await runTransaction(db, async (transaction) => {
+  const notifyPayload = await runTransaction<
+    | {
+        customerId: string;
+        companyId: string;
+        companyName: string;
+        serviceId: string;
+        serviceName: string;
+      }
+    | null
+  >(db, async (transaction) => {
     const ref = doc(db, "bookings", bookingId);
     const snap = await transaction.get(ref);
     if (!snap.exists()) throw new Error("Boeking niet gevonden.");
@@ -2230,6 +2240,14 @@ export async function generateBookingCheckInCodeByCompany(
       throw new Error("Deze boeking kan pas worden verwerkt nadat de betaling is afgerond.");
     }
 
+    const payload = {
+      customerId: row.customerId,
+      companyId: row.companyId,
+      companyName: row.companyName,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+    };
+
     transaction.update(ref, {
       checkInCode: code,
       checkInCodeExpiresAt: new Date(expiresAtMs),
@@ -2238,7 +2256,19 @@ export async function generateBookingCheckInCodeByCompany(
       checkInRejectedReason: "",
       updatedAt: serverTimestamp(),
     });
+    return payload;
   });
+
+  if (notifyPayload) {
+    notifyCustomerOnBookingCheckInReady({
+      customerId: notifyPayload.customerId,
+      companyId: notifyPayload.companyId,
+      companyName: notifyPayload.companyName,
+      serviceId: notifyPayload.serviceId,
+      serviceName: notifyPayload.serviceName,
+      bookingId,
+    }).catch(() => null);
+  }
 
   return { code, expiresAtMs };
 }
