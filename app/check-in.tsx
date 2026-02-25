@@ -1,14 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { doc, onSnapshot } from "firebase/firestore";
-import {
-  confirmBookingCheckInByCustomer,
-  rejectBookingCheckInByCustomer,
-} from "../lib/bookingRepo";
-import { auth, db } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
 
 type BookingLite = {
@@ -30,8 +24,6 @@ export default function CheckInScreen() {
     code?: string | string[];
     checkInCode?: string | string[];
   }>();
-  const uid = String(auth.currentUser?.uid || "").trim();
-
   const bookingId = useMemo(() => {
     const raw = params.bookingId ?? params.id;
     if (typeof raw === "string") return raw.trim();
@@ -49,18 +41,59 @@ export default function CheckInScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [booking, setBooking] = useState<BookingLite | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [rejectReason, setRejectReason] = useState("");
   const [checkedInDone, setCheckedInDone] = useState(false);
 
-  const loginNextRoute = useMemo(() => {
-    if (!bookingId || !code) return "";
-    return `/check-in?bookingId=${encodeURIComponent(bookingId)}&code=${encodeURIComponent(code)}`;
-  }, [bookingId, code]);
+  const functionBaseUrl = useMemo(() => {
+    const raw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
+    return raw.replace(/\/+$/, "");
+  }, []);
 
-  function goToLogin(): void {
-    const next = loginNextRoute ? `?next=${encodeURIComponent(loginNextRoute)}` : "";
-    router.replace(`/(auth)/login${next}` as never);
-  }
+  const checkInEndpoint = useMemo(() => {
+    return Platform.OS === "web"
+      ? "/.netlify/functions/booking-checkin"
+      : `${functionBaseUrl}/.netlify/functions/booking-checkin`;
+  }, [functionBaseUrl]);
+
+  const callCheckInApi = useCallback(async (
+    action: "preview" | "confirm"
+  ): Promise<{ ok: boolean; error?: string; booking?: BookingLite; alreadyCheckedIn?: boolean }> => {
+    const response = await fetch(checkInEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        bookingId,
+        code,
+      }),
+    }).catch(() => null);
+
+    if (!response) return { ok: false, error: "Geen verbinding met check-in server." };
+    const payload = await response.json().catch(() => ({} as Record<string, unknown>));
+    if (!response.ok || payload.ok !== true) {
+      return {
+        ok: false,
+        error: String(payload.error || "").trim() || "Check-in mislukt.",
+      };
+    }
+
+    const bookingNode = payload.booking as Record<string, unknown> | undefined;
+    const bookingParsed = bookingNode
+      ? {
+          id: String(bookingNode.id || bookingId).trim(),
+          companyName: String(bookingNode.companyName || "").trim(),
+          serviceName: String(bookingNode.serviceName || "").trim(),
+          status: parseStatus(bookingNode.status),
+        }
+      : undefined;
+
+    return {
+      ok: true,
+      booking: bookingParsed,
+      alreadyCheckedIn: Boolean(payload.alreadyCheckedIn || payload.checkedIn),
+    };
+  }, [bookingId, checkInEndpoint, code]);
 
   useEffect(() => {
     if (!bookingId) {
@@ -75,47 +108,37 @@ export default function CheckInScreen() {
       setLoadError("Geen check-in code gevonden in de QR-link.");
       return;
     }
-    if (!uid) {
-      setLoading(false);
-      setBooking(null);
-      setLoadError("Log in met je klantaccount om deze check-in te openen.");
-      return;
-    }
 
+    let cancelled = false;
     setLoadError("");
     setLoading(true);
-    const unsub = onSnapshot(
-      doc(db, "bookings", bookingId),
-      (snap) => {
-        if (!snap.exists()) {
+
+    callCheckInApi("preview")
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.ok) {
           setBooking(null);
+          setLoadError(result.error || "Kon deze booking niet openen. Probeer opnieuw.");
           setLoading(false);
-          setLoadError("Boeking niet gevonden of niet meer beschikbaar.");
           return;
         }
-        const data = snap.data() as Record<string, unknown>;
-        setBooking({
-          id: snap.id,
-          companyName: String(data.companyName ?? "").trim(),
-          serviceName: String(data.serviceName ?? "").trim(),
-          status: parseStatus(data.status),
-        });
+        if (result.booking) {
+          setBooking(result.booking);
+        }
+        setCheckedInDone(Boolean(result.alreadyCheckedIn || result.booking?.status === "checked_in"));
         setLoading(false);
-        setLoadError("");
-      },
-      (error) => {
-        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
         setBooking(null);
-        const codeValue = String((error as { code?: unknown })?.code || "").trim();
-        if (codeValue === "permission-denied") {
-          setLoadError("Je bent niet ingelogd met het juiste klantaccount voor deze boeking.");
-          return;
-        }
         setLoadError("Kon deze booking niet openen. Probeer opnieuw.");
-      }
-    );
-    return unsub;
-  }, [bookingId, code, uid]);
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingId, code, checkInEndpoint, callCheckInApi]);
 
   useEffect(() => {
     if (!checkedInDone) return;
@@ -126,36 +149,19 @@ export default function CheckInScreen() {
   }, [bookingId, checkedInDone, router]);
 
   async function onConfirmArrival() {
-    if (!uid || !bookingId || !code || submitting) return;
+    if (!bookingId || !code || submitting) return;
     setSubmitting(true);
     try {
-      await confirmBookingCheckInByCustomer({ bookingId, customerId: uid, code });
+      const result = await callCheckInApi("confirm");
+      if (!result.ok) {
+        throw new Error(result.error || "Kon aankomst niet bevestigen.");
+      }
+      if (result.booking) {
+        setBooking(result.booking);
+      }
       setCheckedInDone(true);
     } catch (error: any) {
       Alert.alert("Check-in mislukt", error?.message ?? "Kon aankomst niet bevestigen.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function onRejectArrival() {
-    if (!uid || !bookingId || !code || submitting) return;
-    if (rejectReason.trim().length < 3) {
-      Alert.alert("Reden nodig", "Vul een korte reden in om te weigeren.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await rejectBookingCheckInByCustomer({
-        bookingId,
-        customerId: uid,
-        code,
-        reason: rejectReason.trim(),
-      });
-      Alert.alert("Gemeld", "Je weigering is veilig doorgestuurd naar het admin team.");
-      router.replace(`/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(bookingId)}` as never);
-    } catch (error: any) {
-      Alert.alert("Melding mislukt", error?.message ?? "Kon weigering niet versturen.");
     } finally {
       setSubmitting(false);
     }
@@ -185,21 +191,13 @@ export default function CheckInScreen() {
         ) : !booking ? (
           <View style={styles.card}>
             <Text style={styles.errorText}>{loadError || "Boeking niet gevonden of niet meer beschikbaar."}</Text>
-            {!uid ? (
-              <Pressable style={styles.primaryBtn} onPress={goToLogin}>
-                <Ionicons name="log-in-outline" size={16} color="#fff" />
-                <Text style={styles.primaryBtnText}>Inloggen en doorgaan</Text>
-              </Pressable>
-            ) : null}
-            {uid ? (
-              <Pressable
-                style={styles.secondaryBtn}
-                onPress={() => router.replace("/(customer)/(tabs)/bookings" as never)}
-              >
-                <Ionicons name="calendar-outline" size={16} color={COLORS.danger} />
-                <Text style={styles.secondaryBtnText}>Naar mijn boekingen</Text>
-              </Pressable>
-            ) : null}
+            <Pressable
+              style={styles.secondaryBtn}
+              onPress={() => router.replace("/(customer)/(tabs)/bookings" as never)}
+            >
+              <Ionicons name="calendar-outline" size={16} color={COLORS.danger} />
+              <Text style={styles.secondaryBtnText}>Naar mijn boekingen</Text>
+            </Pressable>
           </View>
         ) : (
           <View style={styles.card}>
@@ -220,23 +218,6 @@ export default function CheckInScreen() {
                     <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
                   )}
                   <Text style={styles.primaryBtnText}>Bevestig aankomst</Text>
-                </Pressable>
-
-                <TextInput
-                  value={rejectReason}
-                  onChangeText={setRejectReason}
-                  placeholder="Weiger reden (verplicht bij weigeren)"
-                  placeholderTextColor="#5f5f5f"
-                  style={styles.input}
-                  multiline
-                />
-                <Pressable
-                  style={[styles.secondaryBtn, submitting && styles.disabled]}
-                  onPress={() => onRejectArrival().catch(() => null)}
-                  disabled={submitting}
-                >
-                  <Ionicons name="close-circle-outline" size={16} color={COLORS.danger} />
-                  <Text style={styles.secondaryBtnText}>Weiger</Text>
                 </Pressable>
               </>
             ) : null}
@@ -315,19 +296,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 13,
     fontWeight: "900",
-  },
-  input: {
-    minHeight: 86,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#f8f8fb",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlignVertical: "top",
   },
   secondaryBtn: {
     minHeight: 40,

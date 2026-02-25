@@ -665,6 +665,14 @@ export default function BookingDashboardScreen() {
   const appBaseUrl = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl")
     .trim()
     .replace(/\/+$/, "");
+  const checkInModalLiveBooking = useMemo(() => {
+    if (!checkInModalBooking) return null;
+    return bookings.find((row) => row.id === checkInModalBooking.id) ?? checkInModalBooking;
+  }, [bookings, checkInModalBooking]);
+  const checkInModalCheckedIn = useMemo(() => {
+    const status = String(checkInModalLiveBooking?.status || "").trim().toLowerCase();
+    return status === "checked_in" || status === "completed";
+  }, [checkInModalLiveBooking]);
   const checkInUrl = checkInModalBooking && checkInCode
     ? `${appBaseUrl}/check-in?bookingId=${encodeURIComponent(checkInModalBooking.id)}&code=${encodeURIComponent(checkInCode)}`
     : "";
@@ -716,6 +724,14 @@ export default function BookingDashboardScreen() {
     setCheckInCode("");
     setCheckInExpiresAtMs(0);
   }, []);
+
+  useEffect(() => {
+    if (!checkInModalBooking || !checkInModalCheckedIn) return;
+    const timer = setTimeout(() => {
+      closeCheckInModal();
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [checkInModalBooking, checkInModalCheckedIn, closeCheckInModal]);
 
   const proposeDateOptions = useMemo(() => {
     if (!proposeModalBooking) return [];
@@ -1753,7 +1769,7 @@ export default function BookingDashboardScreen() {
       </ScrollView>
 
       <Modal
-        visible={Boolean(checkInModalBooking && checkInCode)}
+        visible={Boolean(checkInModalBooking)}
         transparent
         animationType="fade"
         onRequestClose={closeCheckInModal}
@@ -1774,25 +1790,44 @@ export default function BookingDashboardScreen() {
                 </Pressable>
               </View>
               <View style={styles.requestedTimeCard}>
-                <Ionicons name="qr-code-outline" size={14} color={BLUE.primary} />
-                <Text style={styles.requestedTimeText}>Code: {checkInCode || "-"}</Text>
+                <Ionicons
+                  name={checkInModalCheckedIn ? "checkmark-circle-outline" : "qr-code-outline"}
+                  size={14}
+                  color={checkInModalCheckedIn ? "#1f9a5f" : BLUE.primary}
+                />
+                <Text
+                  style={[
+                    styles.requestedTimeText,
+                    checkInModalCheckedIn ? { color: "#1f9a5f", fontWeight: "900" } : null,
+                  ]}
+                >
+                  {checkInModalCheckedIn ? "Aankomst bevestigd" : `Code: ${checkInCode || "-"}`}
+                </Text>
               </View>
-              {checkInUrl ? (
+              {!checkInModalCheckedIn && checkInUrl ? (
                 <Image
                   source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(checkInUrl)}` }}
                   style={styles.qrPreview}
                   contentFit="contain"
                 />
               ) : null}
-              <Text style={styles.selectedBookingMeta}>
-                Geldig tot: {checkInExpiresAtMs ? formatDateTime(checkInExpiresAtMs) : "-"}
-              </Text>
-              <Text style={styles.selectedBookingMeta}>
-                Link: {checkInUrl || "-"}
-              </Text>
+              {checkInModalCheckedIn ? (
+                <Text style={styles.selectedBookingMeta}>
+                  De QR is verwerkt. Deze afspraak staat nu op ingecheckt.
+                </Text>
+              ) : (
+                <>
+                  <Text style={styles.selectedBookingMeta}>
+                    Geldig tot: {checkInExpiresAtMs ? formatDateTime(checkInExpiresAtMs) : "-"}
+                  </Text>
+                  <Text style={styles.selectedBookingMeta}>
+                    Link: {checkInUrl || "-"}
+                  </Text>
+                </>
+              )}
               <Pressable style={styles.modalPrimaryBtn} onPress={closeCheckInModal}>
                 <Ionicons name="checkmark-outline" size={14} color="#fff" />
-                <Text style={styles.modalPrimaryBtnText}>Sluiten</Text>
+                <Text style={styles.modalPrimaryBtnText}>{checkInModalCheckedIn ? "Klaar" : "Sluiten"}</Text>
               </Pressable>
             </View>
           </View>

@@ -2250,6 +2250,7 @@ export async function generateBookingCheckInCodeByCompany(
 
     transaction.update(ref, {
       checkInCode: code,
+      checkInCodeLast: code,
       checkInCodeExpiresAt: new Date(expiresAtMs),
       checkInQrGeneratedAt: serverTimestamp(),
       checkInRejectedAt: null,
@@ -2323,6 +2324,7 @@ export async function confirmBookingCheckInByCustomer(params: {
     transaction.update(ref, {
       status: "checked_in",
       checkInConfirmedAt: serverTimestamp(),
+      checkInCodeLast: row.checkInCode || "",
       checkInCode: "",
       checkInCodeExpiresAt: null,
       checkInRejectedAt: null,
