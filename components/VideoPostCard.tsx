@@ -121,10 +121,12 @@ export default function VideoPostCard({
   const webSnapStyle: any = isWeb
     ? { scrollSnapAlign: "start", scrollSnapStop: "always" }
     : undefined;
-  const videoStyle: any = useMemo(
-    () => (isWeb ? [StyleSheet.absoluteFillObject, { objectFit: "contain" }] : StyleSheet.absoluteFillObject),
-    [isWeb]
-  );
+const videoStyle: any = useMemo(() => {
+  if (isWeb) {
+    return { width: "100%", height: "100%", objectFit: "contain" };
+  }
+  return { width: "100%", height: "100%" };
+}, [isWeb]);
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -209,6 +211,7 @@ export default function VideoPostCard({
 
   return (
     <View style={[styles.container, { height }, webSnapStyle]}>
+  <View style={{ flex: 1, backgroundColor: "#000", overflow: "hidden" }}></View>
       {imageUri && (mediaType === "image" || !videoReady) ? (
         <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="contain" />
       ) : null}
