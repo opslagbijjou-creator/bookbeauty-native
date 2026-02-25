@@ -23,6 +23,25 @@ function parseBody(event) {
   }
 }
 
+function parseBearerToken(event) {
+  const header =
+    String(event.headers?.authorization || "").trim() ||
+    String(event.headers?.Authorization || "").trim();
+  if (!header.startsWith("Bearer ")) return "";
+  return header.slice(7).trim();
+}
+
+async function verifyRequesterUid(event) {
+  const token = parseBearerToken(event);
+  if (!token) return "";
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    return String(decoded?.uid || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function readParam(event, body, key, fallback = "") {
   const query = event.queryStringParameters || {};
   const fromQuery = String(query[key] || "").trim();
@@ -138,6 +157,11 @@ exports.handler = async (event) => {
 
   try {
     const db = getFirestore();
+    const requesterUid = await verifyRequesterUid(event);
+    if (!requesterUid) {
+      return response(401, { ok: false, error: "Log in om check-in te openen." });
+    }
+
     const bookingRef = db.collection("bookings").doc(bookingId);
     const bookingSnap = await bookingRef.get();
     if (!bookingSnap.exists) {
@@ -145,6 +169,11 @@ exports.handler = async (event) => {
     }
 
     const data = bookingSnap.data() || {};
+    const customerId = String(data.customerId || "").trim();
+    if (!customerId || requesterUid !== customerId) {
+      return response(403, { ok: false, error: "Alleen de klant van deze afspraak kan deze QR gebruiken." });
+    }
+
     const status = sanitizeStatus(data.status);
     const activeCode = String(data.checkInCode || "").trim();
     const lastCode = String(data.checkInLastCode || "").trim();
@@ -228,4 +257,3 @@ exports.handler = async (event) => {
     });
   }
 };
-

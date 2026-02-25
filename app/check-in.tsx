@@ -3,6 +3,8 @@ import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, Text, View }
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { subscribeAuth } from "../lib/authRepo";
+import { auth } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
 
 type BookingLite = {
@@ -42,6 +44,8 @@ export default function CheckInScreen() {
   const [booking, setBooking] = useState<BookingLite | null>(null);
   const [loadError, setLoadError] = useState("");
   const [checkedInDone, setCheckedInDone] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [uid, setUid] = useState("");
 
   const functionBaseUrl = useMemo(() => {
     const raw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
@@ -54,13 +58,34 @@ export default function CheckInScreen() {
       : `${functionBaseUrl}/.netlify/functions/booking-checkin`;
   }, [functionBaseUrl]);
 
+  const loginNextRoute = useMemo(() => {
+    if (!bookingId || !code) return "";
+    return `/check-in?bookingId=${encodeURIComponent(bookingId)}&code=${encodeURIComponent(code)}`;
+  }, [bookingId, code]);
+
+  const goToLogin = useCallback(() => {
+    const next = loginNextRoute ? `?next=${encodeURIComponent(loginNextRoute)}` : "";
+    router.replace(`/(auth)/login${next}` as never);
+  }, [loginNextRoute, router]);
+
+  useEffect(() => {
+    const unsub = subscribeAuth((user) => {
+      setUid(String(user?.uid || "").trim());
+      setAuthReady(true);
+    });
+    return unsub;
+  }, []);
+
   const callCheckInApi = useCallback(async (
     action: "preview" | "confirm"
   ): Promise<{ ok: boolean; error?: string; booking?: BookingLite; alreadyCheckedIn?: boolean }> => {
+    const currentUser = auth.currentUser;
+    const idToken = currentUser ? await currentUser.getIdToken().catch(() => "") : "";
     const response = await fetch(checkInEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : null),
       },
       body: JSON.stringify({
         action,
@@ -96,6 +121,11 @@ export default function CheckInScreen() {
   }, [bookingId, checkInEndpoint, code]);
 
   useEffect(() => {
+    if (!authReady) {
+      setLoading(true);
+      return;
+    }
+
     if (!bookingId) {
       setLoading(false);
       setBooking(null);
@@ -106,6 +136,12 @@ export default function CheckInScreen() {
       setLoading(false);
       setBooking(null);
       setLoadError("Geen check-in code gevonden in de QR-link.");
+      return;
+    }
+    if (!uid) {
+      setLoading(false);
+      setBooking(null);
+      setLoadError("Log in met je klantaccount om deze check-in te openen.");
       return;
     }
 
@@ -138,7 +174,7 @@ export default function CheckInScreen() {
     return () => {
       cancelled = true;
     };
-  }, [bookingId, code, checkInEndpoint, callCheckInApi]);
+  }, [authReady, bookingId, code, uid, checkInEndpoint, callCheckInApi]);
 
   useEffect(() => {
     if (!checkedInDone) return;
@@ -191,6 +227,12 @@ export default function CheckInScreen() {
         ) : !booking ? (
           <View style={styles.card}>
             <Text style={styles.errorText}>{loadError || "Boeking niet gevonden of niet meer beschikbaar."}</Text>
+            {!uid ? (
+              <Pressable style={styles.primaryBtn} onPress={goToLogin}>
+                <Ionicons name="log-in-outline" size={16} color="#fff" />
+                <Text style={styles.primaryBtnText}>Inloggen en doorgaan</Text>
+              </Pressable>
+            ) : null}
             <Pressable
               style={styles.secondaryBtn}
               onPress={() => router.replace("/(customer)/(tabs)/bookings" as never)}
