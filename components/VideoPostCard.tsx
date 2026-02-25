@@ -63,13 +63,14 @@ function buildVideoCandidates(
       })
     : "";
 
+  // Prefer original urls first to preserve the uploaded framing/orientation.
   const candidates = [
-    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
-    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
-    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
     rawSourceVideo,
     rawVideo,
     editedFromSource,
+    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
+    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
+    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
   ].filter(Boolean);
 
   const unique: string[] = [];

@@ -7,6 +7,7 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -81,20 +82,26 @@ const FILTER_OPTIONS: { key: MediaFilterPreset; label: string }[] = [
   { key: "mono", label: "Mono" },
 ];
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function roundToTenth(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
 function parseHashtagsInput(value: string): string[] {
   const normalized = value
     .split(/[\s,]+/)
     .map((part) => part.trim().replace(/^#/, "").toLowerCase())
     .filter(Boolean);
   return Array.from(new Set(normalized)).slice(0, MAX_HASHTAGS);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function roundToTenth(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function formatClipRange(startSec: number, endSec: number): string {
+  const start = Math.max(0, startSec);
+  const end = Math.max(start, endSec);
+  return `${start.toFixed(1)}s - ${end.toFixed(1)}s`;
 }
 
 function formatHashtags(tags?: string[]): string {
@@ -138,12 +145,6 @@ function formatDate(ms?: number): string {
   });
 }
 
-function formatClipRange(startSec: number, endSec: number): string {
-  const start = Math.max(0, startSec);
-  const end = Math.max(start, endSec);
-  return `${start.toFixed(1)}s - ${end.toFixed(1)}s`;
-}
-
 export default function CompanyStudioScreen() {
   const router = useRouter();
   const segments = useSegments();
@@ -174,12 +175,10 @@ export default function CompanyStudioScreen() {
   const [filterPreset, setFilterPreset] = useState<MediaFilterPreset>(DEFAULT_FILTER_PRESET);
   const [uploadStep, setUploadStep] = useState<UploadStep>("select");
   const [uploadComposerVisible, setUploadComposerVisible] = useState(false);
-  const [videoLengthWarning, setVideoLengthWarning] = useState<string | null>(null);
   const [clipStartSec, setClipStartSec] = useState(0);
-  const [clipEndSec, setClipEndSec] = useState(MAX_VIDEO_SECONDS);
+  const [clipEndSec, setClipEndSec] = useState(0);
   const [detectedPreviewDurationSec, setDetectedPreviewDurationSec] = useState(0);
-  const [startRailWidth, setStartRailWidth] = useState(0);
-  const [endRailWidth, setEndRailWidth] = useState(0);
+  const [trimRailWidth, setTrimRailWidth] = useState(0);
   const [libraryPermission, setLibraryPermission] = useState<PermissionState>("undetermined");
   const [pendingMediaAction, setPendingMediaAction] = useState<PendingMediaAction | null>(null);
   const [postingStory, setPostingStory] = useState(false);
@@ -188,8 +187,8 @@ export default function CompanyStudioScreen() {
 
   const tabOpacity = useRef(new Animated.Value(1)).current;
   const previewVideoRef = useRef<Video | null>(null);
-  const previewSeekingRef = useRef(false);
   const uploadComposerAutoOpenedRef = useRef(false);
+  const trimDragStartSecRef = useRef(0);
 
   const activeServices = useMemo(() => services.filter((service) => service.isActive), [services]);
   const hashtags = useMemo(() => parseHashtagsInput(hashtagsInput), [hashtagsInput]);
@@ -234,18 +233,66 @@ export default function CompanyStudioScreen() {
     () => Math.max(videoDurationSec, detectedPreviewDurationSec, savedVideoDurationSec),
     [videoDurationSec, detectedPreviewDurationSec, savedVideoDurationSec]
   );
-  const clipDurationSec = useMemo(
-    () => Math.max(0, Number((clipEndSec - clipStartSec).toFixed(2))),
-    [clipEndSec, clipStartSec]
+  const isTrimEnabledForVideo =
+    uploadMediaType === "video" && hasLiveVideoPreview && effectiveVideoDurationSec > MAX_VIDEO_SECONDS + 0.01;
+  const trimMaxStartSec = useMemo(
+    () => Math.max(0, effectiveVideoDurationSec - MAX_VIDEO_SECONDS),
+    [effectiveVideoDurationSec]
   );
-  const hasVideoClipError =
-    uploadMediaType === "video" &&
-    hasLiveVideoPreview &&
-    (clipDurationSec < 1 ||
-      clipDurationSec > MAX_VIDEO_SECONDS ||
-      clipStartSec < 0 ||
-      clipEndSec <= clipStartSec ||
-      (effectiveVideoDurationSec > 0 && clipEndSec > effectiveVideoDurationSec + 0.001));
+  const hasCustomClipWindow =
+    isTrimEnabledForVideo && clipEndSec > clipStartSec + 0.25;
+
+  const setTrimWindowStart = useCallback(
+    (nextStartRaw: number) => {
+      const nextStartSec = roundToTenth(clamp(nextStartRaw, 0, trimMaxStartSec));
+      const nextEndSec = roundToTenth(Math.min(effectiveVideoDurationSec, nextStartSec + MAX_VIDEO_SECONDS));
+      setClipStartSec(nextStartSec);
+      setClipEndSec(nextEndSec);
+    },
+    [trimMaxStartSec, effectiveVideoDurationSec]
+  );
+
+  const trimWindowWidthPercent = useMemo(() => {
+    if (!isTrimEnabledForVideo || effectiveVideoDurationSec <= 0) return 100;
+    return Math.max(10, Math.min(100, (MAX_VIDEO_SECONDS / effectiveVideoDurationSec) * 100));
+  }, [isTrimEnabledForVideo, effectiveVideoDurationSec]);
+
+  const trimWindowLeftPercent = useMemo(() => {
+    if (!isTrimEnabledForVideo || effectiveVideoDurationSec <= 0) return 0;
+    const left = (clipStartSec / effectiveVideoDurationSec) * 100;
+    return Math.max(0, Math.min(100 - trimWindowWidthPercent, left));
+  }, [isTrimEnabledForVideo, effectiveVideoDurationSec, clipStartSec, trimWindowWidthPercent]);
+
+  const trimWindowLabel = useMemo(() => {
+    if (!hasCustomClipWindow) return "";
+    return formatClipRange(clipStartSec, clipEndSec);
+  }, [hasCustomClipWindow, clipStartSec, clipEndSec]);
+
+  const trimPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => isTrimEnabledForVideo,
+        onStartShouldSetPanResponderCapture: () => isTrimEnabledForVideo,
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          isTrimEnabledForVideo && Math.abs(gestureState.dx) > 2,
+        onPanResponderGrant: () => {
+          trimDragStartSecRef.current = hasCustomClipWindow ? clipStartSec : 0;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (!isTrimEnabledForVideo || trimRailWidth <= 0 || effectiveVideoDurationSec <= 0) return;
+          const deltaSec = (gestureState.dx / trimRailWidth) * effectiveVideoDurationSec;
+          setTrimWindowStart(trimDragStartSecRef.current + deltaSec);
+        },
+      }),
+    [
+      isTrimEnabledForVideo,
+      trimRailWidth,
+      effectiveVideoDurationSec,
+      hasCustomClipWindow,
+      clipStartSec,
+      setTrimWindowStart,
+    ]
+  );
 
   const onPreviewStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
@@ -254,75 +301,71 @@ export default function CompanyStudioScreen() {
         const nextDurationSec = status.durationMillis / 1000;
         setDetectedPreviewDurationSec((prev) => (Math.abs(prev - nextDurationSec) > 0.05 ? nextDurationSec : prev));
       }
-      if (previewSeekingRef.current) return;
+      if (!hasCustomClipWindow) return;
 
       const minStartSec = Math.max(0, clipStartSec);
       const maxEndSec = Math.max(minStartSec + 0.25, clipEndSec);
       const endMs = maxEndSec * 1000;
       if (!status.didJustFinish && status.positionMillis < endMs - 90) return;
 
-      previewSeekingRef.current = true;
       previewVideoRef.current
         ?.setPositionAsync(minStartSec * 1000)
         .then(() => previewVideoRef.current?.playAsync())
-        .catch(() => null)
-        .finally(() => {
-          previewSeekingRef.current = false;
-        });
+        .catch(() => null);
     },
-    [uploadMediaType, hasLiveVideoPreview, clipStartSec, clipEndSec]
+    [uploadMediaType, hasLiveVideoPreview, clipStartSec, clipEndSec, hasCustomClipWindow]
   );
 
   useEffect(() => {
-    if (!hasLiveVideoPreview || uploadMediaType !== "video") return;
-    const targetMs = Math.max(0, clipStartSec * 1000);
+    if (uploadMediaType !== "video" || !hasLiveVideoPreview) return;
 
+    if (!isTrimEnabledForVideo) {
+      if (clipStartSec !== 0) setClipStartSec(0);
+      if (clipEndSec !== 0) setClipEndSec(0);
+      return;
+    }
+
+    const normalizedStart = roundToTenth(clamp(clipStartSec, 0, trimMaxStartSec));
+    const normalizedEnd = roundToTenth(Math.min(effectiveVideoDurationSec, normalizedStart + MAX_VIDEO_SECONDS));
+    const needsUpdate =
+      Math.abs(clipStartSec - normalizedStart) > 0.05 ||
+      Math.abs(clipEndSec - normalizedEnd) > 0.05 ||
+      !hasCustomClipWindow;
+
+    if (needsUpdate) {
+      setClipStartSec(normalizedStart);
+      setClipEndSec(normalizedEnd);
+    }
+  }, [
+    uploadMediaType,
+    hasLiveVideoPreview,
+    isTrimEnabledForVideo,
+    trimMaxStartSec,
+    effectiveVideoDurationSec,
+    clipStartSec,
+    clipEndSec,
+    hasCustomClipWindow,
+  ]);
+
+  useEffect(() => {
+    if (!hasCustomClipWindow) return;
+    const targetMs = Math.max(0, clipStartSec * 1000);
     const timer = setTimeout(() => {
       previewVideoRef.current
         ?.setPositionAsync(targetMs)
         .then(() => previewVideoRef.current?.playAsync())
         .catch(() => null);
-    }, 120);
-
+    }, 80);
     return () => clearTimeout(timer);
-  }, [hasLiveVideoPreview, uploadMediaType, previewVideoUri, clipStartSec, clipEndSec, uploadStep]);
-
-  useEffect(() => {
-    if (uploadMediaType !== "video") return;
-
-    const totalDuration = effectiveVideoDurationSec > 0 ? effectiveVideoDurationSec : MAX_VIDEO_SECONDS;
-    const maxStart = Math.max(0, totalDuration - 1);
-    let nextStart = clamp(clipStartSec, 0, maxStart);
-    let nextEnd = clamp(clipEndSec, nextStart + 1, totalDuration);
-
-    if (nextEnd - nextStart > MAX_VIDEO_SECONDS) {
-      nextEnd = clamp(nextStart + MAX_VIDEO_SECONDS, nextStart + 1, totalDuration);
-    }
-
-    if (Math.abs(nextStart - clipStartSec) > 0.001) {
-      setClipStartSec(roundToTenth(nextStart));
-    }
-    if (Math.abs(nextEnd - clipEndSec) > 0.001) {
-      setClipEndSec(roundToTenth(nextEnd));
-    }
-
-    if (totalDuration > MAX_VIDEO_SECONDS) {
-      setVideoLengthWarning(
-        `Deze video is ${totalDuration.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
-      );
-    } else {
-      setVideoLengthWarning(null);
-    }
-  }, [uploadMediaType, effectiveVideoDurationSec, clipStartSec, clipEndSec]);
+  }, [hasCustomClipWindow, clipStartSec, previewVideoUri]);
 
   const submitLabel = editingPostId ? "Wijzigingen opslaan" : "Upload plaatsen";
   const canSubmit = useMemo(() => {
     if (uploading) return false;
     if (title.trim().length < 2) return false;
     if (!editingPostId && !video && !imageMedia) return false;
-    if (hasVideoClipError) return false;
     return true;
-  }, [uploading, title, editingPostId, video, imageMedia, hasVideoClipError]);
+  }, [uploading, title, editingPostId, video, imageMedia]);
 
   const refreshPermissionStates = useCallback(async () => {
     const libraryState = await getMediaLibraryPermissionState().catch(
@@ -423,22 +466,16 @@ export default function CompanyStudioScreen() {
     setCropPreset(DEFAULT_CROP_PRESET);
     setFilterPreset(DEFAULT_FILTER_PRESET);
     setClipStartSec(0);
-    setClipEndSec(MAX_VIDEO_SECONDS);
+    setClipEndSec(0);
     setDetectedPreviewDurationSec(0);
-    setStartRailWidth(0);
-    setEndRailWidth(0);
+    setTrimRailWidth(0);
     setUploadStep("select");
-    setVideoLengthWarning(null);
     setEditingPostId(null);
     setRefreshingAfterUpload(false);
     setPostingStory(false);
   }
 
   function applyEditForm(post: FeedPost) {
-    const nextClipStart = Math.max(0, Number(post.clipStartSec ?? 0) || 0);
-    const rawClipEnd = Math.max(0, Number(post.clipEndSec ?? 0) || 0);
-    const nextClipEnd = rawClipEnd > nextClipStart ? rawClipEnd : nextClipStart + MAX_VIDEO_SECONDS;
-
     setEditingPostId(post.id);
     setCategory(post.category || CATEGORIES[0]);
     setTitle(post.title ?? "");
@@ -451,13 +488,13 @@ export default function CompanyStudioScreen() {
     setFilterPreset(post.filterPreset ?? DEFAULT_FILTER_PRESET);
     setVideo(null);
     setImageMedia(null);
+    const nextClipStart = Math.max(0, Number(post.clipStartSec ?? 0) || 0);
+    const rawClipEnd = Math.max(0, Number(post.clipEndSec ?? 0) || 0);
     setClipStartSec(nextClipStart);
-    setClipEndSec(nextClipEnd);
+    setClipEndSec(rawClipEnd > nextClipStart + 0.25 ? rawClipEnd : 0);
     setDetectedPreviewDurationSec(Math.max(0, Number(post.videoDurationSec ?? 0) || 0));
-    setStartRailWidth(0);
-    setEndRailWidth(0);
+    setTrimRailWidth(0);
     setUploadStep("details");
-    setVideoLengthWarning(null);
     setStudioTab("upload");
     setUploadComposerVisible(true);
     setDetailPostId(null);
@@ -472,94 +509,20 @@ export default function CompanyStudioScreen() {
       setClipStartSec(0);
       setClipEndSec(0);
       setDetectedPreviewDurationSec(0);
-      setStartRailWidth(0);
-      setEndRailWidth(0);
-      setVideoLengthWarning(null);
+      setTrimRailWidth(0);
       setUploadStep("select");
       return;
     }
 
     const durationSec = picked.durationMs ? Math.max(0, picked.durationMs / 1000) : 0;
-    const defaultEnd = durationSec > 0 ? Math.min(durationSec, MAX_VIDEO_SECONDS) : MAX_VIDEO_SECONDS;
     setUploadMediaType("video");
     setImageMedia(null);
     setVideo(picked);
     setClipStartSec(0);
-    setClipEndSec(defaultEnd);
+    setClipEndSec(0);
     setDetectedPreviewDurationSec(durationSec);
-    setStartRailWidth(0);
-    setEndRailWidth(0);
+    setTrimRailWidth(0);
     setUploadStep("select");
-    if (durationSec > MAX_VIDEO_SECONDS) {
-      setVideoLengthWarning(
-        `Deze video is ${durationSec.toFixed(1)}s. Kies hieronder een clip van max ${MAX_VIDEO_SECONDS}s.`
-      );
-    } else {
-      setVideoLengthWarning(null);
-    }
-  }
-
-  function setClipStartFromRatio(ratioRaw: number) {
-    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
-    const ratio = clamp(ratioRaw, 0, 1);
-    const maxStart = Math.max(0, totalDuration - 1);
-    const nextStart = roundToTenth(ratio * maxStart);
-    const currentDuration = Math.max(1, clipEndSec - clipStartSec);
-    let nextEnd = nextStart + currentDuration;
-
-    if (nextEnd - nextStart > MAX_VIDEO_SECONDS) {
-      nextEnd = nextStart + MAX_VIDEO_SECONDS;
-    }
-    if (nextEnd > totalDuration) {
-      nextEnd = totalDuration;
-    }
-    if (nextEnd <= nextStart) {
-      nextEnd = Math.min(totalDuration, nextStart + 1);
-    }
-
-    setClipStartSec(roundToTenth(nextStart));
-    setClipEndSec(roundToTenth(nextEnd));
-  }
-
-  function setClipEndFromRatio(ratioRaw: number) {
-    const totalDuration = effectiveVideoDurationSec || MAX_VIDEO_SECONDS;
-    const ratio = clamp(ratioRaw, 0, 1);
-    const maxEnd = Math.min(totalDuration, clipStartSec + MAX_VIDEO_SECONDS);
-    const targetEnd = roundToTenth(ratio * totalDuration);
-    const nextEnd = clamp(targetEnd, clipStartSec + 1, maxEnd);
-    setClipEndSec(roundToTenth(nextEnd));
-  }
-
-  function nudgeClipStart(deltaSec: number) {
-    const totalDuration = Math.max(1, effectiveVideoDurationSec || MAX_VIDEO_SECONDS);
-    const maxStart = Math.max(0, totalDuration - 1);
-    const nextStart = clamp(roundToTenth(clipStartSec + deltaSec), 0, maxStart);
-
-    let nextEnd = clipEndSec;
-    if (nextEnd - nextStart > MAX_VIDEO_SECONDS) {
-      nextEnd = nextStart + MAX_VIDEO_SECONDS;
-    }
-    if (nextEnd <= nextStart) {
-      nextEnd = Math.min(totalDuration, nextStart + 1);
-    }
-    if (nextEnd > totalDuration) {
-      nextEnd = totalDuration;
-    }
-
-    setClipStartSec(roundToTenth(nextStart));
-    setClipEndSec(roundToTenth(Math.max(nextStart + 1, nextEnd)));
-  }
-
-  function nudgeClipEnd(deltaSec: number) {
-    const totalDuration = Math.max(1, effectiveVideoDurationSec || MAX_VIDEO_SECONDS);
-    const minEnd = Math.max(1, clipStartSec + 1);
-    const maxEnd = Math.min(totalDuration, clipStartSec + MAX_VIDEO_SECONDS);
-    if (maxEnd <= minEnd) {
-      setClipEndSec(roundToTenth(minEnd));
-      return;
-    }
-    const nextEnd = clamp(roundToTenth(clipEndSec + deltaSec), minEnd, maxEnd);
-    setClipEndSec(roundToTenth(nextEnd));
   }
 
   function closeUploadComposer() {
@@ -669,10 +632,18 @@ export default function CompanyStudioScreen() {
       Alert.alert("Media ontbreekt", "Kies eerst een video of foto.");
       return;
     }
-    if (selectedMediaType === "video" && hasVideoClipError) {
-      Alert.alert("Clip niet geldig", `Kies een videosegment van 1s tot ${MAX_VIDEO_SECONDS}s.`);
-      return;
-    }
+    const storyDurationSec = Math.max(
+      effectiveVideoDurationSec,
+      Number(video?.durationMs ?? 0) > 0 ? Number(video?.durationMs ?? 0) / 1000 : 0,
+      Number(editingItem?.videoDurationSec ?? 0) || 0
+    );
+    const shouldUseStoryClip = selectedMediaType === "video" && storyDurationSec > MAX_VIDEO_SECONDS + 0.01;
+    const storyClipStartSec = shouldUseStoryClip
+      ? roundToTenth(clamp(clipStartSec, 0, Math.max(0, storyDurationSec - MAX_VIDEO_SECONDS)))
+      : 0;
+    const storyClipEndSec = shouldUseStoryClip
+      ? roundToTenth(Math.min(storyDurationSec, storyClipStartSec + MAX_VIDEO_SECONDS))
+      : 0;
 
     setPostingStory(true);
     setUploadStatusText("Story wordt geplaatst...");
@@ -698,8 +669,8 @@ export default function CompanyStudioScreen() {
         thumbnailUrl: storyThumbnail || undefined,
         title: title.trim(),
         caption: description.trim(),
-        clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
-        clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
+        clipStartSec: storyClipStartSec,
+        clipEndSec: storyClipEndSec,
       });
 
       setUploadStatusText("Story geplaatst (24 uur zichtbaar).");
@@ -742,11 +713,6 @@ export default function CompanyStudioScreen() {
       Alert.alert("Media ontbreekt", "Kies eerst een video of foto om te uploaden.");
       return;
     }
-    if (selectedMediaType === "video" && hasVideoClipError) {
-      Alert.alert("Clip niet geldig", `Kies een videosegment van minimaal 1s en maximaal ${MAX_VIDEO_SECONDS}s.`);
-      return;
-    }
-
     setUploading(true);
     setUploadStatusText(editingPostId ? "Wijzigingen worden opgeslagen..." : "Upload wordt geplaatst...");
 
@@ -757,9 +723,17 @@ export default function CompanyStudioScreen() {
       const serviceName = selectedService?.name ?? "";
       const { sourceVideoUrl, sourceImageUrl } = await uploadCurrentMediaIfNeeded(uid, selectedMediaType);
       const fallbackVideoDurationSec = Math.max(
-        clipEndSec,
-        Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec
+        Number(editingItem?.videoDurationSec ?? 0) || 0,
+        effectiveVideoDurationSec,
+        Number(video?.durationMs ?? 0) > 0 ? Number(video?.durationMs ?? 0) / 1000 : 0
       );
+      const shouldUseClip = selectedMediaType === "video" && fallbackVideoDurationSec > MAX_VIDEO_SECONDS + 0.01;
+      const uploadClipStartSec = shouldUseClip
+        ? roundToTenth(clamp(clipStartSec, 0, Math.max(0, fallbackVideoDurationSec - MAX_VIDEO_SECONDS)))
+        : 0;
+      const uploadClipEndSec = shouldUseClip
+        ? roundToTenth(Math.min(fallbackVideoDurationSec, uploadClipStartSec + MAX_VIDEO_SECONDS))
+        : 0;
       const nextVideoUrl =
         selectedMediaType === "video"
           ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset: safeCropPreset, filterPreset })
@@ -798,8 +772,8 @@ export default function CompanyStudioScreen() {
           filterPreset,
           ...(selectedMediaType === "video"
             ? {
-                clipStartSec: clipStartSec,
-                clipEndSec: clipEndSec,
+                clipStartSec: uploadClipStartSec,
+                clipEndSec: uploadClipEndSec,
                 videoDurationSec: Math.max(effectiveVideoDurationSec, fallbackVideoDurationSec),
               }
             : {}),
@@ -831,10 +805,10 @@ export default function CompanyStudioScreen() {
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
           cropPreset: safeCropPreset,
           filterPreset,
-          clipStartSec: selectedMediaType === "video" ? clipStartSec : 0,
-          clipEndSec: selectedMediaType === "video" ? clipEndSec : 0,
+          clipStartSec: uploadClipStartSec,
+          clipEndSec: uploadClipEndSec,
           videoDurationSec:
-            selectedMediaType === "video" ? Math.max(effectiveVideoDurationSec, clipEndSec) : 0,
+            selectedMediaType === "video" ? Math.max(effectiveVideoDurationSec, fallbackVideoDurationSec) : 0,
           viewCount: 0,
         });
 
@@ -911,7 +885,7 @@ export default function CompanyStudioScreen() {
             <Text style={styles.sectionTitle}>Fullscreen upload</Text>
           </View>
           <Text style={styles.uploadLandingText}>
-            Open de upload editor op volledig scherm. Kies media, kort video in op dezelfde pagina en ga daarna door naar titel en omschrijving.
+            {"Open de upload editor op volledig scherm. Kies media, sleep bij lange video's een 15s venster en ga door naar titel en omschrijving."}
           </Text>
           {hasSelectedMedia ? (
             <View style={styles.uploadLandingHintRow}>
@@ -922,7 +896,7 @@ export default function CompanyStudioScreen() {
               />
               <Text style={styles.uploadLandingHintText}>
                 {selectedMediaType === "video"
-                  ? `Video klaar · ${formatClipRange(clipStartSec, clipEndSec)}`
+                  ? "Video klaar voor upload"
                   : "Foto klaar voor upload"}
               </Text>
             </View>
@@ -939,24 +913,13 @@ export default function CompanyStudioScreen() {
   }
 
   function renderUploadComposer() {
-    const selectedVideoDurationSec =
-      effectiveVideoDurationSec > 0
-        ? effectiveVideoDurationSec
-        : Math.max(clipEndSec, Number(editingItem?.videoDurationSec ?? clipEndSec) || clipEndSec);
     const hasSelectedVideo = uploadMediaType === "video" && Boolean(previewVideoUri);
     const hasSelectedImage = uploadMediaType === "image" && Boolean(previewImageUri);
     const hasSelectedMedia = hasSelectedVideo || hasSelectedImage;
-    const canContinue = hasSelectedMedia && (uploadMediaType !== "video" || !hasVideoClipError);
-    const safeDurationForUi = Math.max(
-      selectedVideoDurationSec,
-      clipEndSec,
-      clipStartSec + clipDurationSec,
-      0.1
-    );
-    const clipStartPercent = Math.max(0, Math.min(100, (clipStartSec / safeDurationForUi) * 100));
-    const clipEndPercent = Math.max(0, Math.min(100, (clipEndSec / safeDurationForUi) * 100));
-    const clipWidthPercent = Math.max(2, Math.min(100 - clipStartPercent, (clipDurationSec / safeDurationForUi) * 100));
+    const canContinue = hasSelectedMedia;
     const storyBusy = postingStory || uploading;
+    const showSimpleTrimRail = uploadMediaType === "video" && hasSelectedVideo && isTrimEnabledForVideo;
+    const trimTotalSec = Math.max(0, effectiveVideoDurationSec);
 
     return (
       <SafeAreaView style={styles.uploadComposerScreen} edges={["top", "bottom"]}>
@@ -982,7 +945,7 @@ export default function CompanyStudioScreen() {
                 resizeMode={ResizeMode.CONTAIN}
                 shouldPlay
                 isMuted
-                isLooping={false}
+                isLooping
                 onPlaybackStatusUpdate={onPreviewStatusUpdate}
               />
             ) : hasSelectedImage ? (
@@ -1011,102 +974,58 @@ export default function CompanyStudioScreen() {
                     />
                     <Text style={styles.uploadComposerInfoText}>
                       {uploadMediaType === "video"
-                        ? `Clip ${formatClipRange(clipStartSec, clipEndSec)}`
+                        ? hasCustomClipWindow
+                          ? `Clip ${trimWindowLabel}`
+                          : "Hele video wordt geplaatst"
                         : "Foto in volledige preview"}
                     </Text>
                   </View>
 
                   {uploadMediaType === "video" ? (
                     <>
-                      <View style={styles.uploadComposerTrimHeader}>
-                        <Text style={styles.uploadComposerTrimTitle}>Kort je video in</Text>
-                        <Text style={styles.uploadComposerTrimMeta}>
-                          {clipDurationSec.toFixed(1)}s van {selectedVideoDurationSec > 0 ? selectedVideoDurationSec.toFixed(1) : "--"}s
-                        </Text>
-                      </View>
-
-                      <View style={styles.uploadEditorTimelineRail}>
-                        <View
-                          style={[
-                            styles.uploadEditorTimelineWindow,
-                            {
-                              marginLeft: `${clipStartPercent}%`,
-                              width: `${clipWidthPercent}%`,
-                            },
-                          ]}
-                        />
-                      </View>
-
-                      <View style={styles.trimDirectRow}>
-                        <Text style={styles.trimDirectLabel}>Start: {clipStartSec.toFixed(1)}s</Text>
-                        <Pressable
-                          style={styles.trimTapRail}
-                          onLayout={(event) => setStartRailWidth(event.nativeEvent.layout.width)}
-                          onPress={(event) => {
-                            const ratio = event.nativeEvent.locationX / Math.max(1, startRailWidth);
-                            setClipStartFromRatio(ratio);
-                          }}
-                        >
-                          <View
-                            style={[styles.trimTapFill, { width: `${Math.max(2, Math.min(100, clipStartPercent))}%` }]}
-                          />
-                          <View style={[styles.trimTapThumb, { left: `${clipStartPercent}%` }]} />
-                        </Pressable>
-                        <View style={styles.trimNudgeRow}>
-                          <Pressable style={styles.trimNudgeBtn} onPress={() => nudgeClipStart(-0.5)}>
-                            <Text style={styles.trimNudgeBtnText}>-0.5s</Text>
+                      <Text style={styles.uploadComposerTrimMeta}>
+                        {showSimpleTrimRail
+                          ? `Sleep het 15s venster over je video (${trimTotalSec.toFixed(1)}s).`
+                          : "Video is korter dan 15s, hele video wordt geplaatst."}
+                      </Text>
+                      {showSimpleTrimRail ? (
+                        <View style={styles.simpleTrimCard}>
+                          <Pressable
+                            style={styles.simpleTrimRail}
+                            onLayout={(event) => setTrimRailWidth(event.nativeEvent.layout.width)}
+                            onPress={(event) => {
+                              if (trimRailWidth <= 0 || trimTotalSec <= 0) return;
+                              const tapRatio = event.nativeEvent.locationX / trimRailWidth;
+                              const centeredStart = tapRatio * trimTotalSec - MAX_VIDEO_SECONDS / 2;
+                              setTrimWindowStart(centeredStart);
+                            }}
+                          >
+                            <View
+                              style={[
+                                styles.simpleTrimWindow,
+                                {
+                                  marginLeft: `${trimWindowLeftPercent}%`,
+                                  width: `${trimWindowWidthPercent}%`,
+                                },
+                              ]}
+                              {...trimPanResponder.panHandlers}
+                            >
+                              <View style={styles.simpleTrimHandle} />
+                            </View>
                           </Pressable>
-                          <Pressable style={styles.trimNudgeBtn} onPress={() => nudgeClipStart(0.5)}>
-                            <Text style={styles.trimNudgeBtnText}>+0.5s</Text>
-                          </Pressable>
+                          <View style={styles.simpleTrimMetaRow}>
+                            <Text style={styles.simpleTrimMetaText}>0s</Text>
+                            <Text style={styles.simpleTrimMetaText}>
+                              {hasCustomClipWindow ? trimWindowLabel : `0.0s - ${MAX_VIDEO_SECONDS.toFixed(1)}s`}
+                            </Text>
+                            <Text style={styles.simpleTrimMetaText}>{trimTotalSec.toFixed(1)}s</Text>
+                          </View>
                         </View>
-                      </View>
-
-                      <View style={styles.trimDirectRow}>
-                        <Text style={styles.trimDirectLabel}>Eind: {clipEndSec.toFixed(1)}s</Text>
-                        <Pressable
-                          style={styles.trimTapRail}
-                          onLayout={(event) => setEndRailWidth(event.nativeEvent.layout.width)}
-                          onPress={(event) => {
-                            const ratio = event.nativeEvent.locationX / Math.max(1, endRailWidth);
-                            setClipEndFromRatio(ratio);
-                          }}
-                        >
-                          <View
-                            style={[
-                              styles.trimTapFill,
-                              { width: `${Math.max(2, Math.min(100, clipEndPercent))}%` },
-                            ]}
-                          />
-                          <View style={[styles.trimTapThumb, { left: `${clipEndPercent}%` }]} />
-                        </Pressable>
-                        <View style={styles.trimNudgeRow}>
-                          <Pressable style={styles.trimNudgeBtn} onPress={() => nudgeClipEnd(-0.5)}>
-                            <Text style={styles.trimNudgeBtnText}>-0.5s</Text>
-                          </Pressable>
-                          <Pressable style={styles.trimNudgeBtn} onPress={() => nudgeClipEnd(0.5)}>
-                            <Text style={styles.trimNudgeBtnText}>+0.5s</Text>
-                          </Pressable>
-                        </View>
-                      </View>
+                      ) : null}
                     </>
                   ) : (
                     <Text style={styles.uploadComposerTrimMeta}>Deze foto wordt direct als volledige preview gebruikt.</Text>
                   )}
-
-                  {hasVideoClipError ? (
-                    <View style={styles.trimErrorCard}>
-                      <Ionicons name="alert-circle-outline" size={13} color={COLORS.danger} />
-                      <Text style={styles.trimErrorText}>Kies een clip van 1 tot {MAX_VIDEO_SECONDS} seconden.</Text>
-                    </View>
-                  ) : null}
-
-                  {videoLengthWarning ? (
-                    <View style={styles.warningCardDark}>
-                      <Ionicons name="alert-circle-outline" size={14} color="#ff8da8" />
-                      <Text style={styles.warningTextDark}>{videoLengthWarning}</Text>
-                    </View>
-                  ) : null}
 
                   <View style={styles.uploadComposerActionsRow}>
                     <Pressable style={styles.uploadGhostDarkBtn} onPress={() => openActionWithPermission("library")}>
@@ -1165,7 +1084,11 @@ export default function CompanyStudioScreen() {
                   color={COLORS.primary}
                 />
                 <Text style={styles.uploadTypePillText}>
-                  {uploadMediaType === "video" ? `Video geselecteerd · ${clipDurationSec.toFixed(1)}s` : "Foto geselecteerd"}
+                  {uploadMediaType === "video"
+                    ? hasCustomClipWindow
+                      ? `Video clip · ${trimWindowLabel}`
+                      : "Video geselecteerd"
+                    : "Foto geselecteerd"}
                 </Text>
               </View>
 
@@ -1902,6 +1825,48 @@ const styles = StyleSheet.create({
     color: "#d7d7d7",
     fontSize: 11,
     fontWeight: "700",
+  },
+  simpleTrimCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(12,12,12,0.62)",
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    gap: 7,
+  },
+  simpleTrimRail: {
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  simpleTrimWindow: {
+    height: "100%",
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: "#d9e6ff",
+    backgroundColor: "rgba(65,118,255,0.66)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  simpleTrimHandle: {
+    width: 28,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: "#fff",
+    opacity: 0.94,
+  },
+  simpleTrimMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  simpleTrimMetaText: {
+    color: "#f4f4f4",
+    fontSize: 10,
+    fontWeight: "800",
   },
   uploadComposerActionsRow: {
     flexDirection: "row",
