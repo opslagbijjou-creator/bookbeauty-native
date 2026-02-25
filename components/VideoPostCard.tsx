@@ -25,12 +25,18 @@ type VideoPostCardProps = {
 };
 
 let globalWebMuted = true;
+
+// Cloudinary “safe playback” step
 const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
 
 function normalizeCloudinaryVideoPlaybackUrl(rawUrl: string): string {
   const source = String(rawUrl ?? "").trim();
-  if (!source || !source.includes("/upload/")) return source;
-  if (!source.includes("/video/upload/") && !/\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source)) return source;
+  if (!source) return "";
+  if (!source.includes("/upload/")) return source;
+
+  // Alleen doen als het echt video is
+  const isVideoUrl = source.includes("/video/upload/") || /\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source);
+  if (!isVideoUrl) return source;
 
   const [rawPath, rawQuery = ""] = source.split("?");
   const marker = "/upload/";
@@ -39,99 +45,105 @@ function normalizeCloudinaryVideoPlaybackUrl(rawUrl: string): string {
 
   const basePath = rawPath.slice(0, markerIndex + marker.length);
   const suffixPath = rawPath.slice(markerIndex + marker.length);
-  if (suffixPath.startsWith(`${CLOUDINARY_TRANSCODE_STEP}/`)) {
-    return source;
-  }
+
+  // Als er al transforms zitten, niet opnieuw injecten
+  const firstSegment = suffixPath.split("/")[0] || "";
+  const alreadyHasTransforms = firstSegment.includes(",");
+  if (alreadyHasTransforms) return source;
 
   const nextPath = `${basePath}${CLOUDINARY_TRANSCODE_STEP}/${suffixPath}`;
   return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
 }
 
-function buildVideoCandidates(
-  rawVideoInput: string,
-  rawSourceVideoInput: string,
-  cropPreset: FeedPost["cropPreset"],
-  filterPreset: FeedPost["filterPreset"]
-): string[] {
-  const rawVideo = String(rawVideoInput ?? "").trim();
-  const rawSourceVideo = String(rawSourceVideoInput ?? "").trim();
+function buildVideoCandidates(post: FeedPost): string[] {
+  const rawVideo = String(post.videoUrl ?? "").trim();
+  const rawSourceVideo = String(post.sourceVideoUrl ?? "").trim();
 
+  // Edited url alleen op source, maar dit kan ook de oorzaak zijn van zoom als transforms fout zijn
   const editedFromSource = rawSourceVideo
     ? buildCloudinaryEditedUrl(rawSourceVideo, {
-        cropPreset,
-        filterPreset,
+        cropPreset: post.cropPreset,
+        filterPreset: post.filterPreset,
       })
     : "";
 
-  // Prefer original urls first to preserve the uploaded framing/orientation.
+  // BELANGRIJK:
+  // Zet originele source vóór edited. Zo behoud je oorspronkelijke framing.
   const candidates = [
     rawSourceVideo,
     rawVideo,
-    editedFromSource,
     normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
     normalizeCloudinaryVideoPlaybackUrl(rawVideo),
+    editedFromSource,
     normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
   ].filter(Boolean);
 
   const unique: string[] = [];
-  candidates.forEach((candidate) => {
-    if (!unique.includes(candidate)) unique.push(candidate);
-  });
+  for (const c of candidates) {
+    if (!unique.includes(c)) unique.push(c);
+  }
   return unique;
 }
 
-export default function VideoPostCard({
-  post,
-  isActive,
-  onOpenCompany,
-  onOpenLinkedService,
-  height,
-  liked,
-  likeCount,
-  commentCount,
-  following,
-  followerCount,
-  likeBusy,
-  followBusy,
-  onToggleLike,
-  onToggleFollow,
-  onOpenComments,
-}: VideoPostCardProps) {
+export default function VideoPostCard(props: VideoPostCardProps) {
+  const {
+    post,
+    isActive,
+    onOpenCompany,
+    onOpenLinkedService,
+    height,
+    liked,
+    likeCount,
+    commentCount,
+    following,
+    followerCount,
+    likeBusy,
+    followBusy,
+    onToggleLike,
+    onToggleFollow,
+    onOpenComments,
+  } = props;
+
   const ref = useRef<Video | null>(null);
+
+  const isWeb = Platform.OS === "web";
   const mediaType = post.mediaType === "image" ? "image" : "video";
-  const videoCandidates = useMemo(
-    () => buildVideoCandidates(post.videoUrl, post.sourceVideoUrl ?? "", post.cropPreset, post.filterPreset),
-    [post.videoUrl, post.sourceVideoUrl, post.cropPreset, post.filterPreset]
-  );
+
+  const videoCandidates = useMemo(() => buildVideoCandidates(post), [post]);
   const canPlayVideo = mediaType === "video" && videoCandidates.length > 0;
-  const imageUri = post.imageUrl || post.thumbnailUrl || "";
+
+  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
+  const activeVideoUrl = canPlayVideo ? videoCandidates[Math.min(videoSourceIndex, videoCandidates.length - 1)] : "";
+
+  const [muted, setMuted] = useState(isWeb ? globalWebMuted : false);
+  const [videoReady, setVideoReady] = useState(false);
+
+  const imageUri = String(post.imageUrl || post.thumbnailUrl || "").trim();
+
   const clipStartMs = Math.max(0, Math.round(Number(post.clipStartSec ?? 0) * 1000));
-  const rawClipEndMs = Math.max(0, Math.round(Number(post.clipEndSec ?? 0) * 1000));
-  const hasClipWindow = rawClipEndMs > clipStartMs + 250;
+  const clipEndMs = Math.max(0, Math.round(Number(post.clipEndSec ?? 0) * 1000));
+  const hasClipWindow = clipEndMs > clipStartMs + 250;
+
   const linkedServiceId = typeof post.serviceId === "string" ? post.serviceId.trim() : "";
   const hasLinkedService = Boolean(linkedServiceId && onOpenLinkedService);
   const linkedServiceName = typeof post.serviceName === "string" ? post.serviceName.trim() : "";
+
   const influencerName = typeof post.influencerName === "string" ? post.influencerName.trim() : "";
   const isInfluencerPost = post.creatorRole === "influencer" && Boolean(influencerName);
-  const isWeb = Platform.OS === "web";
-  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
-  const activeVideoUrl = canPlayVideo ? videoCandidates[Math.min(videoSourceIndex, videoCandidates.length - 1)] : "";
-  const [muted, setMuted] = useState(isWeb ? globalWebMuted : false);
-  const [videoReady, setVideoReady] = useState(false);
-  const webSnapStyle: any = isWeb
-    ? { scrollSnapAlign: "start", scrollSnapStop: "always" }
-    : undefined;
-const videoStyle: any = useMemo(() => {
-  if (isWeb) {
-    return { width: "100%", height: "100%", objectFit: "contain" };
-  }
-  return { width: "100%", height: "100%" };
-}, [isWeb]);
+
+  // Web snap
+  const webSnapStyle: any = isWeb ? { scrollSnapAlign: "start", scrollSnapStop: "always" } : undefined;
+
+  // Video style: altijd full container, contain gedrag via resizeMode + (web) objectFit
+  const videoStyle: any = useMemo(() => {
+    if (isWeb) return { ...StyleSheet.absoluteFillObject, objectFit: "contain" as any };
+    return StyleSheet.absoluteFillObject;
+  }, [isWeb]);
 
   useEffect(() => {
     setVideoSourceIndex(0);
     setVideoReady(false);
-  }, [post.id, videoCandidates.length]);
+  }, [post.id]);
 
   useEffect(() => {
     if (!isWeb) return;
@@ -142,13 +154,12 @@ const videoStyle: any = useMemo(() => {
     (status: AVPlaybackStatus) => {
       if (!status.isLoaded) return;
       if (!isActive || !hasClipWindow) return;
-      const player = ref.current;
-      if (!player) return;
-      if (status.positionMillis >= rawClipEndMs - 80) {
-        player.setPositionAsync(clipStartMs).then(() => player.playAsync()).catch(() => null);
+
+      if (status.positionMillis >= clipEndMs - 80) {
+        ref.current?.setPositionAsync(clipStartMs).then(() => ref.current?.playAsync()).catch(() => null);
       }
     },
-    [isActive, hasClipWindow, rawClipEndMs, clipStartMs]
+    [isActive, hasClipWindow, clipStartMs, clipEndMs]
   );
 
   const onVideoError = useCallback(() => {
@@ -161,40 +172,34 @@ const videoStyle: any = useMemo(() => {
   }, [videoCandidates.length]);
 
   useEffect(() => {
-    const video = ref.current;
-    if (!video) return;
+    const player = ref.current;
+    if (!player) return;
 
     if (isActive && canPlayVideo && activeVideoUrl) {
-      if (clipStartMs > 0) {
-        video
-          .setPositionAsync(clipStartMs)
-          .then(() => video.playAsync())
-          .catch(() => null);
-      } else {
-        video.playAsync().catch(() => null);
-      }
+      const start = hasClipWindow ? clipStartMs : 0;
+      player
+        .setPositionAsync(start)
+        .then(() => player.playAsync())
+        .catch(() => null);
     } else {
-      video.pauseAsync().catch(() => null);
+      player.pauseAsync().catch(() => null);
     }
-  }, [isActive, canPlayVideo, clipStartMs, activeVideoUrl]);
+  }, [isActive, canPlayVideo, activeVideoUrl, hasClipWindow, clipStartMs]);
 
   async function onToggleMute() {
     const nextMuted = !muted;
     setMuted(nextMuted);
-    if (isWeb) {
-      globalWebMuted = nextMuted;
-    }
+    if (isWeb) globalWebMuted = nextMuted;
     if (!nextMuted && isActive && canPlayVideo && activeVideoUrl) {
       await ref.current?.playAsync().catch(() => null);
     }
   }
 
   useEffect(() => {
-    const video = ref.current;
+    const player = ref.current;
     return () => {
-      if (!video) return;
-      video.pauseAsync().catch(() => null);
-      video.unloadAsync().catch(() => null);
+      player?.pauseAsync().catch(() => null);
+      player?.unloadAsync().catch(() => null);
     };
   }, []);
 
@@ -211,10 +216,11 @@ const videoStyle: any = useMemo(() => {
 
   return (
     <View style={[styles.container, { height }, webSnapStyle]}>
-  <View style={{ flex: 1, backgroundColor: "#000", overflow: "hidden" }}></View>
+      {/* Fallback afbeelding zolang video nog niet ready is */}
       {imageUri && (mediaType === "image" || !videoReady) ? (
         <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFillObject} contentFit="contain" />
       ) : null}
+
       {canPlayVideo && activeVideoUrl ? (
         <Video
           ref={ref}
@@ -222,7 +228,7 @@ const videoStyle: any = useMemo(() => {
           style={videoStyle}
           resizeMode={ResizeMode.CONTAIN}
           shouldPlay={isActive}
-          isLooping
+          isLooping={!hasClipWindow} // clip-window loop je zelf
           isMuted={muted}
           volume={muted ? 0 : 1}
           progressUpdateIntervalMillis={90}
@@ -232,6 +238,7 @@ const videoStyle: any = useMemo(() => {
           onPlaybackStatusUpdate={onPlaybackStatusUpdate}
         />
       ) : null}
+
       {canPlayVideo && !videoReady && imageUri ? <View style={styles.mediaShade} /> : null}
 
       {canPlayVideo && isWeb && muted ? (
@@ -253,21 +260,26 @@ const videoStyle: any = useMemo(() => {
             </View>
             <Text style={styles.company}>{post.companyName}</Text>
           </View>
+
           {isInfluencerPost ? (
             <View style={styles.influencerPill}>
               <Ionicons name="megaphone-outline" size={12} color="#fff" />
               <Text style={styles.influencerPillText}>Creator: {influencerName}</Text>
             </View>
           ) : null}
+
           <View style={styles.categoryPill}>
             <Text style={styles.category}>{post.category}</Text>
           </View>
+
           {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
+
           {post.hashtags?.length ? (
             <Text style={styles.hashtags} numberOfLines={2}>
               {post.hashtags.map((tag) => `#${tag}`).join(" ")}
             </Text>
           ) : null}
+
           <Pressable
             style={[styles.followBtn, following && styles.followBtnActive, followBusy && styles.touchBusy]}
             onPress={onToggleFollow}
@@ -314,26 +326,25 @@ const videoStyle: any = useMemo(() => {
               <Text style={styles.iconCount}>{muted ? "Geluid uit" : "Geluid aan"}</Text>
             </View>
           ) : null}
+
           <View style={styles.actionItem}>
             <Pressable
               style={[styles.iconBtn, liked && styles.iconBtnActive, likeBusy && styles.touchBusy]}
               onPress={onToggleLike}
               disabled={likeBusy}
             >
-              {likeBusy ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color="#fff" />
-              )}
+              {likeBusy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name={liked ? "heart" : "heart-outline"} size={22} color="#fff" />}
             </Pressable>
             <Text style={styles.iconCount}>{likeCount ?? 0}</Text>
           </View>
+
           <View style={styles.actionItem}>
             <Pressable style={styles.iconBtn} onPress={onOpenComments}>
               <Ionicons name="chatbubble-outline" size={21} color="#fff" />
             </Pressable>
             <Text style={styles.iconCount}>{commentCount ?? 0}</Text>
           </View>
+
           <View style={styles.actionItem}>
             <Pressable style={styles.iconBtn}>
               <Ionicons name="share-social-outline" size={21} color="#fff" />
@@ -347,21 +358,9 @@ const videoStyle: any = useMemo(() => {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-    backgroundColor: "#000",
-  },
-  overlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    flexDirection: "row",
-    padding: 16,
-    backgroundColor: "rgba(0,0,0,0.22)",
-  },
-  mediaShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.2)",
-  },
+  container: { width: "100%", backgroundColor: "#000" },
+  overlay: { flex: 1, justifyContent: "flex-end", flexDirection: "row", padding: 16, backgroundColor: "rgba(0,0,0,0.22)" },
+  mediaShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.2)" },
   tapForSound: {
     position: "absolute",
     top: 12,
@@ -377,21 +376,10 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.42)",
     backgroundColor: "rgba(0,0,0,0.58)",
   },
-  tapForSoundText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 11,
-  },
-  meta: {
-    flex: 1,
-    justifyContent: "flex-end",
-    gap: 6,
-  },
-  companyRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
+  tapForSoundText: { color: "#fff", fontWeight: "800", fontSize: 11 },
+  meta: { flex: 1, justifyContent: "flex-end", gap: 6 },
+
+  companyRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   companyIcon: {
     width: 26,
     height: 26,
@@ -403,22 +391,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.45)",
     overflow: "hidden",
   },
-  companyLogoImg: {
-    width: "100%",
-    height: "100%",
-  },
-  company: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 19,
-  },
-  categoryPill: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
+  companyLogoImg: { width: "100%", height: "100%" },
+  company: { color: "#fff", fontWeight: "800", fontSize: 19 },
+
+  categoryPill: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  category: { color: "#fff", fontWeight: "700", fontSize: 12 },
+
   influencerPill: {
     alignSelf: "flex-start",
     flexDirection: "row",
@@ -431,46 +409,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  influencerPillText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 11,
-  },
-  category: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  caption: {
-    color: "#fff",
-    lineHeight: 20,
-  },
-  hashtags: {
-    color: "#f8d2e8",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  cta: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(255,255,255,0.22)",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
-  },
-  ctaText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  ctaRow: {
-    marginTop: 8,
-    gap: 8,
-    alignSelf: "stretch",
-    width: "100%",
-    maxWidth: 330,
-  },
+  influencerPillText: { color: "#fff", fontWeight: "800", fontSize: 11 },
+
+  caption: { color: "#fff", lineHeight: 20 },
+  hashtags: { color: "#f8d2e8", fontWeight: "700", fontSize: 12 },
+
+  cta: { alignSelf: "flex-start", backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.45)" },
+  ctaText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  ctaRow: { marginTop: 8, gap: 8, alignSelf: "stretch", width: "100%", maxWidth: 330 },
+
   bookServiceBtn: {
     minHeight: 44,
     borderRadius: 999,
@@ -485,84 +432,22 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     maxWidth: "100%",
   },
-  bookServiceTextWrap: {
-    gap: 0,
-  },
-  bookServiceTitle: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  bookServiceMeta: {
-    color: "rgba(255,255,255,0.88)",
-    fontSize: 10,
-    fontWeight: "700",
-    maxWidth: 172,
-  },
-  followBtn: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(223,79,154,0.9)",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginTop: 4,
-  },
-  followBtnActive: {
-    backgroundColor: "rgba(72,159,86,0.9)",
-  },
-  followText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  sideActions: {
-    justifyContent: "flex-end",
-    alignItems: "center",
-    gap: 12,
-    marginLeft: 12,
-    marginBottom: 12,
-  },
-  actionItem: {
-    alignItems: "center",
-    gap: 4,
-  },
-  iconBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  iconBtnActive: {
-    backgroundColor: "rgba(223,79,154,0.5)",
-  },
-  iconCount: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  touchBusy: {
-    opacity: 0.75,
-  },
-  fallback: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#191919",
-    padding: 24,
-  },
-  fallbackTitle: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  fallbackText: {
-    color: "#d3d3d3",
-    marginTop: 8,
-    textAlign: "center",
-  },
+  bookServiceTextWrap: { gap: 0 },
+  bookServiceTitle: { color: "#fff", fontSize: 12, fontWeight: "900" },
+  bookServiceMeta: { color: "rgba(255,255,255,0.88)", fontSize: 10, fontWeight: "700", maxWidth: 172 },
+
+  followBtn: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(223,79,154,0.9)", borderRadius: 11, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
+  followBtnActive: { backgroundColor: "rgba(72,159,86,0.9)" },
+  followText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+
+  sideActions: { justifyContent: "flex-end", alignItems: "center", gap: 12, marginLeft: 12, marginBottom: 12 },
+  actionItem: { alignItems: "center", gap: 4 },
+  iconBtn: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.2)" },
+  iconBtnActive: { backgroundColor: "rgba(223,79,154,0.5)" },
+  iconCount: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  touchBusy: { opacity: 0.75 },
+
+  fallback: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#191919", padding: 24 },
+  fallbackTitle: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  fallbackText: { color: "#d3d3d3", marginTop: 8, textAlign: "center" },
 });
