@@ -4,14 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { COLORS } from "../lib/ui";
 
-const APP_MODE = process.env.EXPO_PUBLIC_APP_MODE;
-
 export default function PaymentsRedirectScreen() {
-  // 🔒 Public mode → geen payment pagina zichtbaar
-  if (APP_MODE === "public") {
-    return null;
-  }
-
   const router = useRouter();
   const params = useLocalSearchParams<{ mollie?: string | string[]; reason?: string | string[] }>();
 
@@ -50,10 +43,7 @@ export default function PaymentsRedirectScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.message}>{message}</Text>
-        <Pressable
-          style={styles.button}
-          onPress={() => router.replace("/(company)/(tabs)/home" as never)}
-        >
+        <Pressable style={styles.button} onPress={() => router.replace("/(company)/(tabs)/home" as never)}>
           <Text style={styles.buttonText}>Terug naar bedrijfsprofiel</Text>
         </Pressable>
       </View>
