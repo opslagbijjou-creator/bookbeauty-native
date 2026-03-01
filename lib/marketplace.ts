@@ -31,8 +31,12 @@ export type MarketplaceFeedItem = {
   categorySlug: string;
   mediaType: "image" | "video";
   posterUrl: string;
+  videoUrl?: string;
+  imageUrl?: string;
+  companyId?: string;
   companyName: string;
   companySlug: string;
+  companyLogoUrl?: string;
   isDemo?: boolean;
 };
 
@@ -131,8 +135,17 @@ export function getCityBySlug(slug?: string | null): MarketplaceCity | null {
 }
 
 export function getCityFromLabel(value?: string | null): MarketplaceCity {
-  const clean = slugifySegment(String(value || ""));
-  return MARKETPLACE_CITIES.find((item) => item.slug === clean) ?? DEFAULT_MARKETPLACE_CITY;
+  const label = String(value || "").trim();
+  const clean = slugifySegment(label);
+  const knownCity = MARKETPLACE_CITIES.find((item) => item.slug === clean);
+  if (knownCity) return knownCity;
+  if (clean) {
+    return {
+      label,
+      slug: clean,
+    };
+  }
+  return DEFAULT_MARKETPLACE_CITY;
 }
 
 function makePosterUrl(seed: string): string {
@@ -196,8 +209,12 @@ function mapFeedPostToMarketplaceItem(post: FeedPost, companySlug: string): Mark
     categorySlug: category.slug,
     mediaType: post.mediaType,
     posterUrl,
+    videoUrl: post.videoUrl?.trim() || undefined,
+    imageUrl: post.imageUrl?.trim() || undefined,
+    companyId: post.companyId,
     companyName: post.companyName,
     companySlug,
+    companyLogoUrl: post.companyLogoUrl?.trim() || undefined,
   };
 }
 
@@ -393,6 +410,8 @@ function buildDemoSalons(): MarketplaceSalon[] {
         categorySlug: salon.categorySlug,
         mediaType: "video",
         posterUrl: salon.coverImageUrl,
+        imageUrl: salon.coverImageUrl,
+        companyId: salon.id,
         companyName: salon.name,
         companySlug: salon.slug,
         isDemo: true,
@@ -414,6 +433,8 @@ export const DEMO_MARKETPLACE_FEED: MarketplaceFeedItem[] = [
     categorySlug: "beauty",
     mediaType: "video",
     posterUrl: DEMO_MARKETPLACE_SALONS[0].coverImageUrl,
+    imageUrl: DEMO_MARKETPLACE_SALONS[0].coverImageUrl,
+    companyId: DEMO_MARKETPLACE_SALONS[0].id,
     companyName: "BookBeauty",
     companySlug: DEMO_MARKETPLACE_SALONS[0].slug,
     isDemo: true,
@@ -426,6 +447,8 @@ export const DEMO_MARKETPLACE_FEED: MarketplaceFeedItem[] = [
     categorySlug: "beauty",
     mediaType: "video",
     posterUrl: DEMO_MARKETPLACE_SALONS[1].coverImageUrl,
+    imageUrl: DEMO_MARKETPLACE_SALONS[1].coverImageUrl,
+    companyId: DEMO_MARKETPLACE_SALONS[1].id,
     companyName: "BookBeauty",
     companySlug: DEMO_MARKETPLACE_SALONS[1].slug,
     isDemo: true,
@@ -438,6 +461,8 @@ export const DEMO_MARKETPLACE_FEED: MarketplaceFeedItem[] = [
     categorySlug: "beauty",
     mediaType: "video",
     posterUrl: DEMO_MARKETPLACE_SALONS[2].coverImageUrl,
+    imageUrl: DEMO_MARKETPLACE_SALONS[2].coverImageUrl,
+    companyId: DEMO_MARKETPLACE_SALONS[2].id,
     companyName: "BookBeauty",
     companySlug: DEMO_MARKETPLACE_SALONS[2].slug,
     isDemo: true,
@@ -450,6 +475,8 @@ export const DEMO_MARKETPLACE_FEED: MarketplaceFeedItem[] = [
     categorySlug: "beauty",
     mediaType: "video",
     posterUrl: DEMO_MARKETPLACE_SALONS[3].coverImageUrl,
+    imageUrl: DEMO_MARKETPLACE_SALONS[3].coverImageUrl,
+    companyId: DEMO_MARKETPLACE_SALONS[3].id,
     companyName: "BookBeauty",
     companySlug: DEMO_MARKETPLACE_SALONS[3].slug,
     isDemo: true,
@@ -462,6 +489,8 @@ export const DEMO_MARKETPLACE_FEED: MarketplaceFeedItem[] = [
     categorySlug: "beauty",
     mediaType: "video",
     posterUrl: DEMO_MARKETPLACE_SALONS[0].coverImageUrl,
+    imageUrl: DEMO_MARKETPLACE_SALONS[0].coverImageUrl,
+    companyId: DEMO_MARKETPLACE_SALONS[0].id,
     companyName: "BookBeauty",
     companySlug: DEMO_MARKETPLACE_SALONS[0].slug,
     isDemo: true,
@@ -772,4 +801,3 @@ export function getStaticCityCategoryPaths(): Array<{ city: string; category: st
   });
   return rows;
 }
-

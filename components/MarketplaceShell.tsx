@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { subscribeAuth } from "../lib/authRepo";
 import { auth } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
 import { getDefaultCityPath } from "../lib/marketplace";
@@ -35,12 +37,13 @@ export default function MarketplaceShell({
 }: MarketplaceShellProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const hasSession = Boolean(auth.currentUser?.uid);
+  const [hasSession, setHasSession] = useState(Boolean(auth.currentUser?.uid));
 
-  const profileRoute = useMemo(
-    () => (hasSession ? "/(customer)/(tabs)/profile" : "/(auth)/login"),
-    [hasSession]
-  );
+  useEffect(() => {
+    return subscribeAuth((user) => {
+      setHasSession(Boolean(user?.uid));
+    });
+  }, []);
 
   function openRoute(href: string) {
     setMenuOpen(false);
@@ -63,13 +66,14 @@ export default function MarketplaceShell({
             </Pressable>
 
             <Pressable onPress={() => router.push("/" as never)} style={styles.logoWrap}>
-              <View style={styles.logoMark}>
-                <View style={styles.logoMarkInner} />
-              </View>
-              <Text style={styles.logoText}>BookBeauty</Text>
+              <Image
+                source={require("../assets/logo/logo.png")}
+                style={styles.logo}
+                contentFit="contain"
+              />
             </Pressable>
 
-            <Pressable onPress={() => router.push(profileRoute as never)} style={styles.sideButton}>
+            <Pressable onPress={() => router.push("/account" as never)} style={styles.sideButton}>
               <Ionicons
                 name={hasSession ? "person-circle-outline" : "person-outline"}
                 size={24}
@@ -161,6 +165,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 8,
   },
   sideButton: {
     width: 44,
@@ -169,29 +174,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   logoWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  logoMark: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: COLORS.primary,
+    flex: 1,
+    minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
   },
-  logoMarkInner: {
-    width: 7,
-    height: 7,
-    borderRadius: 2,
-    backgroundColor: "#ffffff",
-  },
-  logoText: {
-    color: COLORS.text,
-    fontSize: 18,
-    fontWeight: "900",
-    letterSpacing: -0.4,
+  logo: {
+    width: 148,
+    height: 30,
   },
   content: {
     flex: 1,

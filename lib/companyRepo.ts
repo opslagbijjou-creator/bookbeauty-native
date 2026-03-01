@@ -12,7 +12,6 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { hasActiveService } from "./serviceRepo";
 import type { Category } from "./ui";
 
 export type CompanyBookingServiceSummary = {
@@ -114,18 +113,7 @@ export async function fetchCompanies(params: FetchCompaniesParams = {}): Promise
   });
 
   if (!filteredBySearch.length) return [];
-
-  const hasServices = await Promise.all(
-    filteredBySearch.map(async (company) => {
-      try {
-        return await hasActiveService(company.id);
-      } catch {
-        return false;
-      }
-    })
-  );
-
-  return filteredBySearch.filter((_, index) => hasServices[index]);
+  return filteredBySearch;
 }
 
 export async function fetchCompanyById(companyId: string): Promise<CompanyPublic | null> {

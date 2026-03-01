@@ -11,6 +11,8 @@ type MarketplaceSalonCardProps = {
 };
 
 export default function MarketplaceSalonCard({ salon, onPress }: MarketplaceSalonCardProps) {
+  const priceLabel = salon.minPrice > 0 ? `Vanaf ${formatCurrency(salon.minPrice)}` : "Prijs op aanvraag";
+
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
       <Image
@@ -40,7 +42,7 @@ export default function MarketplaceSalonCard({ salon, onPress }: MarketplaceSalo
         </Text>
 
         <View style={styles.bottomLine}>
-          <Text style={styles.price}>Vanaf {formatCurrency(salon.minPrice)}</Text>
+          <Text style={styles.price}>{priceLabel}</Text>
           <Text style={styles.reviews}>{salon.reviewCount} reviews</Text>
           <View style={styles.ctaInline}>
             <Text style={styles.ctaText}>Bekijk salon</Text>

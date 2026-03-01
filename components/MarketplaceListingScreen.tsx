@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -29,6 +29,11 @@ import {
   normalizeListingFilters,
 } from "../lib/marketplace";
 import { COLORS } from "../lib/ui";
+
+const DISCOVER_ALL_CITIES_SLUG = "all";
+
+let pendingListingRestoreY = 0;
+let shouldRestoreListingScroll = false;
 
 type MarketplaceListingScreenProps = {
   mode: "discover" | "listing";
@@ -78,7 +83,8 @@ export default function MarketplaceListingScreen({
     category?: string | string[];
   }>();
 
-  const currentCitySlug = mode === "discover" ? firstValue(params.city) || citySlug : citySlug;
+  const currentCitySlug =
+    mode === "discover" ? firstValue(params.city) || citySlug || DISCOVER_ALL_CITIES_SLUG : citySlug;
   const currentCategorySlug =
     mode === "discover" ? firstValue(params.category) || categorySlug || "" : categorySlug || "";
   const filters = useMemo(
@@ -99,15 +105,25 @@ export default function MarketplaceListingScreen({
   const [loading, setLoading] = useState(true);
   const [usedFallback, setUsedFallback] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollYRef = useRef(0);
 
   const categoryItems = useMemo(() => ["Alles", ...MARKETPLACE_CATEGORIES.map((item) => item.label)], []);
-  const cityLabels = useMemo(() => MARKETPLACE_CITIES.map((item) => item.label), []);
+  const cityLabels = useMemo(
+    () =>
+      mode === "discover"
+        ? ["Alle steden", ...MARKETPLACE_CITIES.map((item) => item.label)]
+        : MARKETPLACE_CITIES.map((item) => item.label),
+    [mode]
+  );
   const activeCategoryLabel = useMemo(() => {
     const category = getCategoryBySlug(currentCategorySlug);
     return category?.label || "Alles";
   }, [currentCategorySlug]);
   const activeCityLabel =
-    MARKETPLACE_CITIES.find((item) => item.slug === currentCitySlug)?.label || DEFAULT_MARKETPLACE_CITY.label;
+    mode === "discover" && currentCitySlug === DISCOVER_ALL_CITIES_SLUG
+      ? "Alle steden"
+      : MARKETPLACE_CITIES.find((item) => item.slug === currentCitySlug)?.label || DEFAULT_MARKETPLACE_CITY.label;
   const showFloatingFilter = width < 900;
 
   useEffect(() => {
@@ -143,6 +159,16 @@ export default function MarketplaceListingScreen({
     };
   }, [currentCategorySlug, currentCitySlug, filters]);
 
+  useEffect(() => {
+    if (loading || !shouldRestoreListingScroll) return;
+    const targetY = pendingListingRestoreY;
+    const raf = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: targetY, animated: false });
+      shouldRestoreListingScroll = false;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [currentCategorySlug, currentCitySlug, items.length, loading]);
+
   const applyRoute = useCallback(
     (nextFilters: MarketplaceFilters, overrides?: { citySlug?: string; categorySlug?: string | null }) => {
       const nextCitySlug = overrides?.citySlug || currentCitySlug || DEFAULT_MARKETPLACE_CITY.slug;
@@ -152,7 +178,7 @@ export default function MarketplaceListingScreen({
         mode === "discover"
           ? (() => {
               const discoverParams = new URLSearchParams();
-              if (nextCitySlug && nextCitySlug !== DEFAULT_MARKETPLACE_CITY.slug) {
+              if (nextCitySlug && nextCitySlug !== DISCOVER_ALL_CITIES_SLUG) {
                 discoverParams.set("city", nextCitySlug);
               }
               if (nextCategorySlug) {
@@ -162,6 +188,8 @@ export default function MarketplaceListingScreen({
               return raw ? `/discover?${raw}` : "/discover";
             })()
           : getSalonListingPath(nextCitySlug, nextCategorySlug);
+      pendingListingRestoreY = scrollYRef.current;
+      shouldRestoreListingScroll = true;
 
       const filterQuery = buildQueryString(nextFilters);
       if (!filterQuery) {
@@ -190,6 +218,10 @@ export default function MarketplaceListingScreen({
   }
 
   function onChangeCity(label: string) {
+    if (mode === "discover" && label === "Alle steden") {
+      applyRoute(filters, { citySlug: DISCOVER_ALL_CITIES_SLUG });
+      return;
+    }
     const next = MARKETPLACE_CITIES.find((item) => item.label === label);
     if (!next) return;
     applyRoute(filters, { citySlug: next.slug });
@@ -198,10 +230,15 @@ export default function MarketplaceListingScreen({
   return (
     <View style={styles.screen}>
       <ScrollView
+        ref={scrollRef}
         style={styles.flex}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          scrollYRef.current = event.nativeEvent.contentOffset.y;
+        }}
       >
         <Text style={styles.pageTitle}>{title}</Text>
         <Text style={styles.pageSubtitle}>{subtitle}</Text>
