@@ -1,9 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -11,7 +15,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { ResizeMode, Video } from "expo-av";
+import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -19,7 +23,13 @@ import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
 import { getUserRole, subscribeAuth } from "../lib/authRepo";
 import { auth } from "../lib/firebase";
-import { MarketplaceFeedItem, buildFeedSeo, fetchMarketplaceFeed } from "../lib/marketplace";
+import {
+  MarketplaceFeedItem,
+  buildCanonicalUrl,
+  buildFeedSeo,
+  fetchMarketplaceFeed,
+  getSalonProfilePath,
+} from "../lib/marketplace";
 import type { AppRole } from "../lib/roles";
 import { getPostLikeCount, isPostLiked, togglePostLike } from "../lib/socialRepo";
 import { COLORS } from "../lib/ui";
@@ -30,11 +40,14 @@ type FeedSlideProps = {
   isActive: boolean;
   muted: boolean;
   liked: boolean;
+  saved: boolean;
   likeBusy: boolean;
   likeCount: number;
   failedVideo: boolean;
   onToggleLike: () => void;
+  onToggleSave: () => void;
   onToggleMuted: () => void;
+  onShare: () => void;
   onOpenSalon: () => void;
   onVideoError: () => void;
 };
@@ -45,21 +58,28 @@ function FeedSlide({
   isActive,
   muted,
   liked,
+  saved,
   likeBusy,
   likeCount,
   failedVideo,
   onToggleLike,
+  onToggleSave,
   onToggleMuted,
+  onShare,
   onOpenSalon,
   onVideoError,
 }: FeedSlideProps) {
   const fade = useRef(new Animated.Value(0)).current;
+  const videoRef = useRef<Video | null>(null);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     fade.setValue(0);
     Animated.timing(fade, {
       toValue: 1,
-      duration: 260,
+      duration: 220,
       useNativeDriver: true,
     }).start();
   }, [fade, item.id]);
@@ -70,36 +90,97 @@ function FeedSlide({
   const isWeb = Platform.OS === "web";
   const videoStyle = isWeb ? [styles.frameMedia, styles.webContain] : styles.frameMedia;
 
+  useEffect(() => {
+    setVideoReady(false);
+    setIsBuffering(false);
+    setProgress(0);
+  }, [item.id]);
+
+  const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
+    if (!status.isLoaded) {
+      setIsBuffering(false);
+      return;
+    }
+
+    setIsBuffering(Boolean(status.isBuffering));
+
+    const duration = Number(status.durationMillis ?? 0);
+    if (duration > 0) {
+      setProgress(Math.max(0, Math.min(1, status.positionMillis / duration)));
+    }
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !canPlayVideo) return;
+
+    if (isActive) {
+      video.playAsync().catch(() => null);
+      return;
+    }
+
+    video
+      .pauseAsync()
+      .then(() => video.setPositionAsync(0))
+      .catch(() => null);
+    setProgress(0);
+  }, [isActive, canPlayVideo, item.id]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      if (!video) return;
+      video.pauseAsync().catch(() => null);
+      video.unloadAsync().catch(() => null);
+    };
+  }, []);
+
   return (
     <Animated.View style={[styles.slide, { height, opacity: fade }]}>
       <View style={styles.stage}>
-        <Image source={{ uri: item.posterUrl }} style={styles.mediaBackdrop} contentFit="cover" transition={220} />
+        <Image source={{ uri: item.posterUrl }} style={styles.mediaBackdrop} contentFit="cover" transition={180} />
         <View style={styles.mediaBackdropShade} />
 
         <View style={styles.frameWrap}>
           <View style={[styles.mediaFrame, canPlayVideo ? styles.videoFrame : styles.photoFrame]}>
             {canPlayVideo ? (
               <Video
+                ref={videoRef}
                 source={{ uri: videoUrl }}
                 style={videoStyle}
                 resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={isActive}
+                shouldPlay={false}
                 isLooping
                 isMuted={muted}
                 volume={muted ? 0 : 1}
-                progressUpdateIntervalMillis={120}
+                progressUpdateIntervalMillis={100}
+                onLoadStart={() => {
+                  setVideoReady(false);
+                  setIsBuffering(true);
+                }}
+                onReadyForDisplay={() => {
+                  setVideoReady(true);
+                  setIsBuffering(false);
+                }}
+                onPlaybackStatusUpdate={onPlaybackStatusUpdate}
                 onError={onVideoError}
               />
             ) : imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.frameMedia} contentFit="cover" transition={220} />
+              <Image source={{ uri: imageUrl }} style={styles.frameMedia} contentFit="cover" transition={180} />
+            ) : null}
+
+            {canPlayVideo && (!videoReady || isBuffering) ? (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator color="#ffffff" />
+              </View>
             ) : null}
           </View>
         </View>
       </View>
 
       <LinearGradient
-        colors={["rgba(5,8,12,0.02)", "rgba(5,8,12,0.14)", "rgba(5,8,12,0.72)"]}
-        locations={[0.35, 0.58, 1]}
+        colors={["rgba(5,8,12,0.02)", "rgba(5,8,12,0.12)", "rgba(5,8,12,0.74)"]}
+        locations={[0.34, 0.58, 1]}
         style={StyleSheet.absoluteFillObject}
       />
 
@@ -107,6 +188,16 @@ function FeedSlide({
         <Pressable onPress={onToggleLike} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
           <Ionicons name={liked ? "heart" : "heart-outline"} size={28} color={liked ? COLORS.accent : "#ffffff"} />
           <Text style={styles.iconLabel}>{likeBusy ? "..." : String(likeCount)}</Text>
+        </Pressable>
+
+        <Pressable onPress={onToggleSave} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
+          <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={24} color="#ffffff" />
+          <Text style={styles.iconLabel}>Bewaar</Text>
+        </Pressable>
+
+        <Pressable onPress={onShare} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
+          <Ionicons name="share-social-outline" size={24} color="#ffffff" />
+          <Text style={styles.iconLabel}>Deel</Text>
         </Pressable>
 
         <Pressable
@@ -140,7 +231,7 @@ function FeedSlide({
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
           </Text>
-          <Text style={styles.caption} numberOfLines={3}>
+          <Text style={styles.caption} numberOfLines={2}>
             {item.caption}
           </Text>
         </View>
@@ -149,6 +240,12 @@ function FeedSlide({
           <Text style={styles.ctaText}>Bekijk salon</Text>
         </Pressable>
       </View>
+
+      {canPlayVideo ? (
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${Math.max(4, progress * 100)}%` }]} />
+        </View>
+      ) : null}
     </Animated.View>
   );
 }
@@ -164,10 +261,11 @@ export default function PublicFeedScreen() {
   const [role, setRole] = useState<AppRole>("customer");
   const [muted, setMuted] = useState(true);
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
+  const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [likeCountMap, setLikeCountMap] = useState<Record<string, number>>({});
   const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
   const [failedVideoMap, setFailedVideoMap] = useState<Record<string, boolean>>({});
-  const slideHeight = Math.max(640, height - 76);
+  const slideHeight = Math.max(1, height - 76);
 
   useEffect(() => {
     return subscribeAuth((user) => {
@@ -179,6 +277,7 @@ export default function PublicFeedScreen() {
     if (!uid) {
       setRole("customer");
       setLikedMap({});
+      setSavedMap({});
       return;
     }
     getUserRole(uid)
@@ -200,6 +299,11 @@ export default function PublicFeedScreen() {
         setItems(result);
         setActiveId(result[0]?.id ?? null);
         setFailedVideoMap({});
+        const nextSaved: Record<string, boolean> = {};
+        result.forEach((item) => {
+          nextSaved[item.id] = false;
+        });
+        setSavedMap(nextSaved);
       })
       .catch(() => {
         if (cancelled) return;
@@ -258,10 +362,12 @@ export default function PublicFeedScreen() {
 
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const current = viewableItems[0]?.item as MarketplaceFeedItem | undefined;
-    setActiveId(current?.id ?? null);
+    if (current?.id) {
+      setActiveId(current.id);
+    }
   }).current;
 
-  const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 82 }), []);
+  const viewabilityConfig = useMemo(() => ({ itemVisiblePercentThreshold: 70 }), []);
 
   const onToggleLike = useCallback(
     async (item: MarketplaceFeedItem) => {
@@ -300,6 +406,29 @@ export default function PublicFeedScreen() {
     [likeBusyMap, likeCountMap, likedMap, role, router, uid]
   );
 
+  function onToggleSave(item: MarketplaceFeedItem) {
+    if (!uid) {
+      router.push("/(auth)/login" as never);
+      return;
+    }
+    setSavedMap((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+  }
+
+  async function onShareItem(item: MarketplaceFeedItem) {
+    const url = buildCanonicalUrl(getSalonProfilePath(item.companySlug));
+    await Share.share({
+      message: `${item.companyName} op BookBeauty\n${url}`,
+      url,
+    }).catch(() => null);
+  }
+
+  function syncActiveFromOffset(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (!items.length || slideHeight <= 0) return;
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(offsetY / slideHeight)));
+    setActiveId(items[nextIndex]?.id ?? null);
+  }
+
   return (
     <MarketplaceShell active="feed" scroll={false} fullBleed>
       <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
@@ -318,11 +447,14 @@ export default function PublicFeedScreen() {
                 isActive={activeId === item.id}
                 muted={muted}
                 liked={Boolean(likedMap[item.id])}
+                saved={Boolean(savedMap[item.id])}
                 likeBusy={Boolean(likeBusyMap[item.id])}
                 likeCount={likeCountMap[item.id] ?? 0}
                 failedVideo={Boolean(failedVideoMap[item.id])}
                 onToggleLike={() => onToggleLike(item).catch(() => null)}
+                onToggleSave={() => onToggleSave(item)}
                 onToggleMuted={() => setMuted((current) => !current)}
+                onShare={() => onShareItem(item).catch(() => null)}
                 onOpenSalon={() => router.push(`/salon/${item.companySlug}` as never)}
                 onVideoError={() => {
                   setFailedVideoMap((prev) => ({ ...prev, [item.id]: true }));
@@ -331,14 +463,20 @@ export default function PublicFeedScreen() {
             )}
             pagingEnabled
             snapToInterval={slideHeight}
+            snapToAlignment="start"
             decelerationRate="fast"
             showsVerticalScrollIndicator={false}
-            initialNumToRender={2}
+            initialNumToRender={1}
             maxToRenderPerBatch={2}
-            windowSize={3}
+            windowSize={2}
             removeClippedSubviews
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
+            onScrollBeginDrag={() => {
+              setActiveId(null);
+            }}
+            onScrollEndDrag={syncActiveFromOffset}
+            onMomentumScrollEnd={syncActiveFromOffset}
             getItemLayout={(_, index) => ({
               length: slideHeight,
               offset: slideHeight * index,
@@ -402,13 +540,19 @@ const styles = StyleSheet.create({
   webContain: {
     objectFit: "contain",
   },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.12)",
+  },
   actionsRail: {
     position: "absolute",
-    right: 18,
-    bottom: 134,
+    right: 16,
+    bottom: 138,
     zIndex: 3,
     alignItems: "center",
-    gap: 18,
+    gap: 16,
   },
   iconButton: {
     alignItems: "center",
@@ -424,9 +568,9 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   overlay: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-    paddingRight: 92,
+    paddingHorizontal: 18,
+    paddingBottom: 28,
+    paddingRight: 90,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -435,14 +579,14 @@ const styles = StyleSheet.create({
   },
   copyWrap: {
     flex: 1,
-    gap: 7,
+    gap: 6,
   },
   categoryLabel: {
-    color: "rgba(255,255,255,0.8)",
+    color: "rgba(255,255,255,0.82)",
     fontSize: 12,
     fontWeight: "900",
     textTransform: "uppercase",
-    letterSpacing: 0.9,
+    letterSpacing: 0.8,
   },
   brandRow: {
     flexDirection: "row",
@@ -455,7 +599,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.24)",
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -465,29 +609,29 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   salonName: {
+    flex: 1,
     color: "#ffffff",
     fontSize: 15,
     fontWeight: "800",
-    flex: 1,
   },
   title: {
     color: "#ffffff",
-    fontSize: 30,
-    lineHeight: 34,
+    fontSize: 28,
+    lineHeight: 32,
     fontWeight: "900",
-    letterSpacing: -0.8,
+    letterSpacing: -0.7,
   },
   caption: {
     color: "rgba(255,255,255,0.84)",
     fontSize: 14,
-    lineHeight: 22,
-    maxWidth: 560,
+    lineHeight: 21,
+    maxWidth: 520,
   },
   cta: {
-    minHeight: 54,
+    minHeight: 50,
     paddingHorizontal: 18,
-    borderRadius: 27,
-    backgroundColor: "#ffffff",
+    borderRadius: 25,
+    backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -495,5 +639,21 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 13,
     fontWeight: "900",
+  },
+  progressTrack: {
+    position: "absolute",
+    left: 18,
+    right: 18,
+    bottom: 8,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    overflow: "hidden",
+    zIndex: 4,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#ffffff",
   },
 });
