@@ -76,7 +76,7 @@ export type MarketplaceFilters = {
   sort?: string;
 };
 
-const MARKETPLACE_BASE_URL = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl")
+const MARKETPLACE_BASE_URL = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://bookbeauty.nl")
   .trim()
   .replace(/\/+$/, "");
 
@@ -752,11 +752,11 @@ export function buildListingSeo(args: { citySlug?: string | null; categorySlug?:
   const category = getCategoryBySlug(args.categorySlug);
   const pathname = getSalonListingPath(city.slug, category?.slug);
   const title = category
-    ? `${category.label} in ${city.label} boeken | BookBeauty`
-    : `Salons in ${city.label} ontdekken | BookBeauty`;
+    ? `${category.label} in ${city.label} | Boek direct – BookBeauty`
+    : `Beauty salons ${city.label} | Online afspraak maken – BookBeauty`;
   const description = category
-    ? `Bekijk ${category.label.toLowerCase()} in ${city.label}, vergelijk prijzen en vraag direct een afspraak aan.`
-    : `Ontdek actieve salons in ${city.label}, vergelijk diensten en boek eenvoudig zonder login.`;
+    ? `Zoek ${category.label.toLowerCase()} in ${city.label}. Vergelijk salons op reviews, prijs en beschikbaarheid en boek direct online via BookBeauty.`
+    : `Bekijk en vergelijk beauty salons in ${city.label}. Reviews, prijzen en beschikbaarheid. Boek direct online via BookBeauty.`;
 
   return {
     title,
@@ -769,9 +769,9 @@ export function buildListingSeo(args: { citySlug?: string | null; categorySlug?:
 export function buildHomeSeo() {
   const pathname = "/";
   return {
-    title: "BookBeauty | Ontdek salons. Bekijk echte video's. Boek direct.",
+    title: "BookBeauty | Beauty salons in Nederland – online boeken",
     description:
-      "BookBeauty verbindt beauty professionals en klanten via video en een simpele boekervaring.",
+      "Vergelijk beauty salons in Nederland. Bekijk reviews, prijzen en beschikbaarheid en boek direct online bij salons in jouw stad via BookBeauty.",
     pathname,
     canonical: buildCanonicalUrl(pathname),
   };
@@ -810,35 +810,113 @@ export function buildSalonSeo(salon: MarketplaceSalon) {
   };
 }
 
+export function buildHomeStructuredData(salons?: MarketplaceSalon[]): string {
+  const topSalons = (salons?.length ? salons : DEMO_MARKETPLACE_SALONS).slice(0, 8);
+  return JSON.stringify([
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      name: "BookBeauty",
+      url: buildCanonicalUrl("/"),
+      potentialAction: {
+        "@type": "SearchAction",
+        target: `${buildCanonicalUrl("/discover")}?query={search_term_string}`,
+        "query-input": "required name=search_term_string",
+      },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      name: "Populaire salons in Nederland",
+      itemListElement: topSalons.map((salon, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        url: buildCanonicalUrl(getSalonProfilePath(salon.slug)),
+      })),
+    },
+  ]);
+}
+
+export function buildListingStructuredData(args: {
+  citySlug?: string | null;
+  categorySlug?: string | null;
+  salons?: MarketplaceSalon[];
+}): string {
+  const city = getCityBySlug(args.citySlug) ?? DEFAULT_MARKETPLACE_CITY;
+  const category = getCategoryBySlug(args.categorySlug);
+  const fallbackSalons = applyMarketplaceFilters(DEMO_MARKETPLACE_SALONS, {
+    citySlug: city.slug,
+    categorySlug: category?.slug,
+    filters: { sort: DEFAULT_MARKETPLACE_SORT },
+  });
+  const rows = (args.salons?.length ? args.salons : fallbackSalons).slice(0, 10);
+  const breadcrumbItems = [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Nederland",
+      item: buildCanonicalUrl("/"),
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: city.label,
+      item: buildCanonicalUrl(getSalonListingPath(city.slug)),
+    },
+  ] as Array<Record<string, unknown>>;
+
+  if (category) {
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      position: 3,
+      name: category.label,
+      item: buildCanonicalUrl(getSalonListingPath(city.slug, category.slug)),
+    });
+  }
+
+  return JSON.stringify([
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: breadcrumbItems,
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      name: category ? `${category.label} in ${city.label}` : `Populaire salons in ${city.label}`,
+      itemListElement: rows.map((salon, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        url: buildCanonicalUrl(getSalonProfilePath(salon.slug)),
+      })),
+    },
+  ]);
+}
+
 export function buildLocalBusinessSchema(salon: MarketplaceSalon): string {
-  return JSON.stringify({
+  const payload: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
     name: salon.name,
-    description: salon.bio,
-    image: salon.coverImageUrl,
     url: buildCanonicalUrl(getSalonProfilePath(salon.slug)),
-    priceRange: `${formatCurrency(salon.minPrice)}+`,
+    image: [salon.coverImageUrl].filter(Boolean),
+    description: salon.bio,
     address: {
       "@type": "PostalAddress",
       addressLocality: salon.city,
       addressCountry: "NL",
     },
-    aggregateRating: {
+  };
+
+  if (salon.reviewCount > 0 && salon.rating > 0) {
+    payload.aggregateRating = {
       "@type": "AggregateRating",
-      ratingValue: salon.rating,
-      reviewCount: salon.reviewCount,
-    },
-    makesOffer: salon.services.map((service) => ({
-      "@type": "Offer",
-      itemOffered: {
-        "@type": "Service",
-        name: service.name,
-      },
-      price: service.price,
-      priceCurrency: "EUR",
-    })),
-  });
+      ratingValue: String(Number(salon.rating.toFixed(1))),
+      reviewCount: String(Math.max(0, salon.reviewCount)),
+    };
+  }
+
+  return JSON.stringify(payload);
 }
 
 export function getStaticCityCategoryPaths(): Array<{ city: string; category: string }> {

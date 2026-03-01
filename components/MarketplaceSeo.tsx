@@ -18,7 +18,7 @@ export default function MarketplaceSeo({
   structuredData,
 }: MarketplaceSeoProps) {
   const canonical = buildCanonicalUrl(pathname);
-  const ogImage = image || "https://www.bookbeauty.nl/icon-512.png";
+  const ogImage = image || "https://bookbeauty.nl/icon-512.png";
   const verification = String(process.env.EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION || "").trim();
 
   return (
@@ -44,4 +44,3 @@ export default function MarketplaceSeo({
     </Head>
   );
 }
-

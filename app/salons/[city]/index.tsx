@@ -3,7 +3,12 @@ import { useLocalSearchParams } from "expo-router";
 import MarketplaceListingScreen from "../../../components/MarketplaceListingScreen";
 import MarketplaceSeo from "../../../components/MarketplaceSeo";
 import MarketplaceShell from "../../../components/MarketplaceShell";
-import { MARKETPLACE_CITIES, buildListingSeo, getCityBySlug } from "../../../lib/marketplace";
+import {
+  MARKETPLACE_CITIES,
+  buildListingSeo,
+  buildListingStructuredData,
+  getCityBySlug,
+} from "../../../lib/marketplace";
 
 export function generateStaticParams() {
   return MARKETPLACE_CITIES.map((city) => ({ city: city.slug }));
@@ -17,12 +22,17 @@ export default function CityListingScreen() {
 
   return (
     <MarketplaceShell active="discover" scroll={false}>
-      <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
+      <MarketplaceSeo
+        title={seo.title}
+        description={seo.description}
+        pathname={seo.pathname}
+        structuredData={buildListingStructuredData({ citySlug })}
+      />
       <MarketplaceListingScreen
         mode="listing"
         citySlug={citySlug}
-        title={`Salons in ${city?.label || "jouw stad"}`}
-        subtitle="Vergelijk lokale salons, bekijk echte content en stuur direct een boekingsaanvraag zonder loginmuur."
+        title={`Beauty salons in ${city?.label || "jouw stad"} – online afspraak maken`}
+        subtitle={`Top salons in ${city?.label || "jouw stad"}: snel vergelijken en direct reserveren.`}
       />
     </MarketplaceShell>
   );

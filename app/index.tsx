@@ -12,6 +12,7 @@ import {
   DEMO_MARKETPLACE_SALONS,
   MARKETPLACE_CATEGORIES,
   MarketplaceSalon,
+  buildHomeStructuredData,
   buildHomeSeo,
   fetchMarketplaceListing,
 } from "../lib/marketplace";
@@ -32,6 +33,7 @@ export default function HomeScreen() {
   const [popularSalons, setPopularSalons] = useState<MarketplaceSalon[]>([]);
   const [loading, setLoading] = useState(true);
   const seo = buildHomeSeo();
+  const homeStructuredData = useMemo(() => buildHomeStructuredData(popularSalons), [popularSalons]);
   const categoryLabels = useMemo(() => MARKETPLACE_CATEGORIES.slice(0, 6).map((item) => item.label), []);
 
   useEffect(() => {
@@ -66,16 +68,17 @@ export default function HomeScreen() {
         description={seo.description}
         pathname={seo.pathname}
         image={DEMO_MARKETPLACE_SALONS[0].coverImageUrl}
+        structuredData={homeStructuredData}
       />
 
       <View style={[styles.heroShell, desktop && styles.heroShellDesktop]}>
         <View style={[styles.hero, desktop && styles.heroDesktop]}>
           <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
           <Text style={[styles.title, desktop ? styles.titleDesktop : styles.titleMobile]}>
-            Vind snel een salon die bij je past.
+            Beauty salons in Nederland – direct online boeken
           </Text>
           <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
-            Bekijk direct prijzen, beschikbaarheid en echte resultaten.
+            Vind snel een salon die bij je past: reviews, prijzen en beschikbaarheid in één plek.
           </Text>
 
           {desktop ? (
@@ -192,7 +195,7 @@ export default function HomeScreen() {
         <View style={styles.sectionCopy}>
           <Text style={styles.sectionEyebrow}>Populaire salons</Text>
           <Text style={[styles.sectionTitle, !desktop && styles.sectionTitleMobile]}>
-            Top keuzes die nu veel bekeken worden
+            Populaire salons in Nederland
           </Text>
         </View>
 
@@ -242,10 +245,11 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.bottomStrip}>
-        <Text style={styles.bottomStripEyebrow}>Voor salons</Text>
-        <Text style={styles.bottomStripTitle}>Sta zichtbaar voor nieuwe klanten.</Text>
+        <Text style={styles.bottomStripEyebrow}>Waarom BookBeauty</Text>
+        <Text style={styles.bottomStripTitle}>Reviews, prijzen en beschikbaarheid in één plek.</Text>
         <Text style={styles.bottomStripText}>
-          Meld je salon aan en verschijn direct in discover.
+          Kies je stad en ontdek salons bij jou in de buurt. Boek zonder bellen en houd alles overzichtelijk op
+          één plek.
         </Text>
         <Pressable
           onPress={() => router.push("/(auth)/register" as never)}
