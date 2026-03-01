@@ -164,7 +164,7 @@ function toFeedPost(id: string, data: Record<string, unknown>): FeedPost {
       : undefined,
     serviceId: linkedServiceId,
     serviceName: linkedServiceName,
-    category: String(data.category ?? "Overig"),
+    category: String(data.category ?? "Beauty"),
     title: typeof data.title === "string" ? data.title : undefined,
     caption: typeof data.caption === "string" ? data.caption : undefined,
     hashtags: normalizeHashtags(data.hashtags),

@@ -1,102 +1,204 @@
 import React, { useMemo, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import CategoryChips from "../../components/CategoryChips";
-import { registerCompany, registerCustomer, registerInfluencer } from "../../lib/authRepo";
+import { registerCompany, registerCustomer } from "../../lib/authRepo";
 import { registerPushTokenForUser } from "../../lib/pushRepo";
-import { CATEGORIES, COLORS } from "../../lib/ui";
+import { addMyService } from "../../lib/serviceRepo";
+import { CATEGORIES, COLORS, RADII } from "../../lib/ui";
+import Button from "../../components/ui/Button";
+import Card from "../../components/ui/Card";
+import Chip from "../../components/ui/Chip";
+import Input from "../../components/ui/Input";
+import Tabs from "../../components/ui/Tabs";
+import Toast from "../../components/ui/Toast";
 
-type RolePick = "customer" | "company" | "influencer";
+type SignupMode = "customer" | "company";
+
+type DraftService = {
+  name: string;
+  category: string;
+  price: number;
+  durationMin: number;
+};
+
+const COMPANY_STEPS = [
+  "Basis",
+  "Contact",
+  "Diensten",
+  "Media",
+  "Openingstijden",
+  "Check",
+] as const;
+
+const SERVICE_TEMPLATES: Record<string, DraftService[]> = {
+  Kapper: [
+    { name: "Knippen", category: "Kapper", price: 35, durationMin: 45 },
+    { name: "Fohnen", category: "Kapper", price: 28, durationMin: 35 },
+    { name: "Kleuren", category: "Kapper", price: 65, durationMin: 90 },
+  ],
+  Nagels: [
+    { name: "BIAB set", category: "Nagels", price: 49, durationMin: 70 },
+    { name: "Gel polish", category: "Nagels", price: 32, durationMin: 40 },
+  ],
+  Wimpers: [
+    { name: "One by one set", category: "Wimpers", price: 59, durationMin: 70 },
+    { name: "Lash lift", category: "Wimpers", price: 45, durationMin: 45 },
+  ],
+  Wenkbrauwen: [
+    { name: "Brow shape", category: "Wenkbrauwen", price: 28, durationMin: 30 },
+    { name: "Brow lamination", category: "Wenkbrauwen", price: 49, durationMin: 50 },
+  ],
+  "Make-up": [
+    { name: "Dag make-up", category: "Make-up", price: 55, durationMin: 45 },
+    { name: "Event glam", category: "Make-up", price: 85, durationMin: 75 },
+  ],
+  Huid: [
+    { name: "Glow facial", category: "Huid", price: 64, durationMin: 55 },
+    { name: "Diepe reiniging", category: "Huid", price: 72, durationMin: 60 },
+  ],
+  Massage: [
+    { name: "Ontspanningsmassage", category: "Massage", price: 68, durationMin: 60 },
+    { name: "Nek en schouders", category: "Massage", price: 42, durationMin: 35 },
+  ],
+  Beauty: [
+    { name: "Beauty consult", category: "Beauty", price: 25, durationMin: 25 },
+    { name: "Fresh up treatment", category: "Beauty", price: 48, durationMin: 45 },
+  ],
+};
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const [mode, setMode] = useState<SignupMode>("company");
+  const [step, setStep] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [successText, setSuccessText] = useState("");
+  const [errorText, setErrorText] = useState("");
 
-  const [role, setRole] = useState<RolePick>("customer");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPassword, setCustomerPassword] = useState("");
+
+  const [companyName, setCompanyName] = useState("");
+  const [city, setCity] = useState("");
+  const [address, setAddress] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  const [influencerName, setInfluencerName] = useState("");
-  const [name, setName] = useState("");
-  const [city, setCity] = useState("");
-  const [bio, setBio] = useState("");
-  const [kvk, setKvk] = useState("");
   const [phone, setPhone] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
+  const [instagram, setInstagram] = useState("");
+  const [services, setServices] = useState<DraftService[]>([]);
+  const [coverImageUrl, setCoverImageUrl] = useState("");
+  const [introVideoUrl, setIntroVideoUrl] = useState("");
+  const [openingHoursNote, setOpeningHoursNote] = useState("");
+  const [bio, setBio] = useState("");
 
-  const [loading, setLoading] = useState(false);
+  const templateOptions = useMemo(
+    () =>
+      categories.flatMap((category) => SERVICE_TEMPLATES[category] ?? []).filter((item, index, list) => {
+        const key = `${item.category}:${item.name}`;
+        return list.findIndex((row) => `${row.category}:${row.name}` === key) === index;
+      }),
+    [categories]
+  );
 
-  const canSubmit = useMemo(() => {
-    if (role === "customer") return email.trim().length > 3 && password.length >= 6;
-    if (role === "influencer") {
-      return email.trim().length > 3 && password.length >= 6 && influencerName.trim().length >= 2;
-    }
-    return (
-      email.trim().length > 3 &&
-      password.length >= 6 &&
-      name.trim().length >= 2 &&
-      city.trim().length >= 2 &&
-      categories.length > 0
-    );
-  }, [email, password, role, influencerName, name, city, categories.length]);
+  const canNextCompany = useMemo(() => {
+    if (step === 0) return companyName.trim().length > 1 && city.trim().length > 1 && categories.length > 0;
+    if (step === 1) return email.trim().length > 4 && password.length >= 6;
+    if (step === 2) return services.length > 0;
+    if (step === 3) return true;
+    if (step === 4) return openingHoursNote.trim().length > 3;
+    return true;
+  }, [step, companyName, city, categories.length, email, password, services.length, openingHoursNote]);
 
   function toggleCategory(value: string) {
     setCategories((prev) => (prev.includes(value) ? prev.filter((x) => x !== value) : [...prev, value]));
   }
 
-  async function onRegister() {
-    if (!canSubmit || loading) return;
+  function toggleServiceTemplate(item: DraftService) {
+    const key = `${item.category}:${item.name}`;
+    setServices((prev) => {
+      const exists = prev.some((service) => `${service.category}:${service.name}` === key);
+      if (exists) {
+        return prev.filter((service) => `${service.category}:${service.name}` !== key);
+      }
+      return [...prev, item];
+    });
+  }
+
+  async function onRegisterCustomer() {
+    if (loading) return;
     setLoading(true);
+    setErrorText("");
 
     try {
-      if (role === "customer") {
-        const user = await registerCustomer(email, password);
-        const pushResult = await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
-        if (pushResult && pushResult.ok !== true) {
-          Alert.alert("Push setup", `Push registreren is niet gelukt (${pushResult.reason}).`);
-        }
-        router.replace("/(customer)/(tabs)" as never);
-      } else if (role === "influencer") {
-        const user = await registerInfluencer({
-          email,
-          password,
-          name: influencerName.trim(),
-        });
-        const pushResult = await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
-        if (pushResult && pushResult.ok !== true) {
-          Alert.alert("Push setup", `Push registreren is niet gelukt (${pushResult.reason}).`);
-        }
-        router.replace("/(customer)/(tabs)/profile" as never);
+      const user = await registerCustomer(customerEmail, customerPassword);
+      const pushResult = await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
+      if (pushResult && pushResult.ok !== true) {
+        setSuccessText("Account is aangemaakt. Push notificaties zijn nog niet volledig ingesteld.");
       } else {
-        const user = await registerCompany({
-          email,
-          password,
-          name: name.trim(),
-          city: city.trim(),
-          categories,
-          bio: bio.trim(),
-          kvk: kvk.trim(),
-          phone: phone.trim(),
-        });
-        const pushResult = await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
-        if (pushResult && pushResult.ok !== true) {
-          Alert.alert("Push setup", `Push registreren is niet gelukt (${pushResult.reason}).`);
-        }
-        router.replace("/(company)/(tabs)/home" as never);
+        setSuccessText("Je account is klaar. Je blijft in de marketplace en kunt nu boeken en favorieten bewaren.");
       }
+      router.replace("/account" as never);
     } catch (error: any) {
-      Alert.alert("Registratie mislukt", error?.message ?? "Probeer het opnieuw.");
+      setErrorText(error?.message ?? "Registratie mislukt.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onRegisterCompany() {
+    if (loading) return;
+    setLoading(true);
+    setErrorText("");
+    setSuccessText("");
+
+    try {
+      const user = await registerCompany({
+        email,
+        password,
+        name: companyName.trim(),
+        city: city.trim(),
+        categories,
+        bio: bio.trim(),
+        address: address.trim(),
+        phone: phone.trim(),
+        instagram: instagram.trim(),
+        coverImageUrl: coverImageUrl.trim(),
+        introVideoUrl: introVideoUrl.trim(),
+        openingHoursNote: openingHoursNote.trim(),
+      });
+
+      if (services.length) {
+        await Promise.all(
+          services.map((service) =>
+            addMyService(user.uid, {
+              name: service.name,
+              category: service.category,
+              description: "",
+              price: service.price,
+              durationMin: service.durationMin,
+              bufferBeforeMin: 0,
+              bufferAfterMin: 0,
+              capacity: 1,
+              isActive: true,
+              photoUrls: [],
+            })
+          )
+        );
+      }
+
+      await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
+      setSuccessText("Je salon is aangemaakt en staat direct live in ontdekken.");
+      router.replace("/(company)/(tabs)/home" as never);
+    } catch (error: any) {
+      setErrorText(error?.message ?? "Aanmelden mislukt.");
     } finally {
       setLoading(false);
     }
@@ -115,113 +217,216 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
-          <View style={styles.card}>
-          <View style={styles.titleRow}>
-            <Ionicons name="sparkles-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.title}>Account aanmaken</Text>
+          <View style={styles.header}>
+            <Text style={styles.eyebrow}>BookBeauty account</Text>
+            <Text style={styles.title}>
+              {mode === "company" ? "Meld je salon aan in een paar rustige stappen." : "Maak je account aan wanneer je wilt boeken."}
+            </Text>
+            <Text style={styles.subtitle}>
+              {mode === "company"
+                ? "Geen admin-gevoel. Gewoon een premium onboarding waarmee je salon direct zichtbaar kan worden."
+                : "Browsen blijft openbaar. Een account is alleen nodig voor boekingen, favorieten en updates."}
+            </Text>
           </View>
 
-          <View style={styles.roleRow}>
-            <Pressable
-              style={[styles.roleBtn, role === "customer" && styles.roleBtnActive]}
-              onPress={() => setRole("customer")}
-            >
-              <Text style={[styles.roleText, role === "customer" && styles.roleTextActive]}>Klant</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.roleBtn, role === "company" && styles.roleBtnActive]}
-              onPress={() => setRole("company")}
-            >
-              <Text style={[styles.roleText, role === "company" && styles.roleTextActive]}>Bedrijf</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.roleBtn, role === "influencer" && styles.roleBtnActive]}
-              onPress={() => setRole("influencer")}
-            >
-              <Text style={[styles.roleText, role === "influencer" && styles.roleTextActive]}>Influencer</Text>
-            </Pressable>
-          </View>
-
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="E-mail"
-            placeholderTextColor={COLORS.placeholder}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={styles.input}
-          />
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Wachtwoord (min 6)"
-            placeholderTextColor={COLORS.placeholder}
-            secureTextEntry
-            style={styles.input}
+          <Tabs
+            items={["Salon aanmelden", "Klant account"]}
+            active={mode === "company" ? "Salon aanmelden" : "Klant account"}
+            onChange={(value) => {
+              setMode(value === "Salon aanmelden" ? "company" : "customer");
+              setErrorText("");
+              setSuccessText("");
+            }}
           />
 
-          {role === "influencer" ? (
-            <View style={styles.companyFields}>
-              <TextInput
-                value={influencerName}
-                onChangeText={setInfluencerName}
-                placeholder="Jouw creator naam"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-            </View>
-          ) : null}
+          {errorText ? <Toast message={errorText} tone="danger" /> : null}
+          {successText ? <Toast message={successText} tone="success" /> : null}
 
-          {role === "company" ? (
-            <View style={styles.companyFields}>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="Salonnaam"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-              <TextInput
-                value={city}
-                onChangeText={setCity}
-                placeholder="Stad"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-              <TextInput
-                value={bio}
-                onChangeText={setBio}
-                placeholder="Korte bio"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-              <TextInput
-                value={kvk}
-                onChangeText={setKvk}
-                placeholder="KVK (optioneel)"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-              <TextInput
-                value={phone}
-                onChangeText={setPhone}
-                placeholder="Telefoon (optioneel)"
-                placeholderTextColor={COLORS.placeholder}
-                style={styles.input}
-              />
-              <Text style={styles.multiLabel}>Kies meerdere categorieen</Text>
-              <CategoryChips items={[...CATEGORIES]} selectedItems={categories} multi onToggle={toggleCategory} />
-            </View>
-          ) : null}
+          {mode === "customer" ? (
+            <Card style={styles.card}>
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Klant account</Text>
+                <Input
+                  label="E-mail"
+                  value={customerEmail}
+                  onChangeText={setCustomerEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholder="naam@voorbeeld.nl"
+                />
+                <Input
+                  label="Wachtwoord"
+                  value={customerPassword}
+                  onChangeText={setCustomerPassword}
+                  secureTextEntry
+                  placeholder="Minimaal 6 tekens"
+                />
+              </View>
 
-          <Pressable onPress={onRegister} style={[styles.btn, (!canSubmit || loading) && styles.disabled]}>
-            <Text style={styles.btnText}>{loading ? "Bezig..." : "Registreren"}</Text>
-          </Pressable>
+              <View style={styles.footerRow}>
+                <Button label="Inloggen" variant="secondary" onPress={() => router.replace("/(auth)/login" as never)} style={styles.footerButton} />
+                <Button label={loading ? "Bezig..." : "Account maken"} onPress={() => onRegisterCustomer().catch(() => null)} style={styles.footerButton} />
+              </View>
+            </Card>
+          ) : (
+            <Card style={styles.card}>
+              <View style={styles.stepHeader}>
+                {COMPANY_STEPS.map((label, index) => {
+                  const active = index <= step;
+                  return <View key={label} style={[styles.stepPill, active && styles.stepPillActive]} />;
+                })}
+              </View>
 
-          <Pressable onPress={() => router.replace("/(auth)/login" as never)}>
-            <Text style={styles.link}>Al een account? Inloggen</Text>
-          </Pressable>
-          </View>
+              <Text style={styles.sectionTitle}>
+                {step + 1}. {COMPANY_STEPS[step]}
+              </Text>
+
+              {step === 0 ? (
+                <View style={styles.section}>
+                  <Input label="Salonnaam" value={companyName} onChangeText={setCompanyName} placeholder="Bijv. Glow Studio Rotterdam" />
+                  <Input label="Stad" value={city} onChangeText={setCity} placeholder="Rotterdam" />
+                  <Input label="Adres" value={address} onChangeText={setAddress} placeholder="Straat en huisnummer" />
+                  <Text style={styles.label}>Categorieen</Text>
+                  <View style={styles.wrap}>
+                    {CATEGORIES.map((item) => (
+                      <Chip key={item} label={item} active={categories.includes(item)} onPress={() => toggleCategory(item)} />
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              {step === 1 ? (
+                <View style={styles.section}>
+                  <Input label="E-mail" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                  <Input label="Wachtwoord" value={password} onChangeText={setPassword} secureTextEntry />
+                  <Input label="Telefoon" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+                  <Input label="Instagram (optioneel)" value={instagram} onChangeText={setInstagram} placeholder="@jouwsalon" />
+                </View>
+              ) : null}
+
+              {step === 2 ? (
+                <View style={styles.section}>
+                  <Text style={styles.helper}>
+                    Kies snelle dienst-templates. Deze verschijnen direct in je profiel en kunnen later altijd worden aangepast.
+                  </Text>
+                  <View style={styles.wrap}>
+                    {templateOptions.length ? (
+                      templateOptions.map((item) => {
+                        const key = `${item.category}:${item.name}`;
+                        const active = services.some((service) => `${service.category}:${service.name}` === key);
+                        return (
+                          <Chip
+                            key={key}
+                            label={`${item.name} · ${item.category}`}
+                            active={active}
+                            onPress={() => toggleServiceTemplate(item)}
+                          />
+                        );
+                      })
+                    ) : (
+                      <Toast message="Kies eerst een of meer categorieen bij de eerste stap." />
+                    )}
+                  </View>
+                  <View style={styles.serviceList}>
+                    {services.map((item) => (
+                      <View key={`${item.category}:${item.name}`} style={styles.serviceRow}>
+                        <Text style={styles.serviceName}>{item.name}</Text>
+                        <Text style={styles.serviceMeta}>
+                          {item.category} • vanaf EUR {item.price}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              {step === 3 ? (
+                <View style={styles.section}>
+                  <Input label="Coverfoto URL (optioneel)" value={coverImageUrl} onChangeText={setCoverImageUrl} placeholder="https://..." />
+                  <Input label="Intro video URL (optioneel)" value={introVideoUrl} onChangeText={setIntroVideoUrl} placeholder="https://..." />
+                  <Text style={styles.helper}>
+                    Je kunt media later ook vanuit je dashboard uploaden en vervangen.
+                  </Text>
+                </View>
+              ) : null}
+
+              {step === 4 ? (
+                <View style={styles.section}>
+                  <Input
+                    label="Openingstijden / beschikbaarheid"
+                    value={openingHoursNote}
+                    onChangeText={setOpeningHoursNote}
+                    placeholder="Ma-vr 09:00-18:00, za 10:00-16:00"
+                  />
+                  <Input
+                    label="Korte beschrijving"
+                    value={bio}
+                    onChangeText={setBio}
+                    placeholder="Waar sta je om bekend?"
+                    multiline
+                    style={styles.multiline}
+                  />
+                </View>
+              ) : null}
+
+              {step === 5 ? (
+                <View style={styles.section}>
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewLabel}>Salon</Text>
+                    <Text style={styles.reviewValue}>{companyName || "-"}</Text>
+                  </View>
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewLabel}>Stad</Text>
+                    <Text style={styles.reviewValue}>{city || "-"}</Text>
+                  </View>
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewLabel}>Categorieen</Text>
+                    <Text style={styles.reviewValue}>{categories.join(", ") || "-"}</Text>
+                  </View>
+                  <View style={styles.reviewRow}>
+                    <Text style={styles.reviewLabel}>Diensten</Text>
+                    <Text style={styles.reviewValue}>{services.length}</Text>
+                  </View>
+                  <Text style={styles.helper}>
+                    Na verzenden staat je salon direct live met de huidige regels. Je kunt daarna alles verder verfijnen in het dashboard.
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.footerRow}>
+                <Button
+                  label={step === 0 ? "Terug" : "Vorige"}
+                  variant="secondary"
+                  onPress={() => {
+                    if (step === 0) {
+                      router.back();
+                      return;
+                    }
+                    setStep((current) => Math.max(0, current - 1));
+                  }}
+                  style={styles.footerButton}
+                />
+                {step < COMPANY_STEPS.length - 1 ? (
+                  <Button
+                    label="Volgende"
+                    onPress={() => {
+                      if (!canNextCompany) return;
+                      setStep((current) => Math.min(COMPANY_STEPS.length - 1, current + 1));
+                    }}
+                    disabled={!canNextCompany}
+                    style={styles.footerButton}
+                  />
+                ) : (
+                  <Button
+                    label={loading ? "Verzenden..." : "Salon aanmaken"}
+                    onPress={() => onRegisterCompany().catch(() => null)}
+                    disabled={loading}
+                    style={styles.footerButton}
+                  />
+                )}
+              </View>
+            </Card>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -235,90 +440,124 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 18,
-    alignItems: "center",
+    gap: 16,
   },
-  card: {
-    width: "100%",
-    maxWidth: 460,
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 16,
-    gap: 10,
+  header: {
+    gap: 8,
+  },
+  eyebrow: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   title: {
-    fontSize: 24,
-    fontWeight: "800",
     color: COLORS.text,
-    marginBottom: 4,
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: "900",
+    letterSpacing: -0.8,
   },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
+  subtitle: {
+    color: COLORS.muted,
+    fontSize: 15,
+    lineHeight: 23,
   },
-  roleRow: {
+  card: {
+    gap: 16,
+  },
+  stepHeader: {
     flexDirection: "row",
     gap: 8,
   },
-  roleBtn: {
+  stepPill: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 10,
-    borderRadius: 12,
-    alignItems: "center",
-    backgroundColor: COLORS.card,
+    height: 6,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.border,
   },
-  roleBtnActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  stepPillActive: {
+    backgroundColor: COLORS.accent,
   },
-  roleText: {
+  section: {
+    gap: 12,
+  },
+  sectionTitle: {
     color: COLORS.text,
-    fontWeight: "700",
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.4,
   },
-  roleTextActive: {
-    color: "#fff",
-  },
-  companyFields: {
-    gap: 10,
-    marginTop: 2,
-  },
-  multiLabel: {
+  label: {
     color: COLORS.text,
-    fontWeight: "700",
     fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
-  input: {
-    backgroundColor: "#fff",
+  helper: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  wrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  serviceList: {
+    gap: 8,
+  },
+  serviceRow: {
+    minHeight: 56,
+    borderRadius: RADII.md,
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: COLORS.text,
-    fontWeight: "600",
-  },
-  btn: {
-    marginTop: 4,
-    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    backgroundColor: COLORS.surface,
   },
-  btnText: {
-    color: "#fff",
+  serviceName: {
+    color: COLORS.text,
+    fontSize: 14,
     fontWeight: "800",
   },
-  disabled: {
-    opacity: 0.5,
+  serviceMeta: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "700",
   },
-  link: {
-    textAlign: "center",
-    color: COLORS.primary,
-    fontWeight: "600",
-    marginTop: 6,
+  multiline: {
+    minHeight: 100,
+    textAlignVertical: "top",
+    paddingTop: 14,
+  },
+  reviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  reviewLabel: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  reviewValue: {
+    flex: 1,
+    textAlign: "right",
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  footerRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  footerButton: {
+    flex: 1,
   },
 });

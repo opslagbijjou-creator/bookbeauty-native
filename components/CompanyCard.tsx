@@ -52,7 +52,7 @@ export default function CompanyCard({ company, onPress }: CompanyCardProps) {
         <View style={styles.metaChip}>
           <Ionicons name="pricetags-outline" size={14} color={COLORS.primary} />
           <Text style={styles.meta} numberOfLines={1}>
-            {company.categories.join(" • ") || "Overig"}
+            {company.categories.join(" • ") || "Beauty"}
           </Text>
         </View>
       </View>

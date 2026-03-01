@@ -115,13 +115,13 @@ export default function PublicAccountScreen() {
         key: "customer-bookings",
         label: "Mijn boekingen",
         subtitle: "Bekijk de status van je lopende beauty-aanvragen.",
-        href: "/(customer)/(tabs)/bookings",
+        href: "/account-bookings",
       },
       {
         key: "customer-profile",
         label: "Mijn profiel",
         subtitle: "Beheer favorieten, instellingen en je accountgegevens.",
-        href: "/(customer)/(tabs)/profile",
+        href: "/account-profile",
       },
       {
         key: "logout",

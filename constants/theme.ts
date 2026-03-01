@@ -1,53 +1,66 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+export const COLORS = {
+  bg: "#ffffff",
+  card: "#ffffff",
+  border: "#e9e9ec",
+  text: "#111111",
+  muted: "#6b6b6b",
+  placeholder: "#9a9aa1",
+  primary: "#111111",
+  primarySoft: "#f3f3f4",
+  danger: "#c24164",
+  success: "#157347",
+  surface: "#f7f7f8",
+  accent: "#d78aa9",
+  accentSoft: "#faeff4",
+};
 
-import { Platform } from 'react-native';
+export const RADII = {
+  sm: 12,
+  md: 16,
+  lg: 20,
+  xl: 24,
+  pill: 999,
+};
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+export const SPACING = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+};
 
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+export const SHADOWS = {
+  card: {
+    shadowColor: "#000000",
+    shadowOpacity: 0.04,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+  soft: {
+    shadowColor: "#000000",
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+export const CATEGORIES = [
+  "Kapper",
+  "Nagels",
+  "Wimpers",
+  "Wenkbrauwen",
+  "Make-up",
+  "Huid",
+  "Massage",
+  "Beauty",
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
+
+export const DISCOVER_CATEGORY_FILTERS = ["Alles", ...CATEGORIES] as const;
+
+export const CITY_OPTIONS = ["Alle", "Amsterdam", "Rotterdam", "Den Haag", "Utrecht"] as const;

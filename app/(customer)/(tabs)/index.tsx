@@ -17,10 +17,9 @@ const discoverIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Wimpers: "eye-outline",
   Wenkbrauwen: "sparkles-outline",
   "Make-up": "color-palette-outline",
+  Huid: "water-outline",
   Massage: "body-outline",
-  Spa: "water-outline",
-  Barber: "man-outline",
-  Overig: "grid-outline",
+  Beauty: "grid-outline",
 };
 
 const cityIcons: Record<string, keyof typeof Ionicons.glyphMap> = {

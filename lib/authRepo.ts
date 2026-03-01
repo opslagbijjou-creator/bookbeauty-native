@@ -19,8 +19,13 @@ export type RegisterCompanyInput = {
   city: string;
   categories: string[];
   bio?: string;
+  address?: string;
   kvk?: string;
   phone?: string;
+  instagram?: string;
+  coverImageUrl?: string;
+  introVideoUrl?: string;
+  openingHoursNote?: string;
 };
 
 export type RegisterInfluencerInput = {
@@ -211,9 +216,14 @@ export async function registerCompany(input: RegisterCompanyInput): Promise<User
     city: input.city,
     categories: input.categories,
     bio: input.bio,
+    address: input.address,
     kvk: input.kvk,
     phone: input.phone,
     email: input.email,
+    instagram: input.instagram,
+    coverImageUrl: input.coverImageUrl,
+    introVideoUrl: input.introVideoUrl,
+    openingHoursNote: input.openingHoursNote,
   });
 
   await ensureBookBeautyAutoFollow(cred.user.uid, "company").catch(() => null);

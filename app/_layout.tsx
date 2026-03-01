@@ -222,7 +222,12 @@ export default function RootLayout() {
       <AppStartupPermissionBootstrap />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
+        <Stack.Screen
+          name="(auth)"
+          options={{
+            presentation: Platform.OS === "web" ? "modal" : "transparentModal",
+          }}
+        />
         <Stack.Screen name="(customer)" />
         <Stack.Screen name="(company)" />
         <Stack.Screen name="(admin)" />

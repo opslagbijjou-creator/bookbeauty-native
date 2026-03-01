@@ -26,6 +26,8 @@ export type PublicBookingRequestInput = {
   requestedTime: string;
   customerUid?: string;
   customerName?: string;
+  customerPhone?: string;
+  consentAccepted?: boolean;
   note?: string;
 };
 
@@ -191,6 +193,8 @@ export async function createPublicBookingRequest(
   const startAt = new Date(selectedSlot.startAtMs);
   const endAt = new Date(selectedSlot.endAtMs);
   const customerName = input.customerName?.trim() || "Gast";
+  const customerPhone = input.customerPhone?.trim() || "";
+  const consentAccepted = Boolean(input.consentAccepted);
 
   await setDoc(bookingRef, {
     companyId,
@@ -236,7 +240,7 @@ export async function createPublicBookingRequest(
     noShowReportedAt: null,
     customerId: input.customerUid?.trim() || `guest:${email}`,
     customerName,
-    customerPhone: "",
+    customerPhone,
     customerEmail: email,
     note: input.note?.trim() || "",
     cancellationFeePercent: 0,
@@ -252,11 +256,14 @@ export async function createPublicBookingRequest(
     customer: {
       email,
       uid: input.customerUid?.trim() || "",
+      name: customerName,
+      phone: customerPhone,
     },
     schedule: {
       requestedDate,
       requestedTime,
     },
+    consentAccepted,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });

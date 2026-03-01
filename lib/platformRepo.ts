@@ -78,7 +78,7 @@ export async function ensureBookBeautyProfileForAdmin(): Promise<void> {
     doc(db, "companies_public", BOOKBEAUTY_COMPANY_ID),
     {
       ...DEFAULT_BOOKBEAUTY_PROFILE,
-      categories: ["Overig"],
+      categories: ["Beauty"],
       minPrice: 0,
       isActive: true,
       bookingEnabled: false,

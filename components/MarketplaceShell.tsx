@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { subscribeAuth } from "../lib/authRepo";
 import { COLORS } from "../lib/ui";
 import { getDefaultCityPath } from "../lib/marketplace";
 
@@ -20,14 +21,6 @@ type MenuItem = {
   href: string;
 };
 
-const MENU_ITEMS: MenuItem[] = [
-  { key: "home", label: "Home", href: "/" },
-  { key: "discover", label: "Ontdek salons", href: "/discover" },
-  { key: "feed", label: "Feed", href: "/feed" },
-  { key: "account", label: "Mijn account", href: "/account" },
-  { key: "register", label: "Meld je salon gratis aan", href: "/(auth)/register" },
-];
-
 export default function MarketplaceShell({
   children,
   active,
@@ -36,6 +29,26 @@ export default function MarketplaceShell({
 }: MarketplaceShellProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
+
+  useEffect(() => {
+    return subscribeAuth((user) => {
+      setHasSession(Boolean(user?.uid));
+    });
+  }, []);
+
+  const menuItems = useMemo<MenuItem[]>(
+    () => [
+      { key: "home", label: "Home", href: "/" },
+      { key: "discover", label: "Ontdek salons", href: "/discover" },
+      { key: "feed", label: "Feed", href: "/feed" },
+      { key: "register", label: "Meld je salon aan", href: "/(auth)/register" },
+      hasSession
+        ? { key: "account", label: "Mijn account", href: "/account" }
+        : { key: "login", label: "Inloggen", href: "/(auth)/login" },
+    ],
+    [hasSession]
+  );
 
   function openRoute(href: string) {
     setMenuOpen(false);
@@ -94,7 +107,7 @@ export default function MarketplaceShell({
               <Text style={styles.menuTitle}>BookBeauty marketplace</Text>
 
               <View style={styles.menuList}>
-                {MENU_ITEMS.map((item) => {
+                {menuItems.map((item) => {
                   const selected = item.key === active;
                   return (
                     <Pressable

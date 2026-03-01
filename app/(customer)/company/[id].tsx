@@ -34,10 +34,9 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Wimpers: "eye-outline",
   Wenkbrauwen: "sparkles-outline",
   "Make-up": "color-palette-outline",
+  Huid: "water-outline",
   Massage: "body-outline",
-  Spa: "water-outline",
-  Barber: "man-outline",
-  Overig: "grid-outline",
+  Beauty: "grid-outline",
 };
 
 function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
@@ -404,7 +403,7 @@ export default function CompanyProfileScreen() {
             </View>
 
             <View style={styles.catWrap}>
-              {(company.categories?.length ? company.categories : ["Overig"]).map((cat) => (
+              {(company.categories?.length ? company.categories : ["Beauty"]).map((cat) => (
                 <View key={cat} style={styles.catPill}>
                   <Text style={styles.catText}>{cat}</Text>
                 </View>

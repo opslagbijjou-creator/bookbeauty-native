@@ -1,7 +1,6 @@
 import React from "react";
-import PaymentsPlaceholderScreen from "../payments";
+import { Redirect } from "expo-router";
 
-export default function PaymentReturnPlaceholderScreen() {
-  return <PaymentsPlaceholderScreen />;
+export default function PaymentReturnScreen() {
+  return <Redirect href="/" />;
 }
-

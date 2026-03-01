@@ -6,10 +6,10 @@ import { auth } from "../../../lib/firebase";
 import type { AppRole } from "../../../lib/roles";
 
 const companyTabConfig: TabVisualConfig = {
-  home: { label: "Profiel", activeIcon: "business", inactiveIcon: "business-outline" },
+  home: { label: "Overzicht", activeIcon: "business", inactiveIcon: "business-outline" },
   services: { label: "Diensten", activeIcon: "cut", inactiveIcon: "cut-outline" },
-  feed: { label: "Feed", activeIcon: "play", inactiveIcon: "play-outline" },
-  studio: { label: "Upload", activeIcon: "add-circle", inactiveIcon: "add-circle-outline" },
+  feed: { label: "Posts", activeIcon: "play", inactiveIcon: "play-outline" },
+  studio: { label: "Studio", activeIcon: "add-circle", inactiveIcon: "add-circle-outline" },
   bookings: { label: "Agenda", activeIcon: "calendar", inactiveIcon: "calendar-outline" },
 };
 
@@ -52,10 +52,10 @@ export default function CompanyTabsLayout() {
         />
       )}
     >
-      <Tabs.Screen name="home" options={{ title: isEmployee ? "Account" : "Profiel" }} />
+      <Tabs.Screen name="home" options={{ title: isEmployee ? "Account" : "Overzicht" }} />
       <Tabs.Screen name="services" options={isEmployee ? { href: null } : { title: "Diensten" }} />
-      <Tabs.Screen name="feed" options={isEmployee ? { href: null } : { title: "Feed" }} />
-      <Tabs.Screen name="studio" options={isEmployee ? { href: null } : { title: "Upload" }} />
+      <Tabs.Screen name="feed" options={isEmployee ? { href: null } : { title: "Posts" }} />
+      <Tabs.Screen name="studio" options={isEmployee ? { href: null } : { title: "Studio" }} />
       <Tabs.Screen name="bookings" options={{ title: "Agenda" }} />
     </Tabs>
   );

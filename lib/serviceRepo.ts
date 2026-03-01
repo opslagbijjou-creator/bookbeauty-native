@@ -54,7 +54,7 @@ function mapService(id: string, data: Record<string, unknown>): CompanyService {
     id,
     name: String(data.name ?? "Onbekende dienst"),
     description: typeof data.description === "string" ? data.description : undefined,
-    category: String(data.category ?? "Overig"),
+    category: String(data.category ?? "Beauty"),
     price: Number(data.price ?? 0),
     durationMin: Number(data.durationMin ?? 0),
     bufferBeforeMin: normalizeNonNegativeInt(data.bufferBeforeMin, 0),

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../lib/ui";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -122,18 +121,13 @@ export default function FloatingCenterTabBar({
               ]}
             >
               {isCenter ? (
-                <LinearGradient
-                  colors={focused ? ["#ff6fb3", "#d94490"] : ["#f0dbe6", "#ebcadb"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.centerIconCircle}
-                >
+                <View style={[styles.centerIconCircle, focused && styles.centerIconCircleActive]}>
                   <Ionicons
                     name={iconName ?? "ellipse-outline"}
                     size={18}
-                    color={focused ? "#fff" : COLORS.primary}
+                    color={focused ? "#fff" : COLORS.text}
                   />
-                </LinearGradient>
+                </View>
               ) : (
                 <Ionicons name={iconName ?? "ellipse-outline"} size={20} color={focused ? COLORS.primary : COLORS.muted} />
               )}
@@ -178,18 +172,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   itemActive: {
-    backgroundColor: "#fff7fb",
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: "#f3d3e3",
+    borderColor: COLORS.border,
   },
   centerItem: {
-    backgroundColor: "#fff4f9",
+    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: "#efccdd",
+    borderColor: COLORS.border,
   },
   centerItemActive: {
-    backgroundColor: "#ffeef7",
-    borderColor: "#eab3cf",
+    backgroundColor: COLORS.surface,
+    borderColor: COLORS.border,
   },
   centerIconCircle: {
     width: 30,
@@ -197,6 +191,10 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#ffffff",
+  },
+  centerIconCircleActive: {
+    backgroundColor: COLORS.primary,
   },
   label: {
     color: COLORS.muted,

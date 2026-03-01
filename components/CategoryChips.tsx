@@ -89,8 +89,8 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   chipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: COLORS.accentSoft,
+    borderColor: "rgba(215,138,169,0.25)",
   },
   chipPressed: {
     transform: [{ scale: 0.98 }],
@@ -104,6 +104,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   textActive: {
-    color: "#fff",
+    color: COLORS.text,
   },
 });

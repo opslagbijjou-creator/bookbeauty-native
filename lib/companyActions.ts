@@ -6,11 +6,15 @@ type CompanyCreateInput = {
   city: string;
   categories: string[];
   bio?: string;
+  address?: string;
   logoUrl?: string;
   coverImageUrl?: string;
   kvk?: string;
   phone?: string;
   email?: string;
+  instagram?: string;
+  introVideoUrl?: string;
+  openingHoursNote?: string;
 };
 
 const DEFAULT_BOOKING_WEEK_SCHEDULE = {
@@ -31,6 +35,7 @@ export async function createCompany(companyId: string, input: CompanyCreateInput
       kvk: input.kvk ?? "",
       phone: input.phone ?? "",
       email: input.email ?? "",
+      instagram: input.instagram ?? "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     },
@@ -61,8 +66,11 @@ export async function createCompany(companyId: string, input: CompanyCreateInput
       minPrice: 0,
       isActive: true,
       bio: input.bio ?? "",
+      address: input.address ?? "",
       logoUrl: input.logoUrl ?? "",
       coverImageUrl: input.coverImageUrl ?? "",
+      introVideoUrl: input.introVideoUrl ?? "",
+      openingHoursNote: input.openingHoursNote ?? "",
       bookingEnabled: true,
       bookingIntervalMin: 30,
       bookingWeekSchedule: DEFAULT_BOOKING_WEEK_SCHEDULE,
