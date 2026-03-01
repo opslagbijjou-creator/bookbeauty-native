@@ -90,7 +90,7 @@ function FeedSlide({
   const imageUrl = item.imageUrl?.trim() || item.posterUrl;
   const canPlayVideo = item.mediaType === "video" && Boolean(videoUrl) && !failedVideo;
   const isWeb = Platform.OS === "web";
-  const videoStyle = isWeb ? [styles.frameMedia, styles.webContain] : styles.frameMedia;
+  const videoStyle = isWeb ? [styles.absoluteMedia, styles.webContain] : styles.absoluteMedia;
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -148,7 +148,12 @@ function FeedSlide({
           <View style={[styles.mediaFrame, canPlayVideo ? styles.videoFrame : styles.photoFrame]}>
             {canPlayVideo ? (
               <>
-                <Image source={{ uri: item.posterUrl }} style={styles.frameMedia} contentFit="contain" transition={0} />
+                <Image
+                  source={{ uri: item.posterUrl }}
+                  style={styles.absoluteMedia}
+                  contentFit="contain"
+                  transition={0}
+                />
                 <Video
                   ref={videoRef}
                   source={{ uri: videoUrl }}
@@ -183,7 +188,7 @@ function FeedSlide({
                 />
               </>
             ) : imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.frameMedia} contentFit="cover" transition={180} />
+              <Image source={{ uri: imageUrl }} style={styles.absoluteMedia} contentFit="cover" transition={180} />
             ) : null}
 
             {canPlayVideo && (!videoReady || isBuffering) ? (
@@ -563,6 +568,10 @@ const styles = StyleSheet.create({
   frameMedia: {
     width: "100%",
     height: "100%",
+    backgroundColor: "#06080c",
+  },
+  absoluteMedia: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: "#06080c",
   },
   webContain: {
