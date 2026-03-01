@@ -74,6 +74,7 @@ function FeedSlide({
   const [isBuffering, setIsBuffering] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [videoSourceIndex, setVideoSourceIndex] = useState(0);
 
   useEffect(() => {
     fade.setValue(0);
@@ -84,13 +85,15 @@ function FeedSlide({
     }).start();
   }, [fade, item.id]);
 
-  const videoUrl = item.videoUrl?.trim() || "";
+  const videoSources = item.videoSources?.length ? item.videoSources : item.videoUrl ? [item.videoUrl] : [];
+  const videoUrl = videoSources[Math.min(videoSourceIndex, Math.max(0, videoSources.length - 1))]?.trim() || "";
   const imageUrl = item.imageUrl?.trim() || item.posterUrl;
   const canPlayVideo = item.mediaType === "video" && Boolean(videoUrl) && !failedVideo;
   const isWeb = Platform.OS === "web";
   const videoStyle = isWeb ? [styles.frameMedia, styles.webContain] : styles.frameMedia;
 
   useEffect(() => {
+    setVideoSourceIndex(0);
     setVideoReady(false);
     setIsBuffering(false);
     setProgress(0);
@@ -124,7 +127,7 @@ function FeedSlide({
       .then(() => video.setPositionAsync(0))
       .catch(() => null);
     setProgress(0);
-  }, [isActive, canPlayVideo, item.id]);
+  }, [isActive, canPlayVideo, item.id, videoUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -165,7 +168,18 @@ function FeedSlide({
                     setIsBuffering(false);
                   }}
                   onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-                  onError={onVideoError}
+                  onError={() => {
+                    setVideoReady(false);
+                    setIsBuffering(false);
+                    setProgress(0);
+                    setVideoSourceIndex((current) => {
+                      if (current + 1 < videoSources.length) {
+                        return current + 1;
+                      }
+                      onVideoError();
+                      return current;
+                    });
+                  }}
                 />
               </>
             ) : imageUrl ? (

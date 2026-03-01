@@ -1,5 +1,6 @@
 import { CompanyPublic, fetchCompanies } from "./companyRepo";
 import { FeedPost, fetchCompanyFeedPublic, fetchFeed, fetchFeedPostById } from "./feedRepo";
+import { buildCloudinaryEditedUrl } from "./mediaEdit";
 import { CompanyService, fetchCompanyServicesPublic } from "./serviceRepo";
 
 export type MarketplaceCity = {
@@ -32,6 +33,7 @@ export type MarketplaceFeedItem = {
   mediaType: "image" | "video";
   posterUrl: string;
   videoUrl?: string;
+  videoSources?: string[];
   imageUrl?: string;
   companyId?: string;
   companyName: string;
@@ -176,6 +178,7 @@ function mapServiceToMarketplaceService(service: CompanyService): MarketplaceSer
 function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
   if (!videoUrl) return "";
   const [rawPath, rawQuery = ""] = videoUrl.split("?");
+  if (!rawPath.includes("/upload/")) return "";
   let path = rawPath;
 
   if (path.includes("/upload/")) {
@@ -211,21 +214,32 @@ function normalizeCloudinaryVideoPlaybackUrl(rawUrl?: string): string {
   return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
 }
 
-function pickMarketplaceVideoUrl(post: FeedPost): string | undefined {
+function buildMarketplaceVideoCandidates(post: FeedPost): string[] {
   const rawSource = post.sourceVideoUrl?.trim() || "";
   const rawEdited = post.videoUrl?.trim() || "";
+  const editedFromSource = rawSource
+    ? buildCloudinaryEditedUrl(rawSource, { cropPreset: post.cropPreset, filterPreset: post.filterPreset })
+    : "";
 
-  return (
-    normalizeCloudinaryVideoPlaybackUrl(rawSource) ||
-    normalizeCloudinaryVideoPlaybackUrl(rawEdited) ||
-    rawSource ||
-    rawEdited ||
-    undefined
-  );
+  const candidates = [
+    normalizeCloudinaryVideoPlaybackUrl(rawEdited),
+    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
+    normalizeCloudinaryVideoPlaybackUrl(rawSource),
+    rawEdited,
+    editedFromSource,
+    rawSource,
+  ].filter(Boolean);
+
+  const unique: string[] = [];
+  for (const candidate of candidates) {
+    if (!unique.includes(candidate)) unique.push(candidate);
+  }
+  return unique;
 }
 
 function mapFeedPostToMarketplaceItem(post: FeedPost, companySlug: string): MarketplaceFeedItem {
   const category = getCategoryFromLabel(post.category);
+  const videoSources = post.mediaType === "video" ? buildMarketplaceVideoCandidates(post) : [];
   const safeVideoSource = post.sourceVideoUrl?.trim() || post.videoUrl?.trim() || "";
   const posterUrl =
     (post.mediaType === "video"
@@ -245,7 +259,8 @@ function mapFeedPostToMarketplaceItem(post: FeedPost, companySlug: string): Mark
     categorySlug: category.slug,
     mediaType: post.mediaType,
     posterUrl,
-    videoUrl: post.mediaType === "video" ? pickMarketplaceVideoUrl(post) : undefined,
+    videoUrl: videoSources[0],
+    videoSources: videoSources.length ? videoSources : undefined,
     imageUrl: post.imageUrl?.trim() || undefined,
     companyId: post.companyId,
     companyName: post.companyName,
