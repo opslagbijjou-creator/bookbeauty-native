@@ -4,7 +4,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { FeedPost } from "../lib/feedRepo";
-import { buildCloudinaryEditedUrl, buildCloudinaryVideoPlaybackUrl } from "../lib/mediaEdit";
+import {
+  buildCloudinaryEditedUrl,
+  buildCloudinaryVideoPlaybackUrl,
+  buildCloudinaryVideoThumbnailUrl,
+} from "../lib/mediaEdit";
 
 type VideoPostCardProps = {
   post: FeedPost;
@@ -79,7 +83,10 @@ export default function VideoPostCard({
   );
 
   const canPlayVideo = mediaType === "video" && videoCandidates.length > 0;
-  const imageUri = post.imageUrl || post.thumbnailUrl || "";
+  const imageUri =
+    mediaType === "video"
+      ? buildCloudinaryVideoThumbnailUrl(post.sourceVideoUrl || post.videoUrl) || post.thumbnailUrl || post.imageUrl || ""
+      : post.imageUrl || post.thumbnailUrl || "";
 
   const clipStartMs = Math.max(0, Math.round(Number(post.clipStartSec ?? 0) * 1000));
   const rawClipEndMs = Math.max(0, Math.round(Number(post.clipEndSec ?? 0) * 1000));

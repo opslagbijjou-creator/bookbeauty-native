@@ -37,6 +37,7 @@ import { COLORS } from "../lib/ui";
 type FeedSlideProps = {
   item: MarketplaceFeedItem;
   height: number;
+  viewportWidth: number;
   isActive: boolean;
   muted: boolean;
   liked: boolean;
@@ -55,6 +56,7 @@ type FeedSlideProps = {
 function FeedSlide({
   item,
   height,
+  viewportWidth,
   isActive,
   muted,
   liked,
@@ -89,8 +91,20 @@ function FeedSlide({
   const videoUrl = videoSources[Math.min(videoSourceIndex, Math.max(0, videoSources.length - 1))]?.trim() || "";
   const imageUrl = item.imageUrl?.trim() || item.posterUrl;
   const canPlayVideo = item.mediaType === "video" && Boolean(videoUrl) && !failedVideo;
+  const usesVideoFrame = item.mediaType === "video";
   const isWeb = Platform.OS === "web";
   const videoStyle = isWeb ? [styles.absoluteMedia, styles.webContain] : styles.absoluteMedia;
+  const compact = viewportWidth < 768;
+  const reservedBottom = compact ? 212 : 152;
+  const reservedTop = compact ? 18 : 28;
+  const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
+  const rightRailAllowance = compact ? 24 : 132;
+  const horizontalPadding = compact ? 24 : 56;
+  const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
+  const targetAspectRatio = usesVideoFrame ? 9 / 16 : 4 / 5;
+  const widthFromHeight = availableFrameHeight * targetAspectRatio;
+  const frameWidth = Math.min(680, availableFrameWidth, widthFromHeight);
+  const frameHeight = Math.min(availableFrameHeight, frameWidth / targetAspectRatio);
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -145,7 +159,15 @@ function FeedSlide({
         <View style={styles.mediaBackdropShade} />
 
         <View style={styles.frameWrap}>
-          <View style={[styles.mediaFrame, canPlayVideo ? styles.videoFrame : styles.photoFrame]}>
+          <View
+            style={[
+              styles.mediaFrame,
+              {
+                width: frameWidth,
+                height: frameHeight,
+              },
+            ]}
+          >
             {canPlayVideo ? (
               <>
                 <Image
@@ -280,7 +302,7 @@ function FeedSlide({
 export default function PublicFeedScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ post?: string | string[] }>();
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const seo = buildFeedSeo();
   const [items, setItems] = useState<MarketplaceFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -477,6 +499,7 @@ export default function PublicFeedScreen() {
               <FeedSlide
                 item={item}
                 height={slideHeight}
+                viewportWidth={width}
                 isActive={activeId === item.id}
                 muted={muted}
                 liked={Boolean(likedMap[item.id])}
@@ -553,17 +576,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   mediaFrame: {
-    width: "100%",
-    maxWidth: 680,
-    maxHeight: "100%",
     backgroundColor: "#06080c",
     overflow: "hidden",
-  },
-  videoFrame: {
-    aspectRatio: 9 / 16,
-  },
-  photoFrame: {
-    aspectRatio: 4 / 5,
   },
   frameMedia: {
     width: "100%",

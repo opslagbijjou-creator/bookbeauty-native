@@ -113,7 +113,17 @@ function cloudinaryVideoThumbnailFromUrl(videoUrl: string): string {
   return buildCloudinaryVideoThumbnailUrl(videoUrl);
 }
 
-function getPostThumbnail(post: Pick<FeedPost, "thumbnailUrl" | "videoUrl" | "imageUrl" | "mediaType">): string {
+function getPostThumbnail(
+  post: Pick<FeedPost, "thumbnailUrl" | "videoUrl" | "sourceVideoUrl" | "imageUrl" | "mediaType">
+): string {
+  if (post.mediaType === "video") {
+    return (
+      cloudinaryVideoThumbnailFromUrl(post.sourceVideoUrl || post.videoUrl) ||
+      post.thumbnailUrl?.trim() ||
+      post.imageUrl?.trim() ||
+      ""
+    );
+  }
   if (post.thumbnailUrl?.trim()) return post.thumbnailUrl.trim();
   if (post.mediaType === "image" && post.imageUrl?.trim()) return post.imageUrl.trim();
   if (post.imageUrl?.trim() && !post.videoUrl?.trim()) return post.imageUrl.trim();
