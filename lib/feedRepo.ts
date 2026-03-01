@@ -314,6 +314,21 @@ export async function fetchCompanyFeedPublic(companyId: string): Promise<FeedPos
   }
 }
 
+export async function fetchFeedPostById(postId: string): Promise<FeedPost | null> {
+  const cleanPostId = postId.trim();
+  if (!cleanPostId) return null;
+
+  const snap = await getDoc(doc(db, "feed_public", cleanPostId));
+  if (!snap.exists()) return null;
+
+  const item = toFeedPost(snap.id, snap.data());
+  if (!item.isActive || item.visibility === "clients_only") {
+    return null;
+  }
+
+  return item;
+}
+
 export async function addMyFeedPost(companyId: string, payload: AddFeedPostPayload): Promise<void> {
   const companySnap = await getDoc(doc(db, "companies_public", companyId));
   if (!companySnap.exists()) {

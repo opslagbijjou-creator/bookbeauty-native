@@ -17,7 +17,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
@@ -28,7 +28,7 @@ import {
   buildCanonicalUrl,
   buildFeedSeo,
   fetchMarketplaceFeed,
-  getSalonProfilePath,
+  getFeedPostPath,
 } from "../lib/marketplace";
 import type { AppRole } from "../lib/roles";
 import { getPostLikeCount, isPostLiked, togglePostLike } from "../lib/socialRepo";
@@ -144,27 +144,30 @@ function FeedSlide({
         <View style={styles.frameWrap}>
           <View style={[styles.mediaFrame, canPlayVideo ? styles.videoFrame : styles.photoFrame]}>
             {canPlayVideo ? (
-              <Video
-                ref={videoRef}
-                source={{ uri: videoUrl }}
-                style={videoStyle}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={false}
-                isLooping
-                isMuted={muted}
-                volume={muted ? 0 : 1}
-                progressUpdateIntervalMillis={100}
-                onLoadStart={() => {
-                  setVideoReady(false);
-                  setIsBuffering(true);
-                }}
-                onReadyForDisplay={() => {
-                  setVideoReady(true);
-                  setIsBuffering(false);
-                }}
-                onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-                onError={onVideoError}
-              />
+              <>
+                <Image source={{ uri: item.posterUrl }} style={styles.frameMedia} contentFit="contain" transition={0} />
+                <Video
+                  ref={videoRef}
+                  source={{ uri: videoUrl }}
+                  style={videoStyle}
+                  resizeMode={ResizeMode.CONTAIN}
+                  shouldPlay={false}
+                  isLooping
+                  isMuted={muted}
+                  volume={muted ? 0 : 1}
+                  progressUpdateIntervalMillis={100}
+                  onLoadStart={() => {
+                    setVideoReady(false);
+                    setIsBuffering(true);
+                  }}
+                  onReadyForDisplay={() => {
+                    setVideoReady(true);
+                    setIsBuffering(false);
+                  }}
+                  onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+                  onError={onVideoError}
+                />
+              </>
             ) : imageUrl ? (
               <Image source={{ uri: imageUrl }} style={styles.frameMedia} contentFit="cover" transition={180} />
             ) : null}
@@ -228,6 +231,11 @@ function FeedSlide({
               {item.companyName}
             </Text>
           </View>
+          {item.companyCity ? (
+            <Text style={styles.metaLine} numberOfLines={1}>
+              {item.companyCity}
+            </Text>
+          ) : null}
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
           </Text>
@@ -252,6 +260,7 @@ function FeedSlide({
 
 export default function PublicFeedScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ post?: string | string[] }>();
   const { height } = useWindowDimensions();
   const seo = buildFeedSeo();
   const [items, setItems] = useState<MarketplaceFeedItem[]>([]);
@@ -266,6 +275,11 @@ export default function PublicFeedScreen() {
   const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
   const [failedVideoMap, setFailedVideoMap] = useState<Record<string, boolean>>({});
   const slideHeight = Math.max(1, height - 76);
+  const focusPostId = useMemo(() => {
+    const raw = Array.isArray(params.post) ? params.post[0] : params.post;
+    const clean = String(raw ?? "").trim();
+    return clean || null;
+  }, [params.post]);
 
   useEffect(() => {
     return subscribeAuth((user) => {
@@ -293,7 +307,7 @@ export default function PublicFeedScreen() {
     let cancelled = false;
     setLoading(true);
 
-    fetchMarketplaceFeed(10)
+    fetchMarketplaceFeed(10, focusPostId)
       .then((result) => {
         if (cancelled) return;
         setItems(result);
@@ -318,7 +332,7 @@ export default function PublicFeedScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [focusPostId]);
 
   useEffect(() => {
     if (!items.length) return;
@@ -415,9 +429,9 @@ export default function PublicFeedScreen() {
   }
 
   async function onShareItem(item: MarketplaceFeedItem) {
-    const url = buildCanonicalUrl(getSalonProfilePath(item.companySlug));
+    const url = buildCanonicalUrl(getFeedPostPath(item.id));
     await Share.share({
-      message: `${item.companyName} op BookBeauty\n${url}`,
+      message: `${item.companyName} op BookBeauty\nOpen direct deze video:\n${url}`,
       url,
     }).catch(() => null);
   }
@@ -613,6 +627,11 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 15,
     fontWeight: "800",
+  },
+  metaLine: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "600",
   },
   title: {
     color: "#ffffff",

@@ -1,5 +1,5 @@
 import { CompanyPublic, fetchCompanies } from "./companyRepo";
-import { FeedPost, fetchCompanyFeedPublic, fetchFeed } from "./feedRepo";
+import { FeedPost, fetchCompanyFeedPublic, fetchFeed, fetchFeedPostById } from "./feedRepo";
 import { CompanyService, fetchCompanyServicesPublic } from "./serviceRepo";
 
 export type MarketplaceCity = {
@@ -37,6 +37,7 @@ export type MarketplaceFeedItem = {
   companyName: string;
   companySlug: string;
   companyLogoUrl?: string;
+  companyCity?: string;
   isDemo?: boolean;
 };
 
@@ -178,7 +179,7 @@ function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
   let path = rawPath;
 
   if (path.includes("/upload/")) {
-    path = path.replace("/upload/", "/upload/so_1,c_fill,g_auto,ar_4:5,w_900,h_1125,q_auto,f_jpg/");
+    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,g_auto,ar_9:16,w_720,h_1280,q_auto,f_jpg/");
   }
 
   if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
@@ -190,12 +191,48 @@ function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
   return rawQuery ? `${path}?${rawQuery}` : path;
 }
 
+const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
+
+function normalizeCloudinaryVideoPlaybackUrl(rawUrl?: string): string {
+  const source = String(rawUrl ?? "").trim();
+  if (!source || !source.includes("/upload/")) return source;
+  if (!source.includes("/video/upload/") && !/\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source)) return source;
+
+  const [rawPath, rawQuery = ""] = source.split("?");
+  const marker = "/upload/";
+  const markerIndex = rawPath.indexOf(marker);
+  if (markerIndex < 0) return source;
+
+  const basePath = rawPath.slice(0, markerIndex + marker.length);
+  const suffixPath = rawPath.slice(markerIndex + marker.length);
+  if (suffixPath.startsWith(`${CLOUDINARY_TRANSCODE_STEP}/`)) return source;
+
+  const nextPath = `${basePath}${CLOUDINARY_TRANSCODE_STEP}/${suffixPath}`;
+  return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
+}
+
+function pickMarketplaceVideoUrl(post: FeedPost): string | undefined {
+  const rawSource = post.sourceVideoUrl?.trim() || "";
+  const rawEdited = post.videoUrl?.trim() || "";
+
+  return (
+    normalizeCloudinaryVideoPlaybackUrl(rawSource) ||
+    normalizeCloudinaryVideoPlaybackUrl(rawEdited) ||
+    rawSource ||
+    rawEdited ||
+    undefined
+  );
+}
+
 function mapFeedPostToMarketplaceItem(post: FeedPost, companySlug: string): MarketplaceFeedItem {
   const category = getCategoryFromLabel(post.category);
+  const safeVideoSource = post.sourceVideoUrl?.trim() || post.videoUrl?.trim() || "";
   const posterUrl =
-    post.thumbnailUrl?.trim() ||
-    post.imageUrl?.trim() ||
-    cloudinaryVideoThumbnailFromUrl(post.videoUrl) ||
+    (post.mediaType === "video"
+      ? cloudinaryVideoThumbnailFromUrl(safeVideoSource) ||
+        post.thumbnailUrl?.trim() ||
+        post.imageUrl?.trim()
+      : post.imageUrl?.trim() || post.thumbnailUrl?.trim()) ||
     makePosterUrl("photo-1521590832167-7bcbfaa6381f");
 
   return {
@@ -208,12 +245,13 @@ function mapFeedPostToMarketplaceItem(post: FeedPost, companySlug: string): Mark
     categorySlug: category.slug,
     mediaType: post.mediaType,
     posterUrl,
-    videoUrl: post.videoUrl?.trim() || undefined,
+    videoUrl: post.mediaType === "video" ? pickMarketplaceVideoUrl(post) : undefined,
     imageUrl: post.imageUrl?.trim() || undefined,
     companyId: post.companyId,
     companyName: post.companyName,
     companySlug,
     companyLogoUrl: post.companyLogoUrl?.trim() || undefined,
+    companyCity: post.companyCity?.trim() || undefined,
   };
 }
 
@@ -506,6 +544,12 @@ export function getSalonProfilePath(slug: string): string {
   return `/salon/${slugifySegment(slug) || slug}`;
 }
 
+export function getFeedPostPath(postId?: string | null): string {
+  const cleanPostId = String(postId ?? "").trim();
+  if (!cleanPostId) return "/feed";
+  return `/feed?post=${encodeURIComponent(cleanPostId)}`;
+}
+
 export function getDefaultCityPath(): string {
   return getSalonListingPath(DEFAULT_MARKETPLACE_CITY.slug);
 }
@@ -682,15 +726,41 @@ export async function fetchMarketplaceSalonBySlug(slug: string): Promise<Marketp
   return demo ?? null;
 }
 
-export async function fetchMarketplaceFeed(limitCount = 8): Promise<MarketplaceFeedItem[]> {
+export async function fetchMarketplaceFeed(
+  limitCount = 8,
+  focusPostId?: string | null
+): Promise<MarketplaceFeedItem[]> {
+  const cleanFocusPostId = String(focusPostId ?? "").trim();
+
   try {
     const res = await fetchFeed({ pageSize: Math.max(1, limitCount) });
-    const mapped = res.items.map((item) =>
+    let mapped = res.items.map((item) =>
       mapFeedPostToMarketplaceItem(
         item,
         item.companyId ? buildSalonSlug(item.companyName, item.companyCity || DEFAULT_MARKETPLACE_CITY.label, item.companyId) : ""
       )
     );
+
+    if (cleanFocusPostId) {
+      const currentIndex = mapped.findIndex((item) => item.id === cleanFocusPostId);
+
+      if (currentIndex >= 0) {
+        mapped = [mapped[currentIndex], ...mapped.filter((item) => item.id !== cleanFocusPostId)];
+      } else {
+        const focusedPost = await fetchFeedPostById(cleanFocusPostId).catch(() => null);
+        if (focusedPost) {
+          const focusedCompanySlug = focusedPost.companyId
+            ? buildSalonSlug(
+                focusedPost.companyName,
+                focusedPost.companyCity || DEFAULT_MARKETPLACE_CITY.label,
+                focusedPost.companyId
+              )
+            : "";
+          mapped = [mapFeedPostToMarketplaceItem(focusedPost, focusedCompanySlug), ...mapped];
+        }
+      }
+    }
+
     return mapped.length ? mapped : DEMO_MARKETPLACE_FEED.slice(0, limitCount);
   } catch {
     return DEMO_MARKETPLACE_FEED.slice(0, limitCount);
