@@ -100,17 +100,17 @@ function FeedSlide({
   const wide = viewportWidth >= 1180;
   const actionPrimarySize = compact ? 24 : 28;
   const actionSecondarySize = compact ? 22 : 24;
-  const reservedBottom = compact ? 72 : 152;
+  const reservedBottom = compact ? 28 : 152;
   const reservedTop = compact ? 12 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
-  const rightRailAllowance = compact ? 24 : 132;
+  const rightRailAllowance = compact ? 16 : 132;
   const horizontalPadding = compact ? 24 : 56;
   const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
   const targetAspectRatio = usesVideoFrame ? mediaAspectRatio || 9 / 16 : 4 / 5;
   const mobilePreferredWidth = Math.min(availableFrameWidth, viewportWidth - 24);
   const widthFromHeight = availableFrameHeight * targetAspectRatio;
   const frameWidth = compact
-    ? Math.min(mobilePreferredWidth, widthFromHeight)
+    ? mobilePreferredWidth
     : Math.min(wide ? 720 : 680, availableFrameWidth, widthFromHeight);
   const frameHeight = Math.min(availableFrameHeight, frameWidth / Math.max(0.01, targetAspectRatio));
 
@@ -192,12 +192,15 @@ function FeedSlide({
   return (
     <Animated.View style={[styles.slide, { height, opacity: fade }]}>
       <View style={styles.stage}>
-        {!compact ? (
-          <Image source={{ uri: item.posterUrl }} style={styles.mediaBackdrop} contentFit="cover" transition={180} />
-        ) : null}
-        <View style={styles.mediaBackdropShade} />
+        <Image
+          source={{ uri: item.posterUrl }}
+          style={[styles.mediaBackdrop, compact && styles.mediaBackdropCompact]}
+          contentFit="cover"
+          transition={180}
+        />
+        <View style={[styles.mediaBackdropShade, compact && styles.mediaBackdropShadeCompact]} />
 
-        <View style={[styles.frameWrap, compact && styles.frameWrapCompact]}>
+        <View style={styles.frameWrap}>
           <View
             style={[
               styles.mediaFrame,
@@ -688,19 +691,22 @@ const styles = StyleSheet.create({
   mediaBackdrop: {
     ...StyleSheet.absoluteFillObject,
   },
+  mediaBackdropCompact: {
+    opacity: 0.28,
+    transform: [{ scale: 1.08 }],
+  },
   mediaBackdropShade: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.34)",
+  },
+  mediaBackdropShadeCompact: {
+    backgroundColor: "rgba(0,0,0,0.58)",
   },
   frameWrap: {
     flex: 1,
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
-  },
-  frameWrapCompact: {
-    justifyContent: "flex-start",
-    paddingTop: 8,
   },
   mediaFrame: {
     backgroundColor: "#06080c",
@@ -742,7 +748,7 @@ const styles = StyleSheet.create({
   },
   actionsRailCompact: {
     right: 14,
-    bottom: 190,
+    bottom: 166,
     gap: 14,
   },
   iconButton: {
@@ -777,7 +783,7 @@ const styles = StyleSheet.create({
   overlayCompact: {
     paddingHorizontal: 18,
     paddingRight: 18,
-    paddingBottom: 92,
+    paddingBottom: 34,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-end",
@@ -896,7 +902,7 @@ const styles = StyleSheet.create({
   progressTrackCompact: {
     left: 12,
     right: 12,
-    bottom: 12,
+    bottom: 8,
   },
   progressFill: {
     height: "100%",
