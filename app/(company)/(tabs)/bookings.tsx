@@ -117,31 +117,14 @@ type CompanyPaymentState = {
   tone: "neutral" | "danger";
 };
 
-function normalizeCompanyPaymentStatus(booking: Booking): string {
-  const direct = String(booking.paymentStatus ?? "").trim().toLowerCase();
-  if (direct) return direct === "cancelled" ? "canceled" : direct;
-  const mollie = String(booking.mollieStatus ?? "").trim().toLowerCase();
-  if (mollie) return mollie === "cancelled" ? "canceled" : mollie;
-  return "";
-}
-
 function isCompanyPaymentSettled(booking: Booking): boolean {
-  const paymentStatus = normalizeCompanyPaymentStatus(booking);
-  if (!paymentStatus) return true; // legacy bookings
-  return paymentStatus === "paid";
+  void booking;
+  return true;
 }
 
 function companyPaymentState(booking: Booking): CompanyPaymentState | null {
-  const paymentStatus = normalizeCompanyPaymentStatus(booking);
-  if (!paymentStatus) return null;
-  if (paymentStatus === "paid") return { label: "Betaling gelukt", tone: "neutral" };
-  if (paymentStatus === "open" || paymentStatus === "pending_payment") {
-    return { label: "Wacht op betaling van klant", tone: "neutral" };
-  }
-  if (paymentStatus === "failed") return { label: "Betaling mislukt", tone: "danger" };
-  if (paymentStatus === "canceled") return { label: "Betaling geannuleerd", tone: "danger" };
-  if (paymentStatus === "expired") return { label: "Betaling verlopen", tone: "danger" };
-  return { label: `Betaalstatus: ${paymentStatus}`, tone: "neutral" };
+  void booking;
+  return null;
 }
 
 function toFriendlyError(error: unknown): string {
@@ -262,24 +245,7 @@ function normalizeParamValue(value: string | string[] | undefined): string | nul
 }
 
 async function syncBookingPaymentStatus(bookingId: string): Promise<void> {
-  const cleanBookingId = String(bookingId || "").trim();
-  if (!cleanBookingId) return;
-  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
-  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const endpoint =
-    Platform.OS === "web"
-      ? "/.netlify/functions/mollie-sync-payment"
-      : `${baseUrl}/.netlify/functions/mollie-sync-payment`;
-
-  await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      bookingId: cleanBookingId,
-    }),
-  }).catch(() => null);
+  void bookingId;
 }
 
 type BookingSectionProps = {

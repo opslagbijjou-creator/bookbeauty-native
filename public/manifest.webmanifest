@@ -1,15 +1,15 @@
 {
   "name": "BookBeauty",
   "short_name": "BookBeauty",
-  "description": "BookBeauty app voor klanten, bedrijven en creators.",
+  "description": "Ontdek salons, bekijk echte video's en verstuur direct een boekingsaanvraag.",
   "lang": "nl-NL",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#f8e8f0",
-  "theme_color": "#df4f9a",
+  "orientation": "any",
+  "background_color": "#f4f7fb",
+  "theme_color": "#0f4c81",
   "icons": [
     {
       "src": "/icon-192.png",

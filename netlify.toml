@@ -25,6 +25,11 @@
   force = true
 
 [[redirects]]
+  from = "/sitemap.xml"
+  to = "/.netlify/functions/sitemap"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

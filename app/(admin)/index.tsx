@@ -89,12 +89,12 @@ export default function AdminIndexScreen() {
       },
       {
         icon: "card-outline" as const,
-        title: "Betaalde transacties",
+        title: "Afgeronde boekingen",
         value: overview.paidBookings,
       },
       {
         icon: "time-outline" as const,
-        title: "Open betalingen",
+        title: "Open aanvragen",
         value: overview.openPayments,
       },
     ],
@@ -105,7 +105,7 @@ export default function AdminIndexScreen() {
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Admin Dashboard</Text>
-        <Text style={styles.subtitle}>Platform-only betalingen, users beheer en omzet controle.</Text>
+        <Text style={styles.subtitle}>Platformoverzicht, users beheer en operationele controle.</Text>
 
         {loading ? (
           <View style={styles.loaderWrap}>

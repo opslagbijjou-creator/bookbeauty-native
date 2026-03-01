@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -82,129 +82,41 @@ function canCancelBooking(status: Booking["status"]): boolean {
 }
 
 function normalizePaymentStatus(item: Booking): string {
-  const status = String(item.paymentStatus || "").trim().toLowerCase();
-  if (status) return status;
-  const mollie = String(item.mollieStatus || "").trim().toLowerCase();
-  if (mollie === "cancelled") return "canceled";
-  return mollie;
+  void item;
+  return "";
 }
 
 function paymentNeedsAction(item: Booking): boolean {
-  const status = normalizePaymentStatus(item);
-  return (
-    status === "open" ||
-    status === "pending_payment" ||
-    status === "failed" ||
-    status === "canceled" ||
-    status === "expired"
-  );
+  void item;
+  return false;
 }
 
 function isPaymentPending(item: Booking): boolean {
-  const status = normalizePaymentStatus(item);
-  return status === "open" || status === "pending_payment";
+  void item;
+  return false;
 }
 
 function isPaymentRetryable(item: Booking): boolean {
-  const status = normalizePaymentStatus(item);
-  return status === "failed";
+  void item;
+  return false;
 }
 
 function paymentStateLabel(item: Booking): string | null {
-  const status = normalizePaymentStatus(item);
-  if (status === "paid") return "Betaling gelukt";
-  if (status === "open" || status === "pending_payment") return "Wacht op betaling";
-  if (status === "failed") return "Betaling mislukt";
-  if (status === "canceled") return "Betaling geannuleerd";
-  if (status === "expired") return "Betaling verlopen";
+  void item;
   return null;
 }
 
 async function createMollieCheckoutForBooking(item: Booking): Promise<string> {
-  const bookingId = String(item.id || "").trim();
-  const companyId = String(item.companyId || "").trim();
-  const amountCents = Math.max(0, Math.floor(Number(item.amountCents || Math.round(item.servicePrice * 100)) || 0));
-  if (!bookingId || !companyId || amountCents <= 0) {
-    throw new Error("Onvolledige betaalgegevens voor deze boeking.");
-  }
-
-  const currentUser = auth.currentUser;
-  if (!currentUser) throw new Error("Je sessie is verlopen. Log opnieuw in.");
-
-  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
-  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const endpoint =
-    Platform.OS === "web"
-      ? "/.netlify/functions/mollie-create-payment"
-      : `${baseUrl}/.netlify/functions/mollie-create-payment`;
-  const idToken = await currentUser.getIdToken(true).catch(() => "");
-  if (!idToken) throw new Error("Kon geen geldige sessie vinden voor betaling.");
-
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      bookingId,
-      companyId,
-      amountCents,
-    }),
-  }).catch(() => null);
-
-  if (!res) throw new Error("Geen verbinding met betaalserver.");
-  const payload = await res.json().catch(() => ({} as Record<string, unknown>));
-  if (!res.ok || payload.ok !== true) {
-    throw new Error(String(payload.error || "").trim() || "Kon betaling niet starten.");
-  }
-
-  const checkoutUrl = String(payload.checkoutUrl || "").trim();
-  if (!checkoutUrl) throw new Error("Mollie checkout URL ontbreekt.");
-  return checkoutUrl;
+  void item;
+  throw new Error("Betalen is niet beschikbaar in Phase 1.");
 }
 
 async function openExternalCheckout(checkoutUrl: string): Promise<void> {
-  if (Platform.OS === "web") {
-    const win = globalThis as {
-      location?: { assign?: (href: string) => void; href?: string };
-      open?: (url?: string, target?: string) => void;
-    };
-    if (typeof win.location?.assign === "function") {
-      win.location.assign(checkoutUrl);
-      return;
-    }
-    if (win.location) {
-      win.location.href = checkoutUrl;
-      return;
-    }
-    if (typeof win.open === "function") {
-      win.open(checkoutUrl, "_self");
-      return;
-    }
-  }
-  await Linking.openURL(checkoutUrl);
+  void checkoutUrl;
 }
 
 async function syncBookingPaymentStatus(bookingId: string): Promise<void> {
-  const cleanBookingId = String(bookingId || "").trim();
-  if (!cleanBookingId) return;
-  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
-  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const endpoint =
-    Platform.OS === "web"
-      ? "/.netlify/functions/mollie-sync-payment"
-      : `${baseUrl}/.netlify/functions/mollie-sync-payment`;
-
-  await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      bookingId: cleanBookingId,
-    }),
-  }).catch(() => null);
+  void bookingId;
 }
 
 function bookingSection(booking: Booking, now: number): CustomerSectionKey {

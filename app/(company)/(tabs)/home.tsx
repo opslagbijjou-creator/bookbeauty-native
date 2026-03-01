@@ -633,6 +633,15 @@ export default function CompanyHomeScreen() {
     );
   }
 
+  void mollieUiStatus;
+  void mollieBusyAction;
+  void mollieBusy;
+  void mollieStateColor;
+  void refreshMollieStatus;
+  void onConnectMollie;
+  void onOpenMollieOnboarding;
+  void onDisconnectMollie;
+
   return (
     <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <KeyboardAvoidingView
@@ -754,53 +763,13 @@ export default function CompanyHomeScreen() {
         <View style={styles.mollieCard}>
           <View style={styles.mollieHeader}>
             <View style={styles.mollieTitleRow}>
-              <Ionicons name="card-outline" size={16} color={COLORS.primary} />
-              <Text style={styles.mollieTitle}>Mollie betalingen</Text>
-            </View>
-            <View style={[styles.mollieStatusBadge, { borderColor: mollieStateColor }]}>
-              <Text style={[styles.mollieStatusBadgeText, { color: mollieStateColor }]}>{mollieUiStatus.label}</Text>
+              <Ionicons name="hourglass-outline" size={16} color={COLORS.primary} />
+              <Text style={styles.mollieTitle}>Betalen volgt later</Text>
             </View>
           </View>
-          <Text style={styles.mollieSubtitle}>{mollieUiStatus.details}</Text>
-
-          <View style={styles.mollieActionsRow}>
-            <Pressable
-              style={[styles.primaryBtn, mollieBusy && styles.disabled]}
-              onPress={onConnectMollie}
-              disabled={mollieBusy}
-            >
-              <Ionicons name="link-outline" size={14} color="#fff" />
-              <Text style={styles.primaryBtnText}>
-                {mollieBusyAction === "connect" ? "Openen..." : "Connect met Mollie"}
-              </Text>
-            </Pressable>
-
-            {mollieUiStatus.state !== "not_connected" ? (
-              <Pressable
-                style={[styles.secondaryBtn, mollieBusy && styles.disabled]}
-                onPress={onDisconnectMollie}
-                disabled={mollieBusy}
-              >
-                <Ionicons name="unlink-outline" size={14} color={COLORS.primary} />
-                <Text style={styles.secondaryBtnText}>
-                  {mollieBusyAction === "disconnect" ? "Bezig..." : "Disconnect"}
-                </Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          {mollieUiStatus.state === "needs_attention" ? (
-            <Pressable
-              style={[styles.mollieOnboardingBtn, mollieBusy && styles.disabled]}
-              onPress={onOpenMollieOnboarding}
-              disabled={mollieBusy}
-            >
-              <Ionicons name="open-outline" size={14} color={COLORS.primary} />
-              <Text style={styles.mollieOnboardingText}>
-                {mollieBusyAction === "onboarding" ? "Openen..." : "Ga naar onboarding"}
-              </Text>
-            </Pressable>
-          ) : null}
+          <Text style={styles.mollieSubtitle}>
+            Phase 1 draait zonder online payments. Focus ligt nu op discovery, video en boekingsaanvragen.
+          </Text>
         </View>
 
         {isOwner ? (

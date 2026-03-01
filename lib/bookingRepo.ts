@@ -32,7 +32,6 @@ import {
   notifyCustomerOnBookingCheckedIn,
   notifyCustomerOnBookingCompleted,
   notifyCustomerOnBookingNoShow,
-  notifyCustomerOnBookingPaymentPending,
   notifyCustomerOnBookingProposalByCompany,
   notifyCustomerOnBookingStatusByCompany,
   notifyCustomerOnRescheduleDecisionByCompany,
@@ -1490,7 +1489,7 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       occupiedStartAt: new Date(occupiedStartAtMs),
       occupiedEndAt: new Date(occupiedEndAtMs),
       status,
-      paymentStatus: "open",
+      paymentStatus: "",
       proposalBy: "",
       proposedBookingDate: "",
       proposedStartAt: null,
@@ -1540,16 +1539,6 @@ export async function createBooking(payload: CreateBookingPayload): Promise<{ bo
       serviceName: String(serviceData.name ?? "Dienst"),
     };
   });
-
-  // Keep user experience stable even if notification write fails.
-  notifyCustomerOnBookingPaymentPending({
-    customerId: payload.customerId,
-    companyId: payload.companyId,
-    companyName: result.companyName,
-    serviceId: payload.serviceId,
-    serviceName: result.serviceName,
-    bookingId: bookingRef.id,
-  }).catch(() => null);
 
   return {
     bookingId: bookingRef.id,

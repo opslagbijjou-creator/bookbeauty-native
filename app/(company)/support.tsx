@@ -61,7 +61,7 @@ export default function CompanySupportScreen() {
         displayName={displayName}
         email={email}
         title="BookBeauty Partner Support"
-        subtitle="Stel je vraag over boekingen, feed, profiel of betalingen."
+        subtitle="Stel je vraag over boekingen, feed of je profiel."
         allowCreateThread
       />
     </SafeAreaView>

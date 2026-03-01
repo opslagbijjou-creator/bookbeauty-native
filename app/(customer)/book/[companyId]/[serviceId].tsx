@@ -4,7 +4,6 @@ import {
   Alert,
   Animated,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -124,90 +123,6 @@ async function askDoubleBookingAction(payload: { bookingId: string; timeLabel: s
       { cancelable: true, onDismiss: () => resolve("cancel") }
     );
   });
-}
-
-async function createMollieCheckoutForBooking(
-  bookingId: string,
-  companyId: string,
-  amountCents: number
-): Promise<string> {
-  const cleanBookingId = String(bookingId || "").trim();
-  const cleanCompanyId = String(companyId || "").trim();
-  if (!cleanBookingId) {
-    throw new Error("bookingId ontbreekt voor betaling.");
-  }
-  if (!cleanCompanyId) {
-    throw new Error("companyId ontbreekt voor betaling.");
-  }
-
-  const currentUser = auth.currentUser;
-  if (!currentUser) {
-    throw new Error("Je sessie is verlopen. Log opnieuw in.");
-  }
-
-  const baseUrlRaw = String(process.env.EXPO_PUBLIC_APP_BASE_URL || "https://www.bookbeauty.nl").trim();
-  const baseUrl = baseUrlRaw.replace(/\/+$/, "");
-  const fullUrl =
-    Platform.OS === "web"
-      ? "/.netlify/functions/mollie-create-payment"
-      : `${baseUrl}/.netlify/functions/mollie-create-payment`;
-
-  const idToken = await currentUser.getIdToken(true).catch(() => "");
-  if (!idToken) {
-    throw new Error("Kon geen geldige sessie vinden voor betaling.");
-  }
-
-  const res = await fetch(fullUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      bookingId: cleanBookingId,
-      companyId: cleanCompanyId,
-      amountCents: Math.max(0, Math.floor(Number(amountCents) || 0)),
-    }),
-  }).catch(() => null);
-
-  if (!res) {
-    throw new Error("Geen verbinding met betaalserver.");
-  }
-
-  const payload = await res.json().catch(() => ({} as Record<string, unknown>));
-  if (!res.ok || payload.ok !== true) {
-    const errorMessage = String(payload.error || "").trim();
-    throw new Error(errorMessage || "Kon Mollie betaling niet starten.");
-  }
-
-  const checkoutUrl = String(payload.checkoutUrl || "").trim();
-  if (!checkoutUrl) {
-    throw new Error("Mollie checkout URL ontbreekt.");
-  }
-
-  return checkoutUrl;
-}
-
-async function openExternalCheckout(checkoutUrl: string): Promise<void> {
-  if (Platform.OS === "web") {
-    const win = globalThis as {
-      location?: { assign?: (href: string) => void; href?: string };
-      open?: (url?: string, target?: string) => void;
-    };
-    if (typeof win.location?.assign === "function") {
-      win.location.assign(checkoutUrl);
-      return;
-    }
-    if (win.location) {
-      win.location.href = checkoutUrl;
-      return;
-    }
-    if (typeof win.open === "function") {
-      win.open(checkoutUrl, "_self");
-      return;
-    }
-  }
-  await Linking.openURL(checkoutUrl);
 }
 
 export default function BookServiceScreen() {
@@ -446,8 +361,6 @@ export default function BookServiceScreen() {
     const slotRef = selectedSlot;
     const customerUid = uid;
     setSubmitting(true);
-    const amountCents = Math.max(0, Math.round(Number(serviceRef.price || 0) * 100));
-    let createdBookingId = "";
 
     async function createBookingDoc(allowDoubleBooking = false) {
       return createBooking({
@@ -489,22 +402,16 @@ export default function BookServiceScreen() {
       if (!result) {
         return;
       }
-      createdBookingId = result.bookingId;
-      const checkoutUrl = await createMollieCheckoutForBooking(result.bookingId, companyId, amountCents);
-      await openExternalCheckout(checkoutUrl);
+      showBookingMessage(
+        "Boekingsaanvraag verstuurd",
+        "Je afspraak staat nu als aanvraag open. De salon kan deze accepteren, afwijzen of een ander tijdstip voorstellen."
+      );
+      router.replace(
+        `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(result.bookingId)}` as never
+      );
     } catch (error: any) {
-      const fallbackMessage = error?.message ?? "Kon boeking of betaling niet starten.";
-      if (createdBookingId) {
-        showBookingMessage(
-          "Boeking geplaatst, betaling niet gestart",
-          `${fallbackMessage}\n\nOpen je boekingen om deze afspraak opnieuw te betalen.`
-        );
-        router.replace(
-          `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(createdBookingId)}` as never
-        );
-      } else {
-        showBookingMessage("Boeken mislukt", fallbackMessage);
-      }
+      const fallbackMessage = error?.message ?? "Kon boekingsaanvraag niet versturen.";
+      showBookingMessage("Boeken mislukt", fallbackMessage);
     } finally {
       setSubmitting(false);
     }

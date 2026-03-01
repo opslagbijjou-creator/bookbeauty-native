@@ -301,13 +301,14 @@ const trimWindowLeftPx = useMemo(() => {
         onPanResponderMove: (_, gestureState) => {
           if (!isTrimEnabledForVideo || trimRailWidth <= 0 || effectiveVideoDurationSec <= 0) return;
           const deltaSec = (gestureState.dx / trimRailWidth) * trimMaxStartSec;
-setTrimWindowStart(trimDragStartSecRef.current + deltaSec);
+          setTrimWindowStart(trimDragStartSecRef.current + deltaSec);
         },
       }),
     [
       isTrimEnabledForVideo,
       trimRailWidth,
       effectiveVideoDurationSec,
+      trimMaxStartSec,
       hasCustomClipWindow,
       clipStartSec,
       setTrimWindowStart,

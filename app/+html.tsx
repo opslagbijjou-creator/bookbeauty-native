@@ -2,18 +2,26 @@ import { ScrollViewStyleReset } from "expo-router/html";
 
 export default function Root({ children }: { children: React.ReactNode }) {
   const iconVersion = "20260223-2";
+  const googleSiteVerification = String(process.env.EXPO_PUBLIC_GOOGLE_SITE_VERIFICATION || "").trim();
   return (
     <html lang="nl">
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta
+          name="description"
+          content="Ontdek salons, bekijk echte video's en verstuur direct een boekingsaanvraag via BookBeauty."
+        />
 
-        <meta name="theme-color" content="#df4f9a" />
+        <meta name="theme-color" content="#0f4c81" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content="BookBeauty" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        {googleSiteVerification ? (
+          <meta name="google-site-verification" content={googleSiteVerification} />
+        ) : null}
 
         <link rel="manifest" href={`/manifest.webmanifest?v=${iconVersion}`} />
         <link rel="apple-touch-icon" sizes="180x180" href={`/apple-touch-icon.png?v=${iconVersion}`} />
@@ -26,6 +34,14 @@ export default function Root({ children }: { children: React.ReactNode }) {
             __html: `
               html {
                 -webkit-text-size-adjust: 100%;
+                background: #f4f7fb;
+              }
+
+              body {
+                margin: 0;
+                background: #f4f7fb;
+                color: #172230;
+                font-family: "Avenir Next", "Segoe UI", sans-serif;
               }
 
               input,
