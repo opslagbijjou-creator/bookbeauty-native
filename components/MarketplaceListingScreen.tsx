@@ -72,6 +72,8 @@ export default function MarketplaceListingScreen({
 }: MarketplaceListingScreenProps) {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const desktop = width >= 768;
+  const gridColumns = width >= 1240 ? 3 : desktop ? 2 : 1;
   const params = useLocalSearchParams<{
     query?: string | string[];
     filter?: string | string[];
@@ -124,7 +126,7 @@ export default function MarketplaceListingScreen({
     mode === "discover" && currentCitySlug === DISCOVER_ALL_CITIES_SLUG
       ? "Alle steden"
       : MARKETPLACE_CITIES.find((item) => item.slug === currentCitySlug)?.label || DEFAULT_MARKETPLACE_CITY.label;
-  const showFloatingFilter = width < 900;
+  const showFloatingFilter = !desktop;
 
   useEffect(() => {
     setDraftQuery(filters.query || "");
@@ -227,12 +229,74 @@ export default function MarketplaceListingScreen({
     applyRoute(filters, { citySlug: next.slug });
   }
 
+  const resultsContent = loading
+    ? Array.from({ length: desktop ? gridColumns * 2 : 6 }).map((_, index) => {
+        if (desktop) {
+          return (
+            <View
+              key={index}
+              style={[
+                styles.resultSlot,
+                gridColumns === 3 ? styles.resultSlotThird : styles.resultSlotHalf,
+              ]}
+            >
+              <View style={styles.skeletonCardDesktop}>
+                <SkeletonBlock height={220} radius={20} />
+                <View style={styles.skeletonBodyDesktop}>
+                  <SkeletonBlock height={20} width="70%" radius={6} />
+                  <SkeletonBlock height={16} width="44%" radius={6} />
+                  <SkeletonBlock height={16} width="86%" radius={6} />
+                </View>
+              </View>
+            </View>
+          );
+        }
+
+        return (
+          <View key={index} style={styles.skeletonRow}>
+            <SkeletonBlock height={118} width={118} radius={0} />
+            <View style={styles.skeletonBody}>
+              <SkeletonBlock height={20} width="72%" radius={6} />
+              <SkeletonBlock height={16} width="46%" radius={6} />
+              <SkeletonBlock height={16} width="92%" radius={6} />
+              <SkeletonBlock height={16} width="66%" radius={6} />
+            </View>
+          </View>
+        );
+      })
+    : items.map((item) => {
+        if (desktop) {
+          return (
+            <View
+              key={item.slug}
+              style={[
+                styles.resultSlot,
+                gridColumns === 3 ? styles.resultSlotThird : styles.resultSlotHalf,
+              ]}
+            >
+              <MarketplaceSalonCard
+                salon={item}
+                onPress={() => router.push(`/salon/${item.slug}` as never)}
+              />
+            </View>
+          );
+        }
+
+        return (
+          <MarketplaceSalonCard
+            key={item.slug}
+            salon={item}
+            onPress={() => router.push(`/salon/${item.slug}` as never)}
+          />
+        );
+      });
+
   return (
     <View style={styles.screen}>
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, desktop && styles.contentDesktop]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         scrollEventThrottle={16}
@@ -252,12 +316,6 @@ export default function MarketplaceListingScreen({
             placeholderTextColor={COLORS.placeholder}
             style={styles.searchInput}
           />
-          {!showFloatingFilter ? (
-            <Pressable onPress={() => setFilterOpen(true)} style={styles.inlineFilterButton}>
-              <Ionicons name="options-outline" size={16} color={COLORS.text} />
-              <Text style={styles.inlineFilterText}>Filters</Text>
-            </Pressable>
-          ) : null}
         </View>
 
         <View style={styles.toolbarBlock}>
@@ -285,27 +343,105 @@ export default function MarketplaceListingScreen({
           </Text>
         </View>
 
-        <View style={styles.listShell}>
-          {loading
-            ? Array.from({ length: 6 }).map((_, index) => (
-                <View key={index} style={styles.skeletonRow}>
-                  <SkeletonBlock height={118} width={118} radius={0} />
-                  <View style={styles.skeletonBody}>
-                    <SkeletonBlock height={20} width="72%" radius={6} />
-                    <SkeletonBlock height={16} width="46%" radius={6} />
-                    <SkeletonBlock height={16} width="92%" radius={6} />
-                    <SkeletonBlock height={16} width="66%" radius={6} />
-                  </View>
-                </View>
-              ))
-            : items.map((item) => (
-                <MarketplaceSalonCard
-                  key={item.slug}
-                  salon={item}
-                  onPress={() => router.push(`/salon/${item.slug}` as never)}
+        {desktop ? (
+          <View style={styles.desktopResultsShell}>
+            <View style={styles.desktopFilterPanel}>
+              <Text style={styles.desktopFilterTitle}>Filters</Text>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>Specialisatie</Text>
+                <TextInput
+                  value={filters.filter || ""}
+                  onChangeText={(value) => applyRoute({ ...filters, filter: value || undefined })}
+                  placeholder="biab, gel, brows"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={styles.modalInput}
                 />
-              ))}
-        </View>
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>Max prijs</Text>
+                <TextInput
+                  value={typeof filters.priceMax === "number" ? String(filters.priceMax) : ""}
+                  onChangeText={(value) =>
+                    applyRoute({
+                      ...filters,
+                      priceMax: value.trim() ? Number(value) : undefined,
+                    })
+                  }
+                  keyboardType="number-pad"
+                  placeholder="60"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={styles.modalInput}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>Min rating</Text>
+                <TextInput
+                  value={typeof filters.ratingMin === "number" ? String(filters.ratingMin) : ""}
+                  onChangeText={(value) =>
+                    applyRoute({
+                      ...filters,
+                      ratingMin: value.trim() ? Number(value) : undefined,
+                    })
+                  }
+                  keyboardType="decimal-pad"
+                  placeholder="4"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={styles.modalInput}
+                />
+              </View>
+
+              <View style={styles.switchRow}>
+                <Text style={styles.modalLabel}>Alleen nu open</Text>
+                <Switch
+                  value={Boolean(filters.openNow)}
+                  onValueChange={(value) => applyRoute({ ...filters, openNow: value || undefined })}
+                  trackColor={{ false: COLORS.surface, true: COLORS.primarySoft }}
+                  thumbColor={filters.openNow ? COLORS.primary : "#ffffff"}
+                />
+              </View>
+
+              <View style={styles.modalField}>
+                <Text style={styles.modalLabel}>Sortering</Text>
+                <View style={styles.sortRow}>
+                  {[
+                    { label: "Popular", value: "popular" },
+                    { label: "Prijs", value: "price_asc" },
+                    { label: "Rating", value: "rating" },
+                  ].map((option) => {
+                    const activeSort = (filters.sort || DEFAULT_MARKETPLACE_SORT) === option.value;
+                    return (
+                      <Pressable
+                        key={option.value}
+                        onPress={() => applyRoute({ ...filters, sort: option.value })}
+                        style={[styles.sortChip, activeSort && styles.sortChipActive]}
+                      >
+                        <Text style={[styles.sortChipText, activeSort && styles.sortChipTextActive]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <Pressable
+                onPress={() => applyRoute({ sort: DEFAULT_MARKETPLACE_SORT })}
+                style={styles.resetButton}
+              >
+                <Text style={styles.resetButtonText}>Reset filters</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.desktopResultsPane}>
+              <View style={[styles.listShell, styles.listShellDesktop]}>{resultsContent}</View>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.listShell}>{resultsContent}</View>
+        )}
       </ScrollView>
 
       {showFloatingFilter ? (
@@ -315,7 +451,7 @@ export default function MarketplaceListingScreen({
         </Pressable>
       ) : null}
 
-      <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
+      <Modal visible={!desktop && filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -430,6 +566,9 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 118,
   },
+  contentDesktop: {
+    paddingBottom: 36,
+  },
   pageTitle: {
     color: COLORS.text,
     fontSize: 40,
@@ -466,20 +605,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 15,
     fontWeight: "700",
-  },
-  inlineFilterButton: {
-    minHeight: 42,
-    paddingHorizontal: 14,
-    borderLeftWidth: 1,
-    borderLeftColor: COLORS.border,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  inlineFilterText: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "900",
   },
   toolbarBlock: {
     marginTop: 22,
@@ -521,6 +646,49 @@ const styles = StyleSheet.create({
     marginTop: 16,
     gap: 16,
   },
+  listShellDesktop: {
+    marginTop: 0,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "stretch",
+  },
+  desktopResultsShell: {
+    marginTop: 18,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 22,
+  },
+  desktopFilterPanel: {
+    width: 276,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 24,
+    backgroundColor: "#ffffff",
+    padding: 18,
+    gap: 14,
+    position: "sticky" as any,
+    top: 20,
+  },
+  desktopFilterTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  desktopResultsPane: {
+    flex: 1,
+    minWidth: 0,
+  },
+  resultSlot: {
+    width: "100%",
+    marginBottom: 18,
+  },
+  resultSlotHalf: {
+    width: "48.6%",
+  },
+  resultSlotThird: {
+    width: "31.6%",
+  },
   skeletonRow: {
     flexDirection: "row",
     borderRadius: 20,
@@ -537,6 +705,20 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
     minHeight: 118,
+  },
+  skeletonCardDesktop: {
+    borderRadius: 20,
+    backgroundColor: "#ffffff",
+    padding: 14,
+    shadowColor: "#172330",
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  skeletonBodyDesktop: {
+    paddingTop: 14,
+    gap: 10,
   },
   floatingFilter: {
     position: "absolute",

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import CategoryChips from "../components/CategoryChips";
@@ -25,6 +25,9 @@ function buildDiscoverHref(query: string): string {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const desktop = width >= 768;
+  const popularColumns = width >= 1180 ? 3 : desktop ? 2 : 1;
   const [query, setQuery] = useState("");
   const [popularSalons, setPopularSalons] = useState<MarketplaceSalon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,57 +68,84 @@ export default function HomeScreen() {
         image={DEMO_MARKETPLACE_SALONS[0].coverImageUrl}
       />
 
-      <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
-        <Text style={styles.title}>Ontdek salons die goed voelen voordat je boekt.</Text>
-        <Text style={styles.subtitle}>
-          Scroll door echte media, vergelijk prijzen en vind in seconden een salon die past bij jouw stijl,
-          budget en stad.
-        </Text>
+      <View style={[styles.heroShell, desktop && styles.heroShellDesktop]}>
+        <View style={[styles.hero, desktop && styles.heroDesktop]}>
+          <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
+          <Text style={[styles.title, desktop && styles.titleDesktop]}>
+            Ontdek salons die goed voelen voordat je boekt.
+          </Text>
+          <Text style={styles.subtitle}>
+            Scroll door echte media, vergelijk prijzen en vind in seconden een salon die past bij jouw stijl,
+            budget en stad.
+          </Text>
 
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color={COLORS.muted} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Zoek op salon, behandeling of stad"
-            placeholderTextColor={COLORS.placeholder}
-            style={styles.searchInput}
-            returnKeyType="search"
-            onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
+          <View style={[styles.searchBar, desktop && styles.searchBarDesktop]}>
+            <Ionicons name="search" size={20} color={COLORS.muted} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Zoek op salon, behandeling of stad"
+              placeholderTextColor={COLORS.placeholder}
+              style={styles.searchInput}
+              returnKeyType="search"
+              onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
+            />
+            <Pressable
+              onPress={() => router.push(buildDiscoverHref(query) as never)}
+              style={({ pressed }) => [styles.searchAction, pressed && styles.buttonPressed]}
+            >
+              <Text style={styles.searchActionText}>Ontdek</Text>
+            </Pressable>
+          </View>
+
+          <CategoryChips
+            items={categoryLabels}
+            style={styles.chipsRow}
+            onChange={(label) => {
+              const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
+              if (!category) return;
+              router.push(`/salons/${DEFAULT_MARKETPLACE_CITY.slug}/${category.slug}` as never);
+            }}
           />
-          <Pressable
-            onPress={() => router.push(buildDiscoverHref(query) as never)}
-            style={({ pressed }) => [styles.searchAction, pressed && styles.buttonPressed]}
-          >
-            <Text style={styles.searchActionText}>Ontdek</Text>
-          </Pressable>
+
+          <View style={styles.metricsRow}>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>Publiek</Text>
+              <Text style={styles.metricLabel}>Vrij browsen zonder account</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>Video-first</Text>
+              <Text style={styles.metricLabel}>Zie sfeer en resultaat direct</Text>
+            </View>
+            <View style={styles.metric}>
+              <Text style={styles.metricValue}>Guest booking</Text>
+              <Text style={styles.metricLabel}>Boek met alleen e-mail</Text>
+            </View>
+          </View>
         </View>
 
-        <CategoryChips
-          items={categoryLabels}
-          style={styles.chipsRow}
-          onChange={(label) => {
-            const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
-            if (!category) return;
-            router.push(`/salons/${DEFAULT_MARKETPLACE_CITY.slug}/${category.slug}` as never);
-          }}
-        />
-
-        <View style={styles.metricsRow}>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>Publiek</Text>
-            <Text style={styles.metricLabel}>Vrij browsen zonder account</Text>
+        {desktop ? (
+          <View style={styles.heroAside}>
+            <Text style={styles.heroAsideEyebrow}>Snel starten</Text>
+            <Text style={styles.heroAsideTitle}>Gebruik BookBeauty als een rustige, snelle marketplace.</Text>
+            <Text style={styles.heroAsideText}>
+              Op desktop navigeer je direct via de vaste zijbalk en vergelijk je sneller meerdere salons naast
+              elkaar.
+            </Text>
+            <Pressable
+              onPress={() => router.push("/discover?city=rotterdam" as never)}
+              style={({ pressed }) => [styles.heroAsidePrimary, pressed && styles.buttonPressed]}
+            >
+              <Text style={styles.heroAsidePrimaryText}>Ontdek in Rotterdam</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push("/(auth)/register" as never)}
+              style={({ pressed }) => [styles.heroAsideSecondary, pressed && styles.buttonPressed]}
+            >
+              <Text style={styles.heroAsideSecondaryText}>Meld je salon gratis aan</Text>
+            </Pressable>
           </View>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>Video-first</Text>
-            <Text style={styles.metricLabel}>Zie sfeer en resultaat direct</Text>
-          </View>
-          <View style={styles.metric}>
-            <Text style={styles.metricValue}>Guest booking</Text>
-            <Text style={styles.metricLabel}>Boek met alleen e-mail</Text>
-          </View>
-        </View>
+        ) : null}
       </View>
 
       <View style={styles.sectionHeader}>
@@ -130,24 +160,39 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      <View style={styles.listWrap}>
+      <View style={[styles.listWrap, desktop && styles.listWrapDesktop]}>
         {loading
           ? Array.from({ length: 3 }).map((_, index) => (
-              <View key={index} style={styles.skeletonCard}>
-                <SkeletonBlock height={220} radius={20} />
-                <View style={styles.skeletonBody}>
-                  <SkeletonBlock height={24} width="54%" radius={8} />
-                  <SkeletonBlock height={16} width="28%" radius={8} />
-                  <SkeletonBlock height={16} width="82%" radius={8} />
+              <View
+                key={index}
+                style={[
+                  styles.listItem,
+                  desktop && (popularColumns === 3 ? styles.listItemThird : styles.listItemHalf),
+                ]}
+              >
+                <View style={styles.skeletonCard}>
+                  <SkeletonBlock height={220} radius={20} />
+                  <View style={styles.skeletonBody}>
+                    <SkeletonBlock height={24} width="54%" radius={8} />
+                    <SkeletonBlock height={16} width="28%" radius={8} />
+                    <SkeletonBlock height={16} width="82%" radius={8} />
+                  </View>
                 </View>
               </View>
             ))
           : popularSalons.map((salon) => (
-              <MarketplaceSalonCard
+              <View
                 key={salon.slug}
-                salon={salon}
-                onPress={() => router.push(`/salon/${salon.slug}` as never)}
-              />
+                style={[
+                  styles.listItem,
+                  desktop && (popularColumns === 3 ? styles.listItemThird : styles.listItemHalf),
+                ]}
+              >
+                <MarketplaceSalonCard
+                  salon={salon}
+                  onPress={() => router.push(`/salon/${salon.slug}` as never)}
+                />
+              </View>
             ))}
       </View>
 
@@ -169,8 +214,20 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  heroShell: {
+    gap: 22,
+  },
+  heroShellDesktop: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 24,
+  },
   hero: {
     paddingTop: 8,
+  },
+  heroDesktop: {
+    flex: 1,
+    minWidth: 0,
   },
   eyebrow: {
     color: COLORS.primary,
@@ -187,6 +244,11 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -1.2,
     maxWidth: 860,
+  },
+  titleDesktop: {
+    fontSize: 56,
+    lineHeight: 62,
+    maxWidth: 760,
   },
   subtitle: {
     marginTop: 12,
@@ -212,6 +274,9 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 2,
+  },
+  searchBarDesktop: {
+    maxWidth: 760,
   },
   searchInput: {
     flex: 1,
@@ -241,6 +306,62 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 14,
+  },
+  heroAside: {
+    width: 320,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 24,
+    backgroundColor: COLORS.surface,
+    padding: 22,
+    gap: 12,
+    alignSelf: "stretch",
+  },
+  heroAsideEyebrow: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  heroAsideTitle: {
+    color: COLORS.text,
+    fontSize: 26,
+    lineHeight: 31,
+    fontWeight: "900",
+    letterSpacing: -0.7,
+  },
+  heroAsideText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  heroAsidePrimary: {
+    marginTop: 8,
+    minHeight: 50,
+    borderRadius: 18,
+    backgroundColor: COLORS.text,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroAsidePrimaryText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  heroAsideSecondary: {
+    minHeight: 48,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroAsideSecondaryText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
   },
   metric: {
     minWidth: 180,
@@ -300,6 +421,21 @@ const styles = StyleSheet.create({
   listWrap: {
     marginTop: 18,
     gap: 18,
+  },
+  listWrapDesktop: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 18,
+    alignItems: "stretch",
+  },
+  listItem: {
+    width: "100%",
+  },
+  listItemHalf: {
+    width: "48.7%",
+  },
+  listItemThird: {
+    width: "31.2%",
   },
   skeletonCard: {
     borderRadius: 20,

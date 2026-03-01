@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Container from "./ui/Container";
+import Drawer from "./ui/Drawer";
 import { subscribeAuth } from "../lib/authRepo";
 import { COLORS } from "../lib/ui";
 import { getDefaultCityPath } from "../lib/marketplace";
@@ -19,6 +21,7 @@ type MenuItem = {
   key: string;
   label: string;
   href: string;
+  icon: keyof typeof Ionicons.glyphMap;
 };
 
 export default function MarketplaceShell({
@@ -29,10 +32,9 @@ export default function MarketplaceShell({
 }: MarketplaceShellProps) {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const desktop = width >= 768;
   const [menuOpen, setMenuOpen] = useState(false);
   const [hasSession, setHasSession] = useState(false);
-  const compact = width < 768;
-  const wide = width >= 1080;
 
   useEffect(() => {
     return subscribeAuth((user) => {
@@ -40,17 +42,15 @@ export default function MarketplaceShell({
     });
   }, []);
 
-  const menuItems = useMemo<MenuItem[]>(
+  const primaryNav = useMemo<MenuItem[]>(
     () => [
-      { key: "home", label: "Home", href: "/" },
-      { key: "discover", label: "Ontdek salons", href: "/discover" },
-      { key: "feed", label: "Feed", href: "/feed" },
-      { key: "register", label: "Meld je salon aan", href: "/(auth)/register" },
-      hasSession
-        ? { key: "account", label: "Mijn account", href: "/account" }
-        : { key: "login", label: "Inloggen", href: "/(auth)/login" },
+      { key: "home", label: "Home", href: "/", icon: "home-outline" },
+      { key: "discover", label: "Ontdek", href: "/discover", icon: "search-outline" },
+      { key: "feed", label: "Feed", href: "/feed", icon: "play-outline" },
+      { key: "register", label: "Aanmelden salon", href: "/(auth)/register", icon: "storefront-outline" },
+      { key: "support", label: "Support", href: "/support", icon: "help-circle-outline" },
     ],
-    [hasSession]
+    []
   );
 
   function openRoute(href: string) {
@@ -58,51 +58,157 @@ export default function MarketplaceShell({
     router.push(href as never);
   }
 
-  const content = (
-    <View
-      style={[
-        styles.content,
-        compact && styles.contentCompact,
-        wide && styles.contentWide,
-        fullBleed && styles.contentFullBleed,
-      ]}
+  const contentNode = (
+    <Container
+      fullBleed={fullBleed}
+      style={desktop ? styles.desktopContent : styles.mobileContent}
+      desktopPadding={28}
+      mobilePadding={12}
     >
       {children}
-    </View>
+    </Container>
   );
+
+  if (desktop) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+        <View style={styles.screen}>
+          <View style={styles.desktopShell}>
+            <View style={styles.sidebarColumn}>
+              <View style={styles.sidebarSticky}>
+                <Pressable onPress={() => openRoute("/")} style={styles.sidebarBrand}>
+                  <Image
+                    source={require("../assets/logo/logo.png")}
+                    style={styles.sidebarLogo}
+                    contentFit="contain"
+                  />
+                </Pressable>
+
+                <Text style={styles.sidebarKicker}>BookBeauty marketplace</Text>
+
+                <View style={styles.sidebarNav}>
+                  {primaryNav.map((item) => {
+                    const selected = item.key === active;
+                    return (
+                      <Pressable
+                        key={item.key}
+                        onPress={() => openRoute(item.href)}
+                        style={({ pressed }) => [
+                          styles.sidebarItem,
+                          selected && styles.sidebarItemActive,
+                          pressed && styles.sidebarItemPressed,
+                        ]}
+                      >
+                        <Ionicons
+                          name={item.icon}
+                          size={18}
+                          color={selected ? "#ffffff" : COLORS.muted}
+                        />
+                        <Text
+                          style={[
+                            styles.sidebarItemText,
+                            selected && styles.sidebarItemTextActive,
+                          ]}
+                        >
+                          {item.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.sidebarFooter}>
+                  <Pressable onPress={() => openRoute(getDefaultCityPath())} style={styles.sidebarPrimaryCta}>
+                    <Text style={styles.sidebarPrimaryCtaText}>Start met zoeken</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => openRoute(hasSession ? "/account" : "/(auth)/login")}
+                    style={styles.sidebarSecondaryCta}
+                  >
+                    <Text style={styles.sidebarSecondaryCtaText}>
+                      {hasSession ? "Mijn account" : "Inloggen"}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.mainColumn}>
+              <View style={styles.desktopTopBar}>
+                <Container desktopPadding={28}>
+                  <View style={styles.desktopTopBarRow}>
+                    <Pressable
+                      onPress={() => openRoute("/discover")}
+                      style={({ pressed }) => [
+                        styles.searchDock,
+                        styles.searchDockDesktop,
+                        pressed && styles.searchDockPressed,
+                      ]}
+                    >
+                      <Ionicons name="search" size={17} color={COLORS.muted} />
+                      <Text style={styles.searchDockText}>Zoek salon, stad of behandeling</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={() => openRoute(hasSession ? "/account" : "/(auth)/login")}
+                      style={styles.accountButton}
+                    >
+                      <Ionicons name={hasSession ? "person" : "person-outline"} size={18} color={COLORS.text} />
+                    </Pressable>
+                  </View>
+                </Container>
+              </View>
+
+              {scroll ? (
+                <ScrollView
+                  style={styles.flex}
+                  contentContainerStyle={styles.scrollContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {contentNode}
+                </ScrollView>
+              ) : (
+                <View style={styles.flex}>{contentNode}</View>
+              )}
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.screen}>
-        <View style={[styles.topBar, compact && styles.topBarCompact]}>
-          <View style={[styles.topBarRow, compact && styles.topBarRowCompact, wide && styles.topBarRowWide]}>
-            <Pressable onPress={() => router.push("/" as never)} style={styles.logoWrap}>
-              <Image
-                source={require("../assets/logo/logo.png")}
-                style={[styles.logo, compact && styles.logoCompact, wide && styles.logoWide]}
-                contentFit="contain"
-              />
-            </Pressable>
+        <View style={styles.mobileTopBar}>
+          <Container mobilePadding={12}>
+            <View style={styles.mobileTopBarRow}>
+              <Pressable onPress={() => openRoute("/")} style={styles.mobileLogoWrap}>
+                <Image
+                  source={require("../assets/logo/logo.png")}
+                  style={styles.mobileLogo}
+                  contentFit="contain"
+                />
+              </Pressable>
 
-            <Pressable
-              onPress={() => router.push("/discover" as never)}
-              style={({ pressed }) => [
-                styles.searchDock,
-                compact && styles.searchDockCompact,
-                wide && styles.searchDockWide,
-                pressed && styles.searchDockPressed,
-              ]}
-            >
-              <Ionicons name="search" size={16} color={COLORS.muted} />
-              <Text style={[styles.searchDockText, compact && styles.searchDockTextCompact]}>
-                {compact ? "Zoek salon" : "Zoek salon of stad"}
-              </Text>
-            </Pressable>
+              <Pressable
+                onPress={() => openRoute("/discover")}
+                style={({ pressed }) => [
+                  styles.searchDock,
+                  styles.searchDockMobile,
+                  pressed && styles.searchDockPressed,
+                ]}
+              >
+                <Ionicons name="search" size={18} color={COLORS.muted} />
+                <Text style={[styles.searchDockText, styles.searchDockTextMobile]}>Zoek salon</Text>
+              </Pressable>
 
-            <Pressable onPress={() => setMenuOpen(true)} style={[styles.sideButton, compact && styles.sideButtonCompact]}>
-              <Ionicons name="menu-outline" size={24} color={COLORS.text} />
-            </Pressable>
-          </View>
+              <Pressable onPress={() => setMenuOpen(true)} style={styles.menuButton}>
+                <Ionicons name="menu-outline" size={24} color={COLORS.text} />
+              </Pressable>
+            </View>
+          </Container>
         </View>
 
         {scroll ? (
@@ -111,49 +217,57 @@ export default function MarketplaceShell({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {content}
+            {contentNode}
           </ScrollView>
         ) : (
-          <View style={styles.flex}>{content}</View>
+          <View style={styles.flex}>{contentNode}</View>
         )}
 
-        <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
-          <View style={styles.menuRoot}>
-            <View style={[styles.menuPanel, compact && styles.menuPanelCompact]}>
-              <Text style={styles.menuKicker}>Navigatie</Text>
-              <Text style={styles.menuTitle}>BookBeauty marketplace</Text>
+        <Drawer visible={menuOpen} onClose={() => setMenuOpen(false)}>
+          <View style={styles.drawerContent}>
+            <Text style={styles.drawerKicker}>Navigatie</Text>
+            <Text style={styles.drawerTitle}>BookBeauty</Text>
 
-              <View style={styles.menuList}>
-                {menuItems.map((item) => {
-                  const selected = item.key === active;
-                  return (
-                    <Pressable
-                      key={item.key}
-                      onPress={() => openRoute(item.href)}
-                      style={[styles.menuItem, selected && styles.menuItemActive]}
-                    >
-                      <Text style={[styles.menuItemText, selected && styles.menuItemTextActive]}>
+            <View style={styles.drawerList}>
+              {primaryNav.map((item) => {
+                const selected = item.key === active;
+                return (
+                  <Pressable
+                    key={item.key}
+                    onPress={() => openRoute(item.href)}
+                    style={[styles.drawerItem, selected && styles.drawerItemActive]}
+                  >
+                    <View style={styles.drawerItemLeft}>
+                      <Ionicons
+                        name={item.icon}
+                        size={17}
+                        color={selected ? COLORS.text : COLORS.muted}
+                      />
+                      <Text
+                        style={[
+                          styles.drawerItemText,
+                          selected && styles.drawerItemTextActive,
+                        ]}
+                      >
                         {item.label}
                       </Text>
-                      <Ionicons
-                        name="arrow-forward"
-                        size={16}
-                        color={selected ? COLORS.primary : COLORS.muted}
-                      />
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <View style={styles.menuFooter}>
-                <Pressable onPress={() => openRoute(getDefaultCityPath())} style={styles.primaryCta}>
-                  <Text style={styles.primaryCtaText}>Start met zoeken</Text>
-                </Pressable>
-              </View>
+                    </View>
+                    <Ionicons name="arrow-forward" size={15} color={COLORS.muted} />
+                  </Pressable>
+                );
+              })}
             </View>
-            <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)} />
+
+            <Pressable
+              onPress={() => openRoute(hasSession ? "/account" : "/(auth)/login")}
+              style={styles.drawerFooterButton}
+            >
+              <Text style={styles.drawerFooterButtonText}>
+                {hasSession ? "Mijn account" : "Inloggen"}
+              </Text>
+            </Pressable>
           </View>
-        </Modal>
+        </Drawer>
       </View>
     </SafeAreaView>
   );
@@ -174,91 +288,157 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
   },
-  topBar: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(232,225,215,0.9)",
-    backgroundColor: "rgba(255,255,255,0.92)",
+  desktopShell: {
+    flex: 1,
+    flexDirection: "row",
+    backgroundColor: COLORS.bg,
+  },
+  sidebarColumn: {
+    width: 250,
     paddingHorizontal: 18,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingVertical: 18,
+    borderRightWidth: 1,
+    borderRightColor: COLORS.border,
+    backgroundColor: "#fcfcfd",
   },
-  topBarCompact: {
-    paddingHorizontal: 12,
-    paddingTop: 4,
-    paddingBottom: 10,
+  sidebarSticky: {
+    flex: 1,
+    position: "sticky" as any,
+    top: 18,
   },
-  topBarRow: {
+  sidebarBrand: {
+    minHeight: 40,
+    justifyContent: "center",
+  },
+  sidebarLogo: {
+    width: 136,
+    height: 28,
+  },
+  sidebarKicker: {
+    marginTop: 10,
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  sidebarNav: {
+    marginTop: 24,
+    gap: 8,
+  },
+  sidebarItem: {
+    minHeight: 48,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "transparent",
+  },
+  sidebarItemActive: {
+    backgroundColor: COLORS.text,
+  },
+  sidebarItemPressed: {
+    transform: [{ scale: 0.99 }],
+  },
+  sidebarItemText: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  sidebarItemTextActive: {
+    color: "#ffffff",
+  },
+  sidebarFooter: {
+    marginTop: "auto",
+    gap: 10,
+  },
+  sidebarPrimaryCta: {
+    minHeight: 48,
+    borderRadius: 16,
+    backgroundColor: COLORS.text,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sidebarPrimaryCtaText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  sidebarSecondaryCta: {
+    minHeight: 46,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ffffff",
+  },
+  sidebarSecondaryCtaText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  mainColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  desktopTopBar: {
+    minHeight: 82,
+    justifyContent: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: "rgba(255,255,255,0.94)",
+  },
+  desktopTopBarRow: {
     minHeight: 54,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    width: "100%",
-    maxWidth: 1280,
-    alignSelf: "center",
+    gap: 14,
   },
-  topBarRowCompact: {
+  mobileTopBar: {
+    paddingTop: 6,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    backgroundColor: "rgba(255,255,255,0.94)",
+  },
+  mobileTopBarRow: {
     minHeight: 48,
-    gap: 8,
-  },
-  topBarRowWide: {
-    maxWidth: 1380,
-  },
-  sideButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(23,35,48,0.04)",
-  },
-  sideButtonCompact: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  logoWrap: {
-    minHeight: 44,
-    alignItems: "flex-start",
-    justifyContent: "center",
-  },
-  logo: {
-    width: 130,
-    height: 28,
-  },
-  logoCompact: {
-    width: 108,
-    height: 24,
-  },
-  logoWide: {
-    width: 142,
-    height: 30,
-  },
-  searchDock: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 23,
-    backgroundColor: "rgba(23,35,48,0.04)",
-    borderWidth: 1,
-    borderColor: "rgba(232,225,215,0.9)",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  mobileLogoWrap: {
+    minWidth: 74,
+    minHeight: 40,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  mobileLogo: {
+    width: 82,
+    height: 22,
+  },
+  searchDock: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#ffffff",
+  },
+  searchDockDesktop: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 26,
+    paddingHorizontal: 16,
+    maxWidth: 760,
+  },
+  searchDockMobile: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 22,
     paddingHorizontal: 14,
-    shadowColor: "#172330",
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 1,
-  },
-  searchDockCompact: {
-    minHeight: 42,
-    borderRadius: 21,
-    paddingHorizontal: 12,
-    gap: 6,
-  },
-  searchDockWide: {
-    maxWidth: 820,
   },
   searchDockPressed: {
     transform: [{ scale: 0.99 }],
@@ -268,79 +448,61 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  searchDockTextCompact: {
+  searchDockTextMobile: {
     fontSize: 13,
   },
-  content: {
-    flex: 1,
-    width: "100%",
-    maxWidth: 1280,
-    alignSelf: "center",
-    paddingHorizontal: 18,
-    paddingTop: 20,
-    paddingBottom: 28,
+  accountButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
   },
-  contentCompact: {
-    paddingHorizontal: 12,
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  mobileContent: {
+    flex: 1,
     paddingTop: 14,
-    paddingBottom: 20,
-  },
-  contentWide: {
-    maxWidth: 1380,
-    paddingHorizontal: 28,
-  },
-  contentFullBleed: {
-    maxWidth: undefined,
-    paddingHorizontal: 0,
-    paddingTop: 0,
-    paddingBottom: 0,
-  },
-  menuRoot: {
-    flex: 1,
-    flexDirection: "row-reverse",
-  },
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(12,20,31,0.38)",
-  },
-  menuPanel: {
-    width: 320,
-    maxWidth: "86%",
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 22,
-    paddingTop: 24,
-    paddingBottom: 28,
-    borderLeftWidth: 1,
-    borderLeftColor: COLORS.border,
-  },
-  menuPanelCompact: {
-    width: 296,
-    maxWidth: "92%",
-    paddingHorizontal: 18,
-    paddingTop: 18,
     paddingBottom: 22,
   },
-  menuKicker: {
-    color: COLORS.primary,
-    fontSize: 12,
+  desktopContent: {
+    flex: 1,
+    paddingTop: 24,
+    paddingBottom: 32,
+  },
+  drawerContent: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 24,
+  },
+  drawerKicker: {
+    color: COLORS.muted,
+    fontSize: 11,
     fontWeight: "800",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0.7,
   },
-  menuTitle: {
-    color: COLORS.text,
-    fontSize: 26,
-    lineHeight: 30,
-    fontWeight: "900",
+  drawerTitle: {
     marginTop: 8,
+    color: COLORS.text,
+    fontSize: 24,
+    fontWeight: "900",
   },
-  menuList: {
-    marginTop: 22,
+  drawerList: {
+    marginTop: 20,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
   },
-  menuItem: {
-    minHeight: 60,
+  drawerItem: {
+    minHeight: 58,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
     flexDirection: "row",
@@ -348,29 +510,33 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
   },
-  menuItemActive: {
+  drawerItemActive: {
     backgroundColor: COLORS.surface,
   },
-  menuItemText: {
+  drawerItemLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  drawerItemText: {
     color: COLORS.text,
     fontSize: 15,
     fontWeight: "700",
   },
-  menuItemTextActive: {
-    color: COLORS.primary,
+  drawerItemTextActive: {
+    color: COLORS.text,
   },
-  menuFooter: {
-    marginTop: 22,
-  },
-  primaryCta: {
+  drawerFooterButton: {
+    marginTop: 20,
     minHeight: 50,
-    backgroundColor: COLORS.primary,
+    borderRadius: 16,
+    backgroundColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryCtaText: {
+  drawerFooterButtonText: {
     color: "#ffffff",
     fontSize: 14,
-    fontWeight: "800",
+    fontWeight: "900",
   },
 });
