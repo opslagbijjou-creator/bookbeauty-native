@@ -73,6 +73,7 @@ function FeedSlide({
 }: FeedSlideProps) {
   const fade = useRef(new Animated.Value(0)).current;
   const videoRef = useRef<Video | null>(null);
+  const webVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isBuffering, setIsBuffering] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -95,6 +96,9 @@ function FeedSlide({
   const isWeb = Platform.OS === "web";
   const videoStyle = isWeb ? [styles.absoluteMedia, styles.webContain] : styles.absoluteMedia;
   const compact = viewportWidth < 768;
+  const wide = viewportWidth >= 1180;
+  const actionPrimarySize = compact ? 24 : 28;
+  const actionSecondarySize = compact ? 22 : 24;
   const reservedBottom = compact ? 212 : 152;
   const reservedTop = compact ? 18 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
@@ -103,7 +107,7 @@ function FeedSlide({
   const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
   const targetAspectRatio = usesVideoFrame ? 9 / 16 : 4 / 5;
   const widthFromHeight = availableFrameHeight * targetAspectRatio;
-  const frameWidth = Math.min(680, availableFrameWidth, widthFromHeight);
+  const frameWidth = Math.min(wide ? 720 : 680, availableFrameWidth, widthFromHeight);
   const frameHeight = Math.min(availableFrameHeight, frameWidth / targetAspectRatio);
 
   useEffect(() => {
@@ -128,34 +132,64 @@ function FeedSlide({
   }, []);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !canPlayVideo) return;
+    if (!canPlayVideo) return;
 
-    if (isActive) {
-      video.playAsync().catch(() => null);
+    if (isWeb) {
+      const webVideo = webVideoRef.current;
+      if (!webVideo) return;
+
+      if (isActive) {
+        webVideo.play().catch(() => null);
+        return;
+      }
+
+      webVideo.pause();
+      try {
+        webVideo.currentTime = 0;
+      } catch {
+        // noop
+      }
+      setProgress(0);
       return;
     }
 
-    video
+    const nativeVideo = videoRef.current;
+    if (!nativeVideo) return;
+
+    if (isActive) {
+      nativeVideo.playAsync().catch(() => null);
+      return;
+    }
+
+    nativeVideo
       .pauseAsync()
-      .then(() => video.setPositionAsync(0))
+      .then(() => nativeVideo.setPositionAsync(0))
       .catch(() => null);
     setProgress(0);
-  }, [isActive, canPlayVideo, item.id, videoUrl]);
+  }, [isActive, canPlayVideo, isWeb, item.id, videoUrl]);
 
   useEffect(() => {
-    const video = videoRef.current;
+    const webVideo = webVideoRef.current;
+    const nativeVideo = videoRef.current;
     return () => {
-      if (!video) return;
-      video.pauseAsync().catch(() => null);
-      video.unloadAsync().catch(() => null);
+      if (webVideo) {
+        webVideo.pause();
+        webVideo.removeAttribute("src");
+        webVideo.load();
+      }
+
+      if (!nativeVideo) return;
+      nativeVideo.pauseAsync().catch(() => null);
+      nativeVideo.unloadAsync().catch(() => null);
     };
-  }, []);
+  }, [isWeb]);
 
   return (
     <Animated.View style={[styles.slide, { height, opacity: fade }]}>
       <View style={styles.stage}>
-        <Image source={{ uri: item.posterUrl }} style={styles.mediaBackdrop} contentFit="cover" transition={180} />
+        {!compact ? (
+          <Image source={{ uri: item.posterUrl }} style={styles.mediaBackdrop} contentFit="cover" transition={180} />
+        ) : null}
         <View style={styles.mediaBackdropShade} />
 
         <View style={styles.frameWrap}>
@@ -176,38 +210,90 @@ function FeedSlide({
                   contentFit="contain"
                   transition={0}
                 />
-                <Video
-                  ref={videoRef}
-                  source={{ uri: videoUrl }}
-                  style={videoStyle}
-                  resizeMode={ResizeMode.CONTAIN}
-                  shouldPlay={false}
-                  isLooping
-                  isMuted={muted}
-                  volume={muted ? 0 : 1}
-                  progressUpdateIntervalMillis={100}
-                  onLoadStart={() => {
-                    setVideoReady(false);
-                    setIsBuffering(true);
-                  }}
-                  onReadyForDisplay={() => {
-                    setVideoReady(true);
-                    setIsBuffering(false);
-                  }}
-                  onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-                  onError={() => {
-                    setVideoReady(false);
-                    setIsBuffering(false);
-                    setProgress(0);
-                    setVideoSourceIndex((current) => {
-                      if (current + 1 < videoSources.length) {
-                        return current + 1;
+                {isWeb ? (
+                  <video
+                    ref={(node) => {
+                      webVideoRef.current = node;
+                    }}
+                    src={videoUrl}
+                    muted={muted}
+                    loop
+                    playsInline
+                    autoPlay={isActive}
+                    preload="metadata"
+                    style={styles.webVideoElement as any}
+                    onLoadStart={() => {
+                      setVideoReady(false);
+                      setIsBuffering(true);
+                    }}
+                    onCanPlay={() => {
+                      setVideoReady(true);
+                      setIsBuffering(false);
+                      if (isActive) {
+                        webVideoRef.current?.play().catch(() => null);
                       }
-                      onVideoError();
-                      return current;
-                    });
-                  }}
-                />
+                    }}
+                    onWaiting={() => {
+                      setIsBuffering(true);
+                    }}
+                    onPlaying={() => {
+                      setIsBuffering(false);
+                    }}
+                    onTimeUpdate={() => {
+                      const player = webVideoRef.current;
+                      if (!player) return;
+                      const duration = Number(player.duration || 0);
+                      if (duration > 0) {
+                        setProgress(Math.max(0, Math.min(1, player.currentTime / duration)));
+                      }
+                    }}
+                    onError={() => {
+                      setVideoReady(false);
+                      setIsBuffering(false);
+                      setProgress(0);
+                      setVideoSourceIndex((current) => {
+                        if (current + 1 < videoSources.length) {
+                          return current + 1;
+                        }
+                        onVideoError();
+                        return current;
+                      });
+                    }}
+                  />
+                ) : (
+                  <Video
+                    ref={videoRef}
+                    source={{ uri: videoUrl }}
+                    style={videoStyle}
+                    resizeMode={ResizeMode.CONTAIN}
+                    shouldPlay={false}
+                    isLooping
+                    isMuted={muted}
+                    volume={muted ? 0 : 1}
+                    progressUpdateIntervalMillis={100}
+                    onLoadStart={() => {
+                      setVideoReady(false);
+                      setIsBuffering(true);
+                    }}
+                    onReadyForDisplay={() => {
+                      setVideoReady(true);
+                      setIsBuffering(false);
+                    }}
+                    onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+                    onError={() => {
+                      setVideoReady(false);
+                      setIsBuffering(false);
+                      setProgress(0);
+                      setVideoSourceIndex((current) => {
+                        if (current + 1 < videoSources.length) {
+                          return current + 1;
+                        }
+                        onVideoError();
+                        return current;
+                      });
+                    }}
+                  />
+                )}
               </>
             ) : imageUrl ? (
               <Image source={{ uri: imageUrl }} style={styles.absoluteMedia} contentFit="cover" transition={180} />
@@ -228,38 +314,53 @@ function FeedSlide({
         style={StyleSheet.absoluteFillObject}
       />
 
-      <View style={styles.actionsRail}>
-        <Pressable onPress={onToggleLike} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
-          <Ionicons name={liked ? "heart" : "heart-outline"} size={28} color={liked ? COLORS.accent : "#ffffff"} />
-          <Text style={styles.iconLabel}>{likeBusy ? "..." : String(likeCount)}</Text>
+      <View style={[styles.actionsRail, compact && styles.actionsRailCompact]}>
+        <Pressable
+          onPress={onToggleLike}
+          style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
+        >
+          <Ionicons
+            name={liked ? "heart" : "heart-outline"}
+            size={actionPrimarySize}
+            color={liked ? COLORS.accent : "#ffffff"}
+          />
+          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>{likeBusy ? "..." : String(likeCount)}</Text>
         </Pressable>
 
-        <Pressable onPress={onToggleSave} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
-          <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={24} color="#ffffff" />
-          <Text style={styles.iconLabel}>Bewaar</Text>
+        <Pressable
+          onPress={onToggleSave}
+          style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
+        >
+          <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={actionSecondarySize} color="#ffffff" />
+          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>Bewaar</Text>
         </Pressable>
 
-        <Pressable onPress={onShare} style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}>
-          <Ionicons name="share-social-outline" size={24} color="#ffffff" />
-          <Text style={styles.iconLabel}>Deel</Text>
+        <Pressable
+          onPress={onShare}
+          style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
+        >
+          <Ionicons name="share-social-outline" size={actionSecondarySize} color="#ffffff" />
+          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>Deel</Text>
         </Pressable>
 
         <Pressable
           onPress={canPlayVideo ? onToggleMuted : onOpenSalon}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.iconPressed]}
+          style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
         >
           <Ionicons
             name={canPlayVideo ? (muted ? "volume-mute-outline" : "volume-high-outline") : "sparkles-outline"}
-            size={24}
+            size={actionSecondarySize}
             color="#ffffff"
           />
-          <Text style={styles.iconLabel}>{canPlayVideo ? (muted ? "Stil" : "Geluid") : "Salon"}</Text>
+          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>
+            {canPlayVideo ? (muted ? "Stil" : "Geluid") : "Salon"}
+          </Text>
         </Pressable>
       </View>
 
-      <View style={styles.overlay}>
-        <View style={styles.copyWrap}>
-          <Text style={styles.categoryLabel}>{item.categoryLabel}</Text>
+      <View style={[styles.overlay, compact && styles.overlayCompact]}>
+        <View style={[styles.copyWrap, compact && styles.copyWrapCompact]}>
+          <Text style={[styles.categoryLabel, compact && styles.categoryLabelCompact]}>{item.categoryLabel}</Text>
           <View style={styles.brandRow}>
             <View style={styles.brandBadge}>
               {item.companyLogoUrl ? (
@@ -268,30 +369,33 @@ function FeedSlide({
                 <Ionicons name="business-outline" size={15} color="#ffffff" />
               )}
             </View>
-            <Text style={styles.salonName} numberOfLines={1}>
+            <Text style={[styles.salonName, compact && styles.salonNameCompact]} numberOfLines={1}>
               {item.companyName}
             </Text>
           </View>
           {item.companyCity ? (
-            <Text style={styles.metaLine} numberOfLines={1}>
+            <Text style={[styles.metaLine, compact && styles.metaLineCompact]} numberOfLines={1}>
               {item.companyCity}
             </Text>
           ) : null}
-          <Text style={styles.title} numberOfLines={2}>
+          <Text style={[styles.title, compact && styles.titleCompact, wide && styles.titleWide]} numberOfLines={2}>
             {item.title}
           </Text>
-          <Text style={styles.caption} numberOfLines={2}>
+          <Text style={[styles.caption, compact && styles.captionCompact]} numberOfLines={2}>
             {item.caption}
           </Text>
         </View>
 
-        <Pressable onPress={onOpenSalon} style={({ pressed }) => [styles.cta, pressed && styles.iconPressed]}>
+        <Pressable
+          onPress={onOpenSalon}
+          style={({ pressed }) => [styles.cta, compact && styles.ctaCompact, pressed && styles.iconPressed]}
+        >
           <Text style={styles.ctaText}>Bekijk salon</Text>
         </Pressable>
       </View>
 
       {canPlayVideo ? (
-        <View style={styles.progressTrack}>
+        <View style={[styles.progressTrack, compact && styles.progressTrackCompact]}>
           <View style={[styles.progressFill, { width: `${Math.max(4, progress * 100)}%` }]} />
         </View>
       ) : null}
@@ -591,6 +695,14 @@ const styles = StyleSheet.create({
   webContain: {
     objectFit: "contain",
   },
+  webVideoElement: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    backgroundColor: "#06080c",
+  },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
@@ -605,10 +717,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 16,
   },
+  actionsRailCompact: {
+    left: 18,
+    right: 18,
+    bottom: 146,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 8,
+  },
   iconButton: {
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
+  },
+  iconButtonCompact: {
+    minWidth: 58,
+    gap: 4,
   },
   iconPressed: {
     transform: [{ scale: 0.98 }],
@@ -617,6 +742,9 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 11,
     fontWeight: "800",
+  },
+  iconLabelCompact: {
+    fontSize: 10,
   },
   overlay: {
     paddingHorizontal: 18,
@@ -628,9 +756,21 @@ const styles = StyleSheet.create({
     gap: 16,
     zIndex: 2,
   },
+  overlayCompact: {
+    paddingHorizontal: 18,
+    paddingRight: 18,
+    paddingBottom: 56,
+    flexDirection: "column",
+    alignItems: "stretch",
+    justifyContent: "flex-end",
+    gap: 14,
+  },
   copyWrap: {
     flex: 1,
     gap: 6,
+  },
+  copyWrapCompact: {
+    gap: 4,
   },
   categoryLabel: {
     color: "rgba(255,255,255,0.82)",
@@ -638,6 +778,9 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     textTransform: "uppercase",
     letterSpacing: 0.8,
+  },
+  categoryLabelCompact: {
+    fontSize: 11,
   },
   brandRow: {
     flexDirection: "row",
@@ -665,10 +808,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
+  salonNameCompact: {
+    fontSize: 14,
+  },
   metaLine: {
     color: "rgba(255,255,255,0.72)",
     fontSize: 12,
     fontWeight: "600",
+  },
+  metaLineCompact: {
+    fontSize: 11,
   },
   title: {
     color: "#ffffff",
@@ -677,11 +826,25 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -0.7,
   },
+  titleCompact: {
+    fontSize: 20,
+    lineHeight: 24,
+    letterSpacing: -0.3,
+  },
+  titleWide: {
+    fontSize: 32,
+    lineHeight: 36,
+  },
   caption: {
     color: "rgba(255,255,255,0.84)",
     fontSize: 14,
     lineHeight: 21,
     maxWidth: 520,
+  },
+  captionCompact: {
+    fontSize: 13,
+    lineHeight: 18,
+    maxWidth: undefined,
   },
   cta: {
     minHeight: 50,
@@ -690,6 +853,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  ctaCompact: {
+    width: "100%",
+    minHeight: 48,
   },
   ctaText: {
     color: COLORS.text,
@@ -706,6 +873,11 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.18)",
     overflow: "hidden",
     zIndex: 4,
+  },
+  progressTrackCompact: {
+    left: 12,
+    right: 12,
+    bottom: 6,
   },
   progressFill: {
     height: "100%",

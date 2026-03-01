@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -28,8 +28,11 @@ export default function MarketplaceShell({
   fullBleed = false,
 }: MarketplaceShellProps) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const [menuOpen, setMenuOpen] = useState(false);
   const [hasSession, setHasSession] = useState(false);
+  const compact = width < 768;
+  const wide = width >= 1080;
 
   useEffect(() => {
     return subscribeAuth((user) => {
@@ -56,7 +59,14 @@ export default function MarketplaceShell({
   }
 
   const content = (
-    <View style={[styles.content, fullBleed && styles.contentFullBleed]}>
+    <View
+      style={[
+        styles.content,
+        compact && styles.contentCompact,
+        wide && styles.contentWide,
+        fullBleed && styles.contentFullBleed,
+      ]}
+    >
       {children}
     </View>
   );
@@ -64,25 +74,32 @@ export default function MarketplaceShell({
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.screen}>
-        <View style={styles.topBar}>
-          <View style={styles.topBarRow}>
+        <View style={[styles.topBar, compact && styles.topBarCompact]}>
+          <View style={[styles.topBarRow, compact && styles.topBarRowCompact, wide && styles.topBarRowWide]}>
             <Pressable onPress={() => router.push("/" as never)} style={styles.logoWrap}>
               <Image
                 source={require("../assets/logo/logo.png")}
-                style={styles.logo}
+                style={[styles.logo, compact && styles.logoCompact, wide && styles.logoWide]}
                 contentFit="contain"
               />
             </Pressable>
 
             <Pressable
               onPress={() => router.push("/discover" as never)}
-              style={({ pressed }) => [styles.searchDock, pressed && styles.searchDockPressed]}
+              style={({ pressed }) => [
+                styles.searchDock,
+                compact && styles.searchDockCompact,
+                wide && styles.searchDockWide,
+                pressed && styles.searchDockPressed,
+              ]}
             >
               <Ionicons name="search" size={16} color={COLORS.muted} />
-              <Text style={styles.searchDockText}>Zoek salon of stad</Text>
+              <Text style={[styles.searchDockText, compact && styles.searchDockTextCompact]}>
+                {compact ? "Zoek salon" : "Zoek salon of stad"}
+              </Text>
             </Pressable>
 
-            <Pressable onPress={() => setMenuOpen(true)} style={styles.sideButton}>
+            <Pressable onPress={() => setMenuOpen(true)} style={[styles.sideButton, compact && styles.sideButtonCompact]}>
               <Ionicons name="menu-outline" size={24} color={COLORS.text} />
             </Pressable>
           </View>
@@ -102,7 +119,7 @@ export default function MarketplaceShell({
 
         <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
           <View style={styles.menuRoot}>
-            <View style={styles.menuPanel}>
+            <View style={[styles.menuPanel, compact && styles.menuPanelCompact]}>
               <Text style={styles.menuKicker}>Navigatie</Text>
               <Text style={styles.menuTitle}>BookBeauty marketplace</Text>
 
@@ -165,12 +182,27 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 12,
   },
+  topBarCompact: {
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
   topBarRow: {
     minHeight: 54,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    width: "100%",
+    maxWidth: 1280,
+    alignSelf: "center",
+  },
+  topBarRowCompact: {
+    minHeight: 48,
+    gap: 8,
+  },
+  topBarRowWide: {
+    maxWidth: 1380,
   },
   sideButton: {
     width: 44,
@@ -180,6 +212,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(23,35,48,0.04)",
   },
+  sideButtonCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
   logoWrap: {
     minHeight: 44,
     alignItems: "flex-start",
@@ -188,6 +225,14 @@ const styles = StyleSheet.create({
   logo: {
     width: 130,
     height: 28,
+  },
+  logoCompact: {
+    width: 92,
+    height: 22,
+  },
+  logoWide: {
+    width: 142,
+    height: 30,
   },
   searchDock: {
     flex: 1,
@@ -206,6 +251,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 1,
   },
+  searchDockCompact: {
+    minHeight: 42,
+    borderRadius: 21,
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  searchDockWide: {
+    maxWidth: 820,
+  },
   searchDockPressed: {
     transform: [{ scale: 0.99 }],
   },
@@ -213,6 +267,9 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 14,
     fontWeight: "700",
+  },
+  searchDockTextCompact: {
+    fontSize: 13,
   },
   content: {
     flex: 1,
@@ -222,6 +279,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 20,
     paddingBottom: 28,
+  },
+  contentCompact: {
+    paddingHorizontal: 12,
+    paddingTop: 14,
+    paddingBottom: 20,
+  },
+  contentWide: {
+    maxWidth: 1380,
+    paddingHorizontal: 28,
   },
   contentFullBleed: {
     maxWidth: undefined,
@@ -246,6 +312,13 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     borderLeftWidth: 1,
     borderLeftColor: COLORS.border,
+  },
+  menuPanelCompact: {
+    width: 296,
+    maxWidth: "92%",
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 22,
   },
   menuKicker: {
     color: COLORS.primary,
