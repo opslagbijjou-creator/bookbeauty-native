@@ -78,6 +78,7 @@ function FeedSlide({
   const [videoReady, setVideoReady] = useState(false);
   const [progress, setProgress] = useState(0);
   const [videoSourceIndex, setVideoSourceIndex] = useState(0);
+  const [mediaAspectRatio, setMediaAspectRatio] = useState<number | null>(null);
 
   useEffect(() => {
     fade.setValue(0);
@@ -99,22 +100,26 @@ function FeedSlide({
   const wide = viewportWidth >= 1180;
   const actionPrimarySize = compact ? 24 : 28;
   const actionSecondarySize = compact ? 22 : 24;
-  const reservedBottom = compact ? 212 : 152;
-  const reservedTop = compact ? 18 : 28;
+  const reservedBottom = compact ? 72 : 152;
+  const reservedTop = compact ? 12 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
-  const rightRailAllowance = compact ? 96 : 132;
+  const rightRailAllowance = compact ? 24 : 132;
   const horizontalPadding = compact ? 24 : 56;
   const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
-  const targetAspectRatio = usesVideoFrame ? 9 / 16 : 4 / 5;
+  const targetAspectRatio = usesVideoFrame ? mediaAspectRatio || 9 / 16 : 4 / 5;
+  const mobilePreferredWidth = Math.min(availableFrameWidth, viewportWidth - 24);
   const widthFromHeight = availableFrameHeight * targetAspectRatio;
-  const frameWidth = Math.min(wide ? 720 : 680, availableFrameWidth, widthFromHeight);
-  const frameHeight = Math.min(availableFrameHeight, frameWidth / targetAspectRatio);
+  const frameWidth = compact
+    ? Math.min(mobilePreferredWidth, widthFromHeight)
+    : Math.min(wide ? 720 : 680, availableFrameWidth, widthFromHeight);
+  const frameHeight = Math.min(availableFrameHeight, frameWidth / Math.max(0.01, targetAspectRatio));
 
   useEffect(() => {
     setVideoSourceIndex(0);
     setVideoReady(false);
     setIsBuffering(false);
     setProgress(0);
+    setMediaAspectRatio(null);
   }, [item.id]);
 
   const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
@@ -192,7 +197,7 @@ function FeedSlide({
         ) : null}
         <View style={styles.mediaBackdropShade} />
 
-        <View style={styles.frameWrap}>
+        <View style={[styles.frameWrap, compact && styles.frameWrapCompact]}>
           <View
             style={[
               styles.mediaFrame,
@@ -222,6 +227,15 @@ function FeedSlide({
                     autoPlay={isActive}
                     preload="metadata"
                     style={styles.webVideoElement as any}
+                    onLoadedMetadata={() => {
+                      const player = webVideoRef.current;
+                      if (!player) return;
+                      const widthValue = Number(player.videoWidth || 0);
+                      const heightValue = Number(player.videoHeight || 0);
+                      if (widthValue > 0 && heightValue > 0) {
+                        setMediaAspectRatio(widthValue / heightValue);
+                      }
+                    }}
                     onLoadStart={() => {
                       setVideoReady(false);
                       setIsBuffering(true);
@@ -275,7 +289,12 @@ function FeedSlide({
                       setVideoReady(false);
                       setIsBuffering(true);
                     }}
-                    onReadyForDisplay={() => {
+                    onReadyForDisplay={(event: any) => {
+                      const widthValue = Number(event?.naturalSize?.width ?? 0);
+                      const heightValue = Number(event?.naturalSize?.height ?? 0);
+                      if (widthValue > 0 && heightValue > 0) {
+                        setMediaAspectRatio(widthValue / heightValue);
+                      }
                       setVideoReady(true);
                       setIsBuffering(false);
                     }}
@@ -679,6 +698,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  frameWrapCompact: {
+    justifyContent: "flex-start",
+    paddingTop: 8,
+  },
   mediaFrame: {
     backgroundColor: "#06080c",
     overflow: "hidden",
@@ -719,7 +742,7 @@ const styles = StyleSheet.create({
   },
   actionsRailCompact: {
     right: 14,
-    bottom: 154,
+    bottom: 190,
     gap: 14,
   },
   iconButton: {
@@ -754,7 +777,7 @@ const styles = StyleSheet.create({
   overlayCompact: {
     paddingHorizontal: 18,
     paddingRight: 18,
-    paddingBottom: 56,
+    paddingBottom: 92,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-end",
@@ -873,7 +896,7 @@ const styles = StyleSheet.create({
   progressTrackCompact: {
     left: 12,
     right: 12,
-    bottom: 6,
+    bottom: 12,
   },
   progressFill: {
     height: "100%",
