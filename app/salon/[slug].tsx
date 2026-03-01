@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import BookingRequestModal from "../../components/BookingRequestModal";
 import MarketplaceSeo from "../../components/MarketplaceSeo";
 import MarketplaceShell from "../../components/MarketplaceShell";
@@ -24,14 +25,6 @@ export function generateStaticParams() {
 }
 
 type ProfileTab = "services" | "videos" | "info";
-
-function initials(name: string): string {
-  return name
-    .split(" ")
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("")
-    .slice(0, 2);
-}
 
 export default function PublicSalonProfileScreen() {
   const router = useRouter();
@@ -85,7 +78,7 @@ export default function PublicSalonProfileScreen() {
   }
 
   return (
-    <MarketplaceShell active="discover">
+    <MarketplaceShell active="discover" scroll={false}>
       {seo && salon ? (
         <MarketplaceSeo
           title={seo.title}
@@ -96,408 +89,389 @@ export default function PublicSalonProfileScreen() {
         />
       ) : null}
 
-      {loading ? (
-        <View style={styles.loadingStack}>
-          <SkeletonBlock height={320} radius={28} />
-          <SkeletonBlock height={28} width="46%" radius={10} />
-          <SkeletonBlock height={20} width="32%" radius={10} />
-          <SkeletonBlock height={120} radius={20} />
-        </View>
-      ) : !salon ? (
-        <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Salon niet gevonden</Text>
-          <Text style={styles.emptyText}>Deze salonpagina kon niet worden geladen.</Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.hero}>
-            <Image source={{ uri: salon.coverImageUrl }} style={styles.cover} contentFit="cover" transition={220} />
+      <View style={styles.screen}>
+        {loading ? (
+          <View style={styles.loadingStack}>
+            <SkeletonBlock height={420} radius={0} />
+            <SkeletonBlock height={28} width="42%" radius={6} />
+            <SkeletonBlock height={18} width="26%" radius={6} />
+            <SkeletonBlock height={110} radius={0} />
+          </View>
+        ) : !salon ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Salon niet gevonden</Text>
+            <Text style={styles.emptyText}>Deze salonpagina kon niet worden geladen.</Text>
+          </View>
+        ) : (
+          <>
+            <ScrollView
+              style={styles.flex}
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.hero}>
+                <Image source={{ uri: salon.coverImageUrl }} style={styles.cover} contentFit="cover" transition={220} />
+                <LinearGradient
+                  colors={["rgba(8,14,22,0.06)", "rgba(8,14,22,0.74)"]}
+                  style={StyleSheet.absoluteFillObject}
+                />
 
-            <View style={styles.heroOverlay}>
-              <View style={styles.profileRow}>
-                <View style={styles.avatarWrap}>
-                  {salon.logoUrl ? (
-                    <Image source={{ uri: salon.logoUrl }} style={styles.avatarImage} contentFit="cover" />
-                  ) : (
-                    <Text style={styles.avatarText}>{initials(salon.name)}</Text>
-                  )}
+                <View style={styles.heroTopRow}>
+                  <Pressable onPress={onFollow} style={styles.followButton}>
+                    <Ionicons name={followed ? "heart" : "heart-outline"} size={16} color="#ffffff" />
+                    <Text style={styles.followButtonText}>{followed ? "Gevolgd" : "Volg"}</Text>
+                  </Pressable>
                 </View>
 
-                <View style={styles.profileText}>
-                  <Text style={styles.name}>{salon.name}</Text>
-                  <Text style={styles.cityText}>
-                    {salon.city} • {salon.categoryLabel}
+                <View style={styles.heroCopy}>
+                  <Text style={styles.heroName}>{salon.name}</Text>
+                  <Text style={styles.heroMeta}>
+                    {salon.categoryLabel} • {salon.city}
                   </Text>
-                  <View style={styles.tagRow}>
-                    {salon.categoryTags.map((tag) => (
-                      <View key={tag} style={styles.tag}>
-                        <Text style={styles.tagText}>{tag}</Text>
-                      </View>
-                    ))}
-                  </View>
+                  <Text style={styles.heroSubline}>
+                    {salon.rating.toFixed(1)} rating • {salon.reviewCount} reviews • Vanaf {formatCurrency(salon.minPrice)}
+                  </Text>
                 </View>
               </View>
 
-              <View style={styles.ctaRow}>
-                <Pressable onPress={onFollow} style={styles.followBtn}>
-                  <Ionicons name={followed ? "heart" : "heart-outline"} size={16} color={COLORS.primary} />
-                  <Text style={styles.followBtnText}>{followed ? "Gevolgd" : "Volg"}</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (primaryBookableService) onBook(primaryBookableService);
-                  }}
-                  style={styles.bookBtn}
-                >
-                  <Text style={styles.bookBtnText}>Boek</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.metricsRow}>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>{salon.rating.toFixed(1)}</Text>
-              <Text style={styles.metricLabel}>Rating</Text>
-            </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>{formatCurrency(salon.minPrice)}</Text>
-              <Text style={styles.metricLabel}>Vanaf prijs</Text>
-            </View>
-            <View style={styles.metricCard}>
-              <Text style={styles.metricValue}>{salon.reviewCount}</Text>
-              <Text style={styles.metricLabel}>Reviews</Text>
-            </View>
-          </View>
-
-          <View style={styles.tabRow}>
-            {[
-              { key: "services" as const, label: "Diensten" },
-              { key: "videos" as const, label: "Video's" },
-              { key: "info" as const, label: "Info" },
-            ].map((tab) => (
-              <Pressable
-                key={tab.key}
-                onPress={() => setActiveTab(tab.key)}
-                style={[styles.tabBtn, activeTab === tab.key && styles.tabBtnActive]}
-              >
-                <Text style={[styles.tabBtnText, activeTab === tab.key && styles.tabBtnTextActive]}>
-                  {tab.label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {activeTab === "services" ? (
-            <View style={styles.panelGrid}>
-              {salon.services.map((service) => (
-                <View key={service.id} style={styles.serviceCard}>
-                  <View style={styles.serviceHeader}>
-                    <View style={styles.serviceTextWrap}>
-                      <Text style={styles.serviceName}>{service.name}</Text>
-                      <Text style={styles.serviceMeta}>
-                        {formatCurrency(service.price)} • {service.durationMin} min
+              <View style={styles.tabBar}>
+                {[
+                  { key: "services" as const, label: "Behandelingen" },
+                  { key: "videos" as const, label: "Video's" },
+                  { key: "info" as const, label: "Info" },
+                ].map((tab) => {
+                  const selected = activeTab === tab.key;
+                  return (
+                    <Pressable
+                      key={tab.key}
+                      onPress={() => setActiveTab(tab.key)}
+                      style={[styles.tabButton, selected && styles.tabButtonActive]}
+                    >
+                      <Text style={[styles.tabButtonText, selected && styles.tabButtonTextActive]}>
+                        {tab.label}
                       </Text>
-                    </View>
-                    <Pressable onPress={() => onBook(service)} style={styles.serviceBookBtn}>
-                      <Text style={styles.serviceBookBtnText}>Boek</Text>
                     </Pressable>
-                  </View>
-                  <Text style={styles.serviceDescription}>{service.description}</Text>
+                  );
+                })}
+              </View>
+
+              {activeTab === "services" ? (
+                <View style={styles.section}>
+                  {salon.services.map((service) => {
+                    const selected = selectedService?.id === service.id;
+                    return (
+                      <Pressable
+                        key={service.id}
+                        onPress={() => setSelectedService(service)}
+                        style={[styles.serviceRow, selected && styles.serviceRowSelected]}
+                      >
+                        <View style={styles.serviceInfo}>
+                          <Text style={styles.serviceName}>{service.name}</Text>
+                          <Text style={styles.serviceMeta}>
+                            {formatCurrency(service.price)} • {service.durationMin} min
+                          </Text>
+                          <Text style={styles.serviceDescription} numberOfLines={2}>
+                            {service.description}
+                          </Text>
+                        </View>
+
+                        <Pressable
+                          onPress={() => onBook(service)}
+                          style={({ pressed }) => [styles.rowAction, pressed && styles.rowActionPressed]}
+                        >
+                          <Text style={styles.rowActionText}>Boek</Text>
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-              ))}
-            </View>
-          ) : null}
+              ) : null}
 
-          {activeTab === "videos" ? (
-            <View style={styles.panelGrid}>
-              {salon.feed.map((item) => (
-                <View key={item.id} style={styles.videoCard}>
-                  <Image source={{ uri: item.posterUrl }} style={styles.videoPoster} contentFit="cover" transition={220} />
-                  <View style={styles.videoBody}>
-                    <Text style={styles.videoTitle}>{item.title}</Text>
-                    <Text style={styles.videoCaption}>{item.caption}</Text>
-                  </View>
+              {activeTab === "videos" ? (
+                <View style={styles.section}>
+                  {salon.feed.map((item) => (
+                    <View key={item.id} style={styles.mediaRow}>
+                      <Image source={{ uri: item.posterUrl }} style={styles.mediaThumb} contentFit="cover" transition={220} />
+                      <View style={styles.mediaInfo}>
+                        <Text style={styles.mediaTitle}>{item.title}</Text>
+                        <Text style={styles.mediaCaption} numberOfLines={3}>
+                          {item.caption}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-          ) : null}
+              ) : null}
 
-          {activeTab === "info" ? (
-            <View style={styles.infoPanel}>
-              <Text style={styles.infoHeading}>Over deze salon</Text>
-              <Text style={styles.infoBody}>{salon.bio}</Text>
-              <Text style={styles.infoBody}>
-                BookBeauty laat salons publiek zichtbaar zijn zonder loginwall, zodat klanten eerst kunnen oriënteren en daarna pas beslissen.
-              </Text>
-            </View>
-          ) : null}
+              {activeTab === "info" ? (
+                <View style={styles.section}>
+                  <Text style={styles.infoText}>{salon.bio}</Text>
+                  <Text style={styles.infoText}>
+                    Bekijk eerst de sfeer, kies daarna een behandeling en verstuur direct een boekingsaanvraag zonder loginwall.
+                  </Text>
+                </View>
+              ) : null}
+            </ScrollView>
 
-          <BookingRequestModal
-            visible={bookingOpen}
-            salon={salon}
-            service={selectedService}
-            onClose={() => setBookingOpen(false)}
-          />
-        </>
-      )}
+            <View style={styles.stickyBar}>
+              <View style={styles.stickyMeta}>
+                <Text style={styles.stickyLabel}>{primaryBookableService?.name || "Kies een behandeling"}</Text>
+                <Text style={styles.stickyPrice}>
+                  {primaryBookableService ? formatCurrency(primaryBookableService.price) : formatCurrency(salon.minPrice)}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => {
+                  if (primaryBookableService) onBook(primaryBookableService);
+                }}
+                style={({ pressed }) => [styles.stickyCta, pressed && styles.rowActionPressed]}
+              >
+                <Text style={styles.stickyCtaText}>Boek nu</Text>
+              </Pressable>
+            </View>
+
+            <BookingRequestModal
+              visible={bookingOpen}
+              salon={salon}
+              service={selectedService}
+              onClose={() => setBookingOpen(false)}
+            />
+          </>
+        )}
+      </View>
     </MarketplaceShell>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+  flex: {
+    flex: 1,
+  },
   loadingStack: {
     gap: 14,
   },
   emptyState: {
-    padding: 24,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    gap: 8,
+    paddingVertical: 24,
   },
   emptyTitle: {
     color: COLORS.text,
-    fontSize: 24,
-    fontWeight: "800",
+    fontSize: 28,
+    fontWeight: "900",
   },
   emptyText: {
+    marginTop: 8,
     color: COLORS.muted,
+    fontSize: 14,
     lineHeight: 22,
   },
+  scrollContent: {
+    paddingBottom: 110,
+  },
   hero: {
-    borderRadius: 28,
-    overflow: "hidden",
-    backgroundColor: COLORS.card,
+    width: "100%",
+    height: 430,
+    backgroundColor: COLORS.surface,
+    justifyContent: "space-between",
   },
   cover: {
-    width: "100%",
-    height: 360,
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroTopRow: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  followButton: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.44)",
+    backgroundColor: "rgba(8,14,22,0.18)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  followButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  heroCopy: {
+    paddingHorizontal: 18,
+    paddingBottom: 22,
+    gap: 4,
+  },
+  heroName: {
+    color: "#ffffff",
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
+  heroMeta: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  heroSubline: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  tabBar: {
+    marginTop: 18,
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tabButton: {
+    minHeight: 48,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabButtonActive: {
+    borderBottomColor: COLORS.text,
+  },
+  tabButtonText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  tabButtonTextActive: {
+    color: COLORS.text,
+  },
+  section: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  serviceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  serviceRowSelected: {
     backgroundColor: COLORS.surface,
   },
-  heroOverlay: {
-    padding: 20,
-    gap: 18,
-    backgroundColor: COLORS.card,
-  },
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  avatarWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: COLORS.primarySoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarImage: {
-    width: "100%",
-    height: "100%",
-  },
-  avatarText: {
-    color: COLORS.primary,
-    fontWeight: "800",
-    fontSize: 24,
-  },
-  profileText: {
-    flex: 1,
-    gap: 4,
-  },
-  name: {
-    color: COLORS.text,
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: "800",
-  },
-  cityText: {
-    color: COLORS.muted,
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  tagRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 6,
-  },
-  tag: {
-    borderRadius: 999,
-    backgroundColor: COLORS.primarySoft,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  tagText: {
-    color: COLORS.primary,
-    fontWeight: "800",
-    fontSize: 11,
-  },
-  ctaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  followBtn: {
-    minHeight: 46,
-    borderRadius: 12,
-    backgroundColor: COLORS.primarySoft,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  followBtnText: {
-    color: COLORS.primary,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  bookBtn: {
-    minHeight: 46,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  bookBtnText: {
-    color: "#ffffff",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  metricsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginTop: 16,
-  },
-  metricCard: {
-    flex: 1,
-    minWidth: 120,
-    padding: 16,
-    borderRadius: 18,
-    backgroundColor: COLORS.card,
-    gap: 4,
-  },
-  metricValue: {
-    color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 24,
-  },
-  metricLabel: {
-    color: COLORS.muted,
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  tabRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 16,
-  },
-  tabBtn: {
-    minHeight: 42,
-    borderRadius: 999,
-    backgroundColor: COLORS.card,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabBtnActive: {
-    backgroundColor: COLORS.primary,
-  },
-  tabBtnText: {
-    color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  tabBtnTextActive: {
-    color: "#ffffff",
-  },
-  panelGrid: {
-    marginTop: 16,
-    gap: 14,
-  },
-  serviceCard: {
-    padding: 18,
-    borderRadius: 20,
-    backgroundColor: COLORS.card,
-    gap: 12,
-  },
-  serviceHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  serviceTextWrap: {
+  serviceInfo: {
     flex: 1,
     gap: 4,
   },
   serviceName: {
     color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: -0.3,
   },
   serviceMeta: {
-    color: COLORS.muted,
-    fontWeight: "700",
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
   },
   serviceDescription: {
     color: COLORS.muted,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 19,
   },
-  serviceBookBtn: {
-    minHeight: 40,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
+  rowAction: {
+    minHeight: 42,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
   },
-  serviceBookBtnText: {
+  rowActionPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  rowActionText: {
     color: "#ffffff",
-    fontWeight: "800",
     fontSize: 12,
+    fontWeight: "900",
   },
-  videoCard: {
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: COLORS.card,
+  mediaRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  videoPoster: {
-    width: "100%",
-    height: 280,
+  mediaThumb: {
+    width: 128,
+    height: 128,
     backgroundColor: COLORS.surface,
   },
-  videoBody: {
-    padding: 16,
+  mediaInfo: {
+    flex: 1,
     gap: 6,
+    justifyContent: "center",
   },
-  videoTitle: {
+  mediaTitle: {
     color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: "900",
   },
-  videoCaption: {
+  mediaCaption: {
     color: COLORS.muted,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 20,
   },
-  infoPanel: {
-    marginTop: 16,
-    padding: 20,
-    borderRadius: 20,
-    backgroundColor: COLORS.card,
-    gap: 10,
-  },
-  infoHeading: {
-    color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 22,
-  },
-  infoBody: {
+  infoText: {
+    paddingVertical: 18,
     color: COLORS.muted,
+    fontSize: 14,
     lineHeight: 23,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  stickyBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  stickyMeta: {
+    flex: 1,
+    gap: 2,
+  },
+  stickyLabel: {
+    color: COLORS.text,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  stickyPrice: {
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  stickyCta: {
+    minHeight: 50,
+    paddingHorizontal: 20,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickyCtaText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
   },
 });

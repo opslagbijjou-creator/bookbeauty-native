@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -64,6 +66,7 @@ export default function MarketplaceListingScreen({
   subtitle,
 }: MarketplaceListingScreenProps) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const params = useLocalSearchParams<{
     query?: string | string[];
     filter?: string | string[];
@@ -96,6 +99,16 @@ export default function MarketplaceListingScreen({
   const [loading, setLoading] = useState(true);
   const [usedFallback, setUsedFallback] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+
+  const categoryItems = useMemo(() => ["Alles", ...MARKETPLACE_CATEGORIES.map((item) => item.label)], []);
+  const cityLabels = useMemo(() => MARKETPLACE_CITIES.map((item) => item.label), []);
+  const activeCategoryLabel = useMemo(() => {
+    const category = getCategoryBySlug(currentCategorySlug);
+    return category?.label || "Alles";
+  }, [currentCategorySlug]);
+  const activeCityLabel =
+    MARKETPLACE_CITIES.find((item) => item.slug === currentCitySlug)?.label || DEFAULT_MARKETPLACE_CITY.label;
+  const showFloatingFilter = width < 900;
 
   useEffect(() => {
     setDraftQuery(filters.query || "");
@@ -130,12 +143,6 @@ export default function MarketplaceListingScreen({
     };
   }, [currentCategorySlug, currentCitySlug, filters]);
 
-  const categoryItems = useMemo(() => ["Alles", ...MARKETPLACE_CATEGORIES.map((item) => item.label)], []);
-  const activeCategoryLabel = useMemo(() => {
-    const category = getCategoryBySlug(currentCategorySlug);
-    return category?.label || "Alles";
-  }, [currentCategorySlug]);
-
   const applyRoute = useCallback(
     (nextFilters: MarketplaceFilters, overrides?: { citySlug?: string; categorySlug?: string | null }) => {
       const nextCitySlug = overrides?.citySlug || currentCitySlug || DEFAULT_MARKETPLACE_CITY.slug;
@@ -155,6 +162,7 @@ export default function MarketplaceListingScreen({
               return raw ? `/discover?${raw}` : "/discover";
             })()
           : getSalonListingPath(nextCitySlug, nextCategorySlug);
+
       const filterQuery = buildQueryString(nextFilters);
       if (!filterQuery) {
         router.replace(basePath as never);
@@ -181,100 +189,94 @@ export default function MarketplaceListingScreen({
     applyRoute(filters, { categorySlug: nextCategory?.slug });
   }
 
-  function onChangeCity(nextCity: string) {
-    applyRoute(filters, { citySlug: nextCity });
+  function onChangeCity(label: string) {
+    const next = MARKETPLACE_CITIES.find((item) => item.label === label);
+    if (!next) return;
+    applyRoute(filters, { citySlug: next.slug });
   }
 
-  const cityLabels = MARKETPLACE_CITIES.map((item) => item.label);
-  const activeCityLabel =
-    MARKETPLACE_CITIES.find((item) => item.slug === currentCitySlug)?.label || DEFAULT_MARKETPLACE_CITY.label;
-
   return (
-    <>
-      <View style={styles.hero}>
-        <View style={styles.heroTextWrap}>
-          <Text style={styles.kicker}>BookBeauty Marketplace</Text>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
-        </View>
+    <View style={styles.screen}>
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.pageTitle}>{title}</Text>
+        <Text style={styles.pageSubtitle}>{subtitle}</Text>
 
-        <View style={styles.searchWrap}>
+        <View style={styles.searchBar}>
           <Ionicons name="search" size={18} color={COLORS.muted} />
           <TextInput
             value={draftQuery}
             onChangeText={setDraftQuery}
-            placeholder="Zoek op salon, stad of categorie"
-            placeholderTextColor={COLORS.muted}
+            placeholder="Zoek op salon, stad of behandeling"
+            placeholderTextColor={COLORS.placeholder}
             style={styles.searchInput}
           />
-          <Pressable onPress={() => setFilterOpen(true)} style={styles.filterBtn}>
-            <Ionicons name="options-outline" size={16} color={COLORS.primary} />
-            <Text style={styles.filterBtnText}>Filters</Text>
-          </Pressable>
+          {!showFloatingFilter ? (
+            <Pressable onPress={() => setFilterOpen(true)} style={styles.inlineFilterButton}>
+              <Ionicons name="options-outline" size={16} color={COLORS.text} />
+              <Text style={styles.inlineFilterText}>Filters</Text>
+            </Pressable>
+          ) : null}
         </View>
-      </View>
 
-      <View style={styles.toolbar}>
-        <View style={styles.toolbarGroup}>
+        <View style={styles.toolbarBlock}>
           <Text style={styles.toolbarLabel}>Stad</Text>
-          <CategoryChips
-            items={cityLabels}
-            active={activeCityLabel}
-            onChange={(label) => {
-              const next = MARKETPLACE_CITIES.find((item) => item.label === label);
-              if (next) onChangeCity(next.slug);
-            }}
-          />
+          <CategoryChips items={cityLabels} active={activeCityLabel} onChange={onChangeCity} />
         </View>
 
-        <View style={styles.toolbarGroup}>
+        <View style={styles.toolbarBlock}>
           <Text style={styles.toolbarLabel}>Categorie</Text>
           <CategoryChips items={categoryItems} active={activeCategoryLabel} onChange={onChangeCategory} />
         </View>
-      </View>
 
-      {usedFallback ? (
-        <View style={styles.fallbackBanner}>
-          <Ionicons name="sparkles-outline" size={16} color={COLORS.primary} />
-          <Text style={styles.fallbackText}>
-            Live aanbod is nog in opbouw. Daarom tonen we nu demo salons zodat de marketplace nooit leeg is.
+        {usedFallback ? (
+          <Text style={styles.fallbackNote}>
+            Tijdelijk tonen we demo salons zodat de marketplace niet leeg aanvoelt.
+          </Text>
+        ) : null}
+
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsTitle}>{loading ? "Salons laden" : `${items.length} salons`}</Text>
+          <Text style={styles.resultsMeta}>
+            {filters.priceMax ? `Tot ${formatCurrency(filters.priceMax)} • ` : ""}
+            {filters.openNow ? "Nu open • " : ""}
+            {filters.sort || DEFAULT_MARKETPLACE_SORT}
           </Text>
         </View>
+
+        <View style={styles.listShell}>
+          {loading
+            ? Array.from({ length: 6 }).map((_, index) => (
+                <View key={index} style={styles.skeletonRow}>
+                  <SkeletonBlock height={118} width={118} radius={0} />
+                  <View style={styles.skeletonBody}>
+                    <SkeletonBlock height={20} width="72%" radius={6} />
+                    <SkeletonBlock height={16} width="46%" radius={6} />
+                    <SkeletonBlock height={16} width="92%" radius={6} />
+                    <SkeletonBlock height={16} width="66%" radius={6} />
+                  </View>
+                </View>
+              ))
+            : items.map((item) => (
+                <MarketplaceSalonCard
+                  key={item.slug}
+                  salon={item}
+                  onPress={() => router.push(`/salon/${item.slug}` as never)}
+                />
+              ))}
+        </View>
+      </ScrollView>
+
+      {showFloatingFilter ? (
+        <Pressable onPress={() => setFilterOpen(true)} style={({ pressed }) => [styles.floatingFilter, pressed && styles.floatingFilterPressed]}>
+          <Ionicons name="options-outline" size={18} color="#ffffff" />
+          <Text style={styles.floatingFilterText}>Filters</Text>
+        </Pressable>
       ) : null}
-
-      <View style={styles.resultsHeader}>
-        <Text style={styles.resultsTitle}>{loading ? "Salons laden" : `${items.length} salons gevonden`}</Text>
-        <Text style={styles.resultsMeta}>
-          {filters.priceMax ? `Tot ${formatCurrency(filters.priceMax)} • ` : ""}
-          {filters.openNow ? "Nu open • " : ""}
-          Sorteer op {filters.sort || DEFAULT_MARKETPLACE_SORT}
-        </Text>
-      </View>
-
-      {loading ? (
-        <View style={styles.grid}>
-          {Array.from({ length: 6 }).map((_, index) => (
-            <View key={index} style={styles.skeletonCard}>
-              <SkeletonBlock height={220} />
-              <SkeletonBlock height={24} width="72%" radius={10} />
-              <SkeletonBlock height={18} width="48%" radius={10} />
-              <SkeletonBlock height={18} width="88%" radius={10} />
-              <SkeletonBlock height={18} width="64%" radius={10} />
-            </View>
-          ))}
-        </View>
-      ) : (
-        <View style={styles.grid}>
-          {items.map((item) => (
-            <View key={item.slug} style={styles.gridItem}>
-              <MarketplaceSalonCard
-                salon={item}
-                onPress={() => router.push(`/salon/${item.slug}` as never)}
-              />
-            </View>
-          ))}
-        </View>
-      )}
 
       <Modal visible={filterOpen} transparent animationType="fade" onRequestClose={() => setFilterOpen(false)}>
         <View style={styles.modalBackdrop}>
@@ -287,12 +289,12 @@ export default function MarketplaceListingScreen({
             </View>
 
             <View style={styles.modalField}>
-              <Text style={styles.modalLabel}>Zoek op filtertag</Text>
+              <Text style={styles.modalLabel}>Specialisatie</Text>
               <TextInput
                 value={filters.filter || ""}
                 onChangeText={(value) => applyRoute({ ...filters, filter: value || undefined })}
                 placeholder="biab, gel, brows"
-                placeholderTextColor={COLORS.muted}
+                placeholderTextColor={COLORS.placeholder}
                 style={styles.modalInput}
               />
             </View>
@@ -309,7 +311,7 @@ export default function MarketplaceListingScreen({
                 }
                 keyboardType="number-pad"
                 placeholder="60"
-                placeholderTextColor={COLORS.muted}
+                placeholderTextColor={COLORS.placeholder}
                 style={styles.modalInput}
               />
             </View>
@@ -326,7 +328,7 @@ export default function MarketplaceListingScreen({
                 }
                 keyboardType="decimal-pad"
                 placeholder="4"
-                placeholderTextColor={COLORS.muted}
+                placeholderTextColor={COLORS.placeholder}
                 style={styles.modalInput}
               />
             </View>
@@ -349,14 +351,14 @@ export default function MarketplaceListingScreen({
                   { label: "Prijs", value: "price_asc" },
                   { label: "Rating", value: "rating" },
                 ].map((option) => {
-                  const active = (filters.sort || DEFAULT_MARKETPLACE_SORT) === option.value;
+                  const activeSort = (filters.sort || DEFAULT_MARKETPLACE_SORT) === option.value;
                   return (
                     <Pressable
                       key={option.value}
                       onPress={() => applyRoute({ ...filters, sort: option.value })}
-                      style={[styles.sortChip, active && styles.sortChipActive]}
+                      style={[styles.sortChip, activeSort && styles.sortChipActive]}
                     >
-                      <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>
+                      <Text style={[styles.sortChipText, activeSort && styles.sortChipTextActive]}>
                         {option.label}
                       </Text>
                     </Pressable>
@@ -370,58 +372,51 @@ export default function MarketplaceListingScreen({
                 setFilterOpen(false);
                 applyRoute({ sort: DEFAULT_MARKETPLACE_SORT });
               }}
-              style={styles.resetBtn}
+              style={styles.resetButton}
             >
-              <Text style={styles.resetBtnText}>Reset filters</Text>
+              <Text style={styles.resetButtonText}>Reset filters</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: {
-    padding: 24,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    gap: 18,
-    shadowColor: "#102544",
-    shadowOpacity: 0.05,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
+  screen: {
+    flex: 1,
   },
-  heroTextWrap: {
-    gap: 8,
+  flex: {
+    flex: 1,
   },
-  kicker: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
+  content: {
+    paddingBottom: 96,
   },
-  title: {
+  pageTitle: {
     color: COLORS.text,
-    fontSize: 32,
-    fontWeight: "800",
-    lineHeight: 38,
+    fontSize: 36,
+    lineHeight: 42,
+    fontWeight: "900",
+    letterSpacing: -0.8,
   },
-  subtitle: {
+  pageSubtitle: {
+    marginTop: 8,
     color: COLORS.muted,
     fontSize: 15,
     lineHeight: 23,
     maxWidth: 760,
   },
-  searchWrap: {
+  searchBar: {
+    marginTop: 20,
+    minHeight: 58,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#ffffff",
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderRadius: 16,
-    backgroundColor: COLORS.surface,
     paddingHorizontal: 14,
-    paddingVertical: 12,
   },
   searchInput: {
     flex: 1,
@@ -429,91 +424,102 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
   },
-  filterBtn: {
+  inlineFilterButton: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.border,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
-  filterBtnText: {
-    color: COLORS.primary,
-    fontWeight: "800",
+  inlineFilterText: {
+    color: COLORS.text,
     fontSize: 12,
+    fontWeight: "800",
   },
-  toolbar: {
+  toolbarBlock: {
     marginTop: 18,
-    gap: 14,
-  },
-  toolbarGroup: {
     gap: 8,
   },
   toolbarLabel: {
     color: COLORS.text,
-    fontWeight: "800",
     fontSize: 13,
+    fontWeight: "800",
   },
-  fallbackBanner: {
-    marginTop: 18,
-    borderRadius: 16,
-    backgroundColor: COLORS.primarySoft,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  fallbackText: {
-    flex: 1,
+  fallbackNote: {
+    marginTop: 14,
     color: COLORS.primary,
+    fontSize: 13,
     fontWeight: "700",
-    lineHeight: 20,
   },
   resultsHeader: {
-    marginTop: 18,
-    gap: 4,
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
   },
   resultsTitle: {
     color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 22,
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: -0.5,
   },
   resultsMeta: {
     color: COLORS.muted,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
   },
-  grid: {
-    marginTop: 16,
+  listShell: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    backgroundColor: "#ffffff",
+  },
+  skeletonRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 16,
+    gap: 14,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  gridItem: {
-    flexBasis: 340,
-    flexGrow: 1,
-    flexShrink: 1,
+  skeletonBody: {
+    flex: 1,
+    justifyContent: "space-between",
   },
-  skeletonCard: {
-    width: "100%",
-    borderRadius: 16,
-    backgroundColor: COLORS.card,
-    padding: 16,
-    gap: 12,
+  floatingFilter: {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    minHeight: 54,
+    paddingHorizontal: 18,
+    backgroundColor: COLORS.text,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  floatingFilterPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  floatingFilterText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "800",
   },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(12,20,31,0.42)",
-    justifyContent: "center",
-    padding: 16,
+    justifyContent: "flex-end",
   },
   modalCard: {
-    width: "100%",
-    maxWidth: 520,
-    alignSelf: "center",
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    padding: 20,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 28,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
     gap: 16,
   },
   modalHeader: {
@@ -524,14 +530,12 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     color: COLORS.text,
-    fontSize: 22,
-    fontWeight: "800",
+    fontSize: 24,
+    fontWeight: "900",
   },
   modalClose: {
     width: 36,
     height: 36,
-    borderRadius: 999,
-    backgroundColor: COLORS.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -540,15 +544,16 @@ const styles = StyleSheet.create({
   },
   modalLabel: {
     color: COLORS.text,
-    fontWeight: "800",
     fontSize: 13,
+    fontWeight: "800",
   },
   modalInput: {
-    minHeight: 46,
-    borderRadius: 14,
-    backgroundColor: COLORS.surface,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     paddingHorizontal: 14,
     color: COLORS.text,
+    fontSize: 14,
     fontWeight: "600",
   },
   switchRow: {
@@ -563,32 +568,35 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   sortChip: {
-    borderRadius: 999,
-    backgroundColor: COLORS.surface,
+    minHeight: 38,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
   sortChipActive: {
-    backgroundColor: COLORS.primary,
+    borderColor: COLORS.text,
+    backgroundColor: COLORS.text,
   },
   sortChipText: {
     color: COLORS.text,
-    fontWeight: "800",
     fontSize: 12,
+    fontWeight: "800",
   },
   sortChipTextActive: {
     color: "#ffffff",
   },
-  resetBtn: {
-    minHeight: 46,
-    borderRadius: 12,
-    backgroundColor: COLORS.primarySoft,
+  resetButton: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
   },
-  resetBtnText: {
-    color: COLORS.primary,
+  resetButtonText: {
+    color: COLORS.text,
+    fontSize: 13,
     fontWeight: "800",
-    fontSize: 14,
   },
 });

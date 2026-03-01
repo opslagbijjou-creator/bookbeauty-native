@@ -1,22 +1,61 @@
-import React, { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import CategoryChips from "../components/CategoryChips";
+import MarketplaceSalonCard from "../components/MarketplaceSalonCard";
 import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
+import SkeletonBlock from "../components/SkeletonBlock";
 import {
-  DEMO_MARKETPLACE_FEED,
+  DEFAULT_MARKETPLACE_CITY,
   DEMO_MARKETPLACE_SALONS,
+  MARKETPLACE_CATEGORIES,
+  MarketplaceSalon,
   buildHomeSeo,
-  getDefaultCityPath,
+  fetchMarketplaceListing,
 } from "../lib/marketplace";
 import { COLORS } from "../lib/ui";
 
+function buildDiscoverHref(query: string): string {
+  const clean = query.trim();
+  if (!clean) return "/discover";
+  return `/discover?query=${encodeURIComponent(clean)}`;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
-  const [installOpen, setInstallOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [popularSalons, setPopularSalons] = useState<MarketplaceSalon[]>([]);
+  const [loading, setLoading] = useState(true);
   const seo = buildHomeSeo();
+  const categoryLabels = useMemo(() => MARKETPLACE_CATEGORIES.slice(0, 6).map((item) => item.label), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    fetchMarketplaceListing({
+      citySlug: DEFAULT_MARKETPLACE_CITY.slug,
+      filters: { sort: "popular" },
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setPopularSalons(result.items.slice(0, 5));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPopularSalons(DEMO_MARKETPLACE_SALONS.slice(0, 5));
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <MarketplaceShell active="home">
@@ -28,381 +67,217 @@ export default function HomeScreen() {
       />
 
       <View style={styles.hero}>
-        <View style={styles.heroTextWrap}>
-          <Text style={styles.heroKicker}>Phase 1 marketplace</Text>
-          <Text style={styles.heroTitle}>Ontdek salons. Bekijk echte video&apos;s. Boek direct.</Text>
-          <Text style={styles.heroSubtitle}>
-            BookBeauty verbindt beauty professionals en klanten via video en een simpele boekervaring.
-          </Text>
+        <Text style={styles.eyebrow}>Marketplace voor beauty</Text>
+        <Text style={styles.title}>Vind een salon die past bij je stijl, prijs en moment.</Text>
+        <Text style={styles.subtitle}>
+          Zoek direct door salons, behandelingen en populaire beautycategorieen zonder eerst in te loggen.
+        </Text>
 
-          <View style={styles.heroCtas}>
-            <Pressable onPress={() => router.push(getDefaultCityPath() as never)} style={styles.primaryBtn}>
-              <Text style={styles.primaryBtnText}>Ontdek salons</Text>
-            </Pressable>
-            <Pressable onPress={() => router.push("/(auth)/register" as never)} style={styles.secondaryBtn}>
-              <Text style={styles.secondaryBtnText}>Meld je salon gratis aan</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.heroPreview}>
-          {DEMO_MARKETPLACE_FEED.slice(0, 3).map((item) => (
-            <View key={item.id} style={styles.previewCard}>
-              <Image source={{ uri: item.posterUrl }} style={styles.previewImage} contentFit="cover" transition={220} />
-              <View style={styles.previewOverlay}>
-                <Text style={styles.previewTitle}>{item.title}</Text>
-                <Text style={styles.previewCaption} numberOfLines={2}>
-                  {item.caption}
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.sectionGrid}>
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Hoe het werkt</Text>
-          {[
-            "1. Kies stad en categorie.",
-            "2. Bekijk echte video’s en salonprofielen.",
-            "3. Vergelijk diensten en vanaf-prijzen.",
-            "4. Verstuur direct een boekingsaanvraag als gast of met account.",
-          ].map((line) => (
-            <Text key={line} style={styles.stepText}>
-              {line}
-            </Text>
-          ))}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Voor salons</Text>
-          {[
-            "Kom direct live na registratie.",
-            "Toon je studio via video in de feed.",
-            "Krijg boekingsaanvragen zonder extra drempels.",
-            "Beheer bevestigen, afwijzen of tijd voorstellen vanuit je dashboard.",
-          ].map((line) => (
-            <Text key={line} style={styles.stepText}>
-              {line}
-            </Text>
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.infoRow}>
-        <View style={styles.infoCard}>
-          <Text style={styles.infoLabel}>Early access city</Text>
-          <Text style={styles.infoTitle}>Rotterdam is live als startstad</Text>
-          <Text style={styles.infoText}>
-            We openen de marketplace slim per stad. Rotterdam is het uitgangspunt voor launch, daarna volgen Amsterdam, Den Haag en Utrecht.
-          </Text>
-        </View>
-
-        <View style={styles.infoCard}>
-          <Text style={styles.infoLabel}>Install as app</Text>
-          <Text style={styles.infoTitle}>Gebruik BookBeauty als PWA</Text>
-          <Text style={styles.infoText}>
-            Voeg BookBeauty toe aan je beginscherm voor sneller openen, een app-achtige ervaring en direct terugkeren naar de feed.
-          </Text>
-          <Pressable onPress={() => setInstallOpen(true)} style={styles.inlineBtn}>
-            <Text style={styles.inlineBtnText}>Bekijk installatie-instructies</Text>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={20} color={COLORS.muted} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Zoek op salon, behandeling of stad"
+            placeholderTextColor={COLORS.placeholder}
+            style={styles.searchInput}
+          />
+          <Pressable
+            onPress={() => router.push(buildDiscoverHref(query) as never)}
+            style={({ pressed }) => [styles.searchAction, pressed && styles.buttonPressed]}
+          >
+            <Text style={styles.searchActionText}>Zoeken</Text>
           </Pressable>
         </View>
+
+        <CategoryChips
+          items={categoryLabels}
+          onChange={(label) => {
+            const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
+            if (!category) return;
+            router.push(`/salons/${DEFAULT_MARKETPLACE_CITY.slug}/${category.slug}` as never);
+          }}
+        />
       </View>
 
-      <View style={styles.showcaseSection}>
-        <Text style={styles.sectionTitle}>Marketplace preview</Text>
-        <View style={styles.showcaseGrid}>
-          {DEMO_MARKETPLACE_SALONS.slice(0, 3).map((salon) => (
-            <Pressable
-              key={salon.slug}
-              onPress={() => router.push(`/salon/${salon.slug}` as never)}
-              style={({ pressed }) => [styles.showcaseCard, pressed && styles.showcaseCardPressed]}
-            >
-              <Image source={{ uri: salon.coverImageUrl }} style={styles.showcaseImage} contentFit="cover" transition={220} />
-              <View style={styles.showcaseBody}>
-                <Text style={styles.showcaseName}>{salon.name}</Text>
-                <Text style={styles.showcaseMeta}>
-                  {salon.city} • {salon.categoryLabel}
-                </Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Populaire salons</Text>
+        <Pressable onPress={() => router.push("/discover" as never)} style={styles.inlineLink}>
+          <Text style={styles.inlineLinkText}>Bekijk alles</Text>
+          <Ionicons name="chevron-forward" size={14} color={COLORS.text} />
+        </Pressable>
+      </View>
+
+      <View style={styles.listWrap}>
+        {loading
+          ? Array.from({ length: 4 }).map((_, index) => (
+              <View key={index} style={styles.skeletonRow}>
+                <SkeletonBlock height={118} width={118} radius={0} />
+                <View style={styles.skeletonInfo}>
+                  <SkeletonBlock height={20} width="68%" radius={6} />
+                  <SkeletonBlock height={16} width="42%" radius={6} />
+                  <SkeletonBlock height={16} width="90%" radius={6} />
+                  <SkeletonBlock height={16} width="70%" radius={6} />
+                </View>
               </View>
-            </Pressable>
-          ))}
-        </View>
+            ))
+          : popularSalons.map((salon) => (
+              <MarketplaceSalonCard
+                key={salon.slug}
+                salon={salon}
+                onPress={() => router.push(`/salon/${salon.slug}` as never)}
+              />
+            ))}
       </View>
 
-      <Modal visible={installOpen} transparent animationType="fade" onRequestClose={() => setInstallOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Installeer BookBeauty als app</Text>
-              <Pressable onPress={() => setInstallOpen(false)} style={styles.modalClose}>
-                <Ionicons name="close" size={18} color={COLORS.text} />
-              </Pressable>
-            </View>
-            <Text style={styles.modalText}>iPhone / iPad: tik op Deel en kies &quot;Zet op beginscherm&quot;.</Text>
-            <Text style={styles.modalText}>
-              Android: open het browsermenu en kies &quot;App installeren&quot; of &quot;Toevoegen aan startscherm&quot;.
-            </Text>
-            <Text style={styles.modalText}>
-              Desktop: gebruik de install-knop in de adresbalk wanneer je browser die toont.
-            </Text>
-          </View>
-        </View>
-      </Modal>
+      <View style={styles.bottomStrip}>
+        <Text style={styles.bottomStripTitle}>Voor salons</Text>
+        <Text style={styles.bottomStripText}>
+          Sluit aan, ga direct live in de marketplace en ontvang boekingsaanvragen zonder loginmuur voor klanten.
+        </Text>
+        <Pressable
+          onPress={() => router.push("/(auth)/register" as never)}
+          style={({ pressed }) => [styles.secondaryAction, pressed && styles.buttonPressed]}
+        >
+          <Text style={styles.secondaryActionText}>Meld je salon gratis aan</Text>
+        </Pressable>
+      </View>
     </MarketplaceShell>
   );
 }
 
 const styles = StyleSheet.create({
   hero: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 18,
-    padding: 24,
-    borderRadius: 28,
-    backgroundColor: COLORS.card,
-    shadowColor: "#102544",
-    shadowOpacity: 0.05,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
+    paddingTop: 8,
   },
-  heroTextWrap: {
-    flex: 1,
-    minWidth: 280,
-    gap: 12,
-  },
-  heroKicker: {
+  eyebrow: {
     color: COLORS.primary,
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
-  heroTitle: {
+  title: {
+    marginTop: 8,
     color: COLORS.text,
-    fontSize: 40,
-    lineHeight: 46,
-    fontWeight: "800",
-    maxWidth: 640,
+    fontSize: 42,
+    lineHeight: 48,
+    fontWeight: "900",
+    letterSpacing: -1,
+    maxWidth: 760,
   },
-  heroSubtitle: {
+  subtitle: {
+    marginTop: 10,
     color: COLORS.muted,
     fontSize: 16,
     lineHeight: 24,
-    maxWidth: 620,
+    maxWidth: 720,
   },
-  heroCtas: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginTop: 6,
-  },
-  primaryBtn: {
-    minHeight: 48,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryBtnText: {
-    color: "#ffffff",
-    fontWeight: "800",
-    fontSize: 14,
-  },
-  secondaryBtn: {
-    minHeight: 48,
-    borderRadius: 12,
-    backgroundColor: COLORS.primarySoft,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryBtnText: {
-    color: COLORS.primary,
-    fontWeight: "800",
-    fontSize: 14,
-  },
-  heroPreview: {
-    flex: 1,
-    minWidth: 280,
-    gap: 12,
-  },
-  previewCard: {
-    height: 138,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: COLORS.surface,
-  },
-  previewImage: {
+  searchBar: {
+    marginTop: 22,
+    minHeight: 62,
     width: "100%",
-    height: "100%",
-  },
-  previewOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 14,
-    gap: 4,
-    backgroundColor: "rgba(12,20,31,0.36)",
-  },
-  previewTitle: {
-    color: "#ffffff",
-    fontWeight: "800",
-    fontSize: 15,
-  },
-  previewCaption: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  sectionGrid: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: "#ffffff",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 16,
-    marginTop: 18,
-  },
-  sectionCard: {
-    flex: 1,
-    minWidth: 280,
-    padding: 22,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
+    alignItems: "center",
     gap: 12,
+    paddingHorizontal: 16,
   },
-  sectionTitle: {
-    color: COLORS.text,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  stepText: {
-    color: COLORS.muted,
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  infoRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 16,
-    marginTop: 18,
-  },
-  infoCard: {
+  searchInput: {
     flex: 1,
-    minWidth: 280,
-    padding: 22,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    gap: 8,
-  },
-  infoLabel: {
-    color: COLORS.primary,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  infoTitle: {
     color: COLORS.text,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: "800",
+    fontSize: 16,
+    fontWeight: "600",
   },
-  infoText: {
-    color: COLORS.muted,
-    lineHeight: 22,
-  },
-  inlineBtn: {
-    alignSelf: "flex-start",
+  searchAction: {
     minHeight: 42,
-    borderRadius: 12,
-    backgroundColor: COLORS.primarySoft,
-    paddingHorizontal: 14,
+    paddingHorizontal: 18,
+    backgroundColor: COLORS.primary,
+    alignItems: "center",
     justifyContent: "center",
   },
-  inlineBtnText: {
-    color: COLORS.primary,
-    fontWeight: "800",
+  searchActionText: {
+    color: "#ffffff",
     fontSize: 13,
-  },
-  showcaseSection: {
-    marginTop: 18,
-    gap: 14,
-  },
-  showcaseGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 16,
-  },
-  showcaseCard: {
-    flex: 1,
-    minWidth: 240,
-    borderRadius: 20,
-    overflow: "hidden",
-    backgroundColor: COLORS.card,
-  },
-  showcaseCardPressed: {
-    transform: [{ scale: 0.98 }],
-  },
-  showcaseImage: {
-    width: "100%",
-    height: 180,
-    backgroundColor: COLORS.surface,
-  },
-  showcaseBody: {
-    padding: 16,
-    gap: 4,
-  },
-  showcaseName: {
-    color: COLORS.text,
     fontWeight: "800",
-    fontSize: 18,
   },
-  showcaseMeta: {
-    color: COLORS.muted,
-    fontWeight: "700",
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(12,20,31,0.44)",
-    justifyContent: "center",
-    padding: 16,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 520,
-    alignSelf: "center",
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    padding: 20,
-    gap: 14,
-  },
-  modalHeader: {
+  sectionHeader: {
+    marginTop: 30,
+    paddingTop: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
-  modalTitle: {
+  sectionTitle: {
     color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 22,
-    flex: 1,
+    fontSize: 28,
+    fontWeight: "900",
+    letterSpacing: -0.6,
   },
-  modalClose: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: COLORS.surface,
+  inlineLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  inlineLinkText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  listWrap: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  skeletonRow: {
+    flexDirection: "row",
+    gap: 14,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  skeletonInfo: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  bottomStrip: {
+    marginTop: 32,
+    paddingTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    gap: 8,
+  },
+  bottomStripTitle: {
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: -0.4,
+  },
+  bottomStripText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: 720,
+  },
+  secondaryAction: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    minHeight: 46,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
   },
-  modalText: {
-    color: COLORS.muted,
-    lineHeight: 22,
-    fontSize: 14,
+  secondaryActionText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  buttonPressed: {
+    transform: [{ scale: 0.98 }],
   },
 });
-

@@ -8,7 +8,7 @@ export default function DiscoverScreen() {
   const seo = buildDiscoverSeo();
 
   return (
-    <MarketplaceShell active="discover">
+    <MarketplaceShell active="discover" scroll={false}>
       <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
       <MarketplaceListingScreen
         mode="discover"
@@ -19,4 +19,3 @@ export default function DiscoverScreen() {
     </MarketplaceShell>
   );
 }
-

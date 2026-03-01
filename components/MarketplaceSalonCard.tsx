@@ -12,59 +12,39 @@ type MarketplaceSalonCardProps = {
 
 export default function MarketplaceSalonCard({ salon, onPress }: MarketplaceSalonCardProps) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
       <Image
         source={{ uri: salon.coverImageUrl }}
-        style={styles.cover}
+        style={styles.image}
         contentFit="cover"
-        transition={220}
+        transition={200}
         cachePolicy="memory-disk"
       />
 
-      <View style={styles.body}>
-        <View style={styles.rowTop}>
-          <View style={styles.titleWrap}>
-            <Text style={styles.name} numberOfLines={1}>
-              {salon.name}
-            </Text>
-            <Text style={styles.metaText} numberOfLines={1}>
-              {salon.categoryLabel} • {salon.city}
-            </Text>
-          </View>
-
-          <View style={styles.ratingPill}>
-            <Ionicons name="star" size={12} color="#ffffff" />
+      <View style={styles.info}>
+        <View style={styles.topLine}>
+          <Text style={styles.name} numberOfLines={1}>
+            {salon.name}
+          </Text>
+          <View style={styles.ratingWrap}>
+            <Ionicons name="star" size={12} color={COLORS.primary} />
             <Text style={styles.ratingText}>{salon.rating.toFixed(1)}</Text>
           </View>
         </View>
 
+        <Text style={styles.meta} numberOfLines={1}>
+          {salon.categoryLabel} in {salon.city}
+        </Text>
         <Text style={styles.bio} numberOfLines={2}>
           {salon.bio}
         </Text>
 
-        <View style={styles.metaRow}>
-          <View style={styles.infoPill}>
-            <Ionicons name="pricetag-outline" size={14} color={COLORS.primary} />
-            <Text style={styles.infoText}>Vanaf {formatCurrency(salon.minPrice)}</Text>
-          </View>
-          <View style={styles.infoPill}>
-            <Ionicons name="chatbubble-ellipses-outline" size={14} color={COLORS.primary} />
-            <Text style={styles.infoText}>{salon.reviewCount} reviews</Text>
-          </View>
-        </View>
-
-        <View style={styles.footer}>
-          <View style={styles.tagsRow}>
-            {salon.tags.slice(0, 2).map((tag) => (
-              <View key={tag} style={styles.tag}>
-                <Text style={styles.tagText}>{tag}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.cta}>
+        <View style={styles.bottomLine}>
+          <Text style={styles.price}>Vanaf {formatCurrency(salon.minPrice)}</Text>
+          <Text style={styles.reviews}>{salon.reviewCount} reviews</Text>
+          <View style={styles.ctaInline}>
             <Text style={styles.ctaText}>Bekijk salon</Text>
-            <Ionicons name="arrow-forward" size={14} color="#ffffff" />
+            <Ionicons name="chevron-forward" size={14} color={COLORS.text} />
           </View>
         </View>
       </View>
@@ -73,122 +53,87 @@ export default function MarketplaceSalonCard({ salon, onPress }: MarketplaceSalo
 }
 
 const styles = StyleSheet.create({
-  card: {
-    flex: 1,
-    minWidth: 280,
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#102544",
-    shadowOpacity: 0.07,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
+  row: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 14,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  cardPressed: {
-    transform: [{ scale: 0.98 }],
+  rowPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.99 }],
   },
-  cover: {
-    width: "100%",
-    height: 220,
+  image: {
+    width: 118,
+    height: 118,
     backgroundColor: COLORS.surface,
   },
-  body: {
-    padding: 16,
-    gap: 12,
+  info: {
+    flex: 1,
+    justifyContent: "space-between",
+    gap: 6,
   },
-  rowTop: {
+  topLine: {
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
-  titleWrap: {
+  name: {
     flex: 1,
+    color: COLORS.text,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "900",
+    letterSpacing: -0.3,
+  },
+  ratingWrap: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
-  name: {
+  ratingText: {
     color: COLORS.text,
-    fontSize: 20,
+    fontSize: 13,
     fontWeight: "800",
   },
-  metaText: {
+  meta: {
     color: COLORS.muted,
     fontSize: 13,
     fontWeight: "700",
   },
-  ratingPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    height: 28,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    backgroundColor: COLORS.primary,
-  },
-  ratingText: {
-    color: "#ffffff",
-    fontWeight: "800",
-    fontSize: 12,
-  },
   bio: {
     color: COLORS.muted,
-    lineHeight: 20,
-    fontSize: 14,
+    fontSize: 13,
+    lineHeight: 19,
   },
-  metaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  infoPill: {
+  bottomLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderRadius: 999,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    flexWrap: "wrap",
+    gap: 10,
   },
-  infoText: {
+  price: {
     color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  reviews: {
+    color: COLORS.muted,
     fontSize: 12,
     fontWeight: "700",
   },
-  footer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  tagsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tag: {
-    borderRadius: 999,
-    backgroundColor: COLORS.primarySoft,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  tagText: {
-    color: COLORS.primary,
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  cta: {
+  ctaInline: {
+    marginLeft: "auto",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: 2,
   },
   ctaText: {
-    color: "#ffffff",
+    color: COLORS.text,
     fontSize: 12,
     fontWeight: "800",
   },
 });
-

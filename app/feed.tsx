@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
-import SkeletonBlock from "../components/SkeletonBlock";
 import {
   MarketplaceFeedItem,
   buildFeedSeo,
@@ -14,9 +14,11 @@ import { COLORS } from "../lib/ui";
 
 export default function PublicFeedScreen() {
   const router = useRouter();
+  const { height } = useWindowDimensions();
   const seo = buildFeedSeo();
   const [items, setItems] = useState<MarketplaceFeedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const slideHeight = Math.max(560, height - 78);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,136 +44,118 @@ export default function PublicFeedScreen() {
   }, []);
 
   return (
-    <MarketplaceShell active="feed">
+    <MarketplaceShell active="feed" scroll={false} fullBleed>
       <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
 
-      <View style={styles.header}>
-        <Text style={styles.kicker}>Public feed</Text>
-        <Text style={styles.title}>Beauty discovery in motion</Text>
-        <Text style={styles.subtitle}>
-          Scroll door een TikTok-lite feed, maar met rust, duidelijke context en directe routes naar salonprofielen.
-        </Text>
-      </View>
+      <View style={styles.screen}>
+        <ScrollView
+          style={styles.flex}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          decelerationRate="fast"
+        >
+          {loading
+            ? Array.from({ length: 4 }).map((_, index) => (
+                <View key={index} style={[styles.slide, { height: slideHeight, backgroundColor: COLORS.surface }]} />
+              ))
+            : items.map((item) => (
+                <View key={item.id} style={[styles.slide, { height: slideHeight }]}>
+                  <Image source={{ uri: item.posterUrl }} style={styles.media} contentFit="cover" transition={220} />
+                  <LinearGradient
+                    colors={["rgba(10,16,24,0.04)", "rgba(10,16,24,0.72)"]}
+                    style={StyleSheet.absoluteFillObject}
+                  />
 
-      <View style={styles.stack}>
-        {loading
-          ? Array.from({ length: 4 }).map((_, index) => (
-              <View key={index} style={styles.skeletonCard}>
-                <SkeletonBlock height={360} />
-                <SkeletonBlock height={24} width="70%" radius={10} />
-                <SkeletonBlock height={18} width="92%" radius={10} />
-                <SkeletonBlock height={18} width="60%" radius={10} />
-              </View>
-            ))
-          : items.map((item) => (
-              <View key={item.id} style={styles.feedCard}>
-                <Image source={{ uri: item.posterUrl }} style={styles.poster} contentFit="cover" transition={220} />
-                <View style={styles.feedBody}>
-                  <Text style={styles.feedLabel}>{item.categoryLabel}</Text>
-                  <Text style={styles.feedTitle}>{item.title}</Text>
-                  <Text style={styles.feedCaption}>{item.caption}</Text>
+                  <View style={styles.overlay}>
+                    <View style={styles.copyWrap}>
+                      <Text style={styles.categoryLabel}>{item.categoryLabel}</Text>
+                      <Text style={styles.salonName}>{item.companyName}</Text>
+                      <Text style={styles.title}>{item.title}</Text>
+                      <Text style={styles.caption}>{item.caption}</Text>
+                    </View>
 
-                  <Pressable
-                    onPress={() => router.push(`/salon/${item.companySlug}` as never)}
-                    style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
-                  >
-                    <Text style={styles.ctaText}>Bekijk bijbehorende salon</Text>
-                  </Pressable>
+                    <Pressable
+                      onPress={() => router.push(`/salon/${item.companySlug}` as never)}
+                      style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
+                    >
+                      <Text style={styles.ctaText}>Bekijk salon</Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            ))}
+              ))}
+        </ScrollView>
       </View>
     </MarketplaceShell>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    padding: 24,
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    gap: 8,
+  screen: {
+    flex: 1,
+    backgroundColor: "#0b1018",
   },
-  kicker: {
-    color: COLORS.primary,
+  flex: {
+    flex: 1,
+  },
+  slide: {
+    width: "100%",
+    justifyContent: "flex-end",
+    backgroundColor: "#0b1018",
+  },
+  media: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#0b1018",
+  },
+  overlay: {
+    paddingHorizontal: 18,
+    paddingBottom: 26,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+  copyWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  categoryLabel: {
+    color: "rgba(255,255,255,0.84)",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
   title: {
-    color: COLORS.text,
-    fontSize: 32,
-    fontWeight: "800",
+    color: "#ffffff",
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "900",
+    letterSpacing: -0.6,
   },
-  subtitle: {
-    color: COLORS.muted,
-    lineHeight: 22,
+  salonName: {
+    color: "#ffffff",
     fontSize: 15,
-    maxWidth: 720,
-  },
-  stack: {
-    marginTop: 18,
-    gap: 18,
-  },
-  skeletonCard: {
-    borderRadius: 24,
-    backgroundColor: COLORS.card,
-    padding: 18,
-    gap: 12,
-  },
-  feedCard: {
-    borderRadius: 24,
-    overflow: "hidden",
-    backgroundColor: COLORS.card,
-    shadowColor: "#102544",
-    shadowOpacity: 0.05,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
-  },
-  poster: {
-    width: "100%",
-    height: 420,
-    backgroundColor: COLORS.surface,
-  },
-  feedBody: {
-    padding: 18,
-    gap: 8,
-  },
-  feedLabel: {
-    color: COLORS.primary,
     fontWeight: "800",
-    fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
   },
-  feedTitle: {
-    color: COLORS.text,
-    fontWeight: "800",
-    fontSize: 24,
-    lineHeight: 30,
-  },
-  feedCaption: {
-    color: COLORS.muted,
-    lineHeight: 22,
+  caption: {
+    color: "rgba(255,255,255,0.88)",
     fontSize: 14,
+    lineHeight: 21,
+    maxWidth: 560,
   },
   cta: {
-    marginTop: 4,
-    alignSelf: "flex-start",
-    minHeight: 44,
-    borderRadius: 12,
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
+    minHeight: 50,
+    paddingHorizontal: 18,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
     justifyContent: "center",
   },
   ctaPressed: {
     transform: [{ scale: 0.98 }],
   },
   ctaText: {
-    color: "#ffffff",
-    fontWeight: "800",
+    color: COLORS.text,
     fontSize: 13,
+    fontWeight: "900",
   },
 });
-

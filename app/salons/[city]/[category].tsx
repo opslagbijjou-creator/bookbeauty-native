@@ -23,7 +23,7 @@ export default function CityCategoryListingScreen() {
   const seo = buildListingSeo({ citySlug, categorySlug });
 
   return (
-    <MarketplaceShell active="discover">
+    <MarketplaceShell active="discover" scroll={false}>
       <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
       <MarketplaceListingScreen
         mode="listing"

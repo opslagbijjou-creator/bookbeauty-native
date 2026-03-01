@@ -72,27 +72,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   chip: {
-    minHeight: 34,
+    minHeight: 38,
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-    borderRadius: 999,
+    backgroundColor: "#ffffff",
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 8,
   },
   chipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: COLORS.text,
+    borderColor: COLORS.text,
   },
   icon: {
     marginRight: 6,
   },
   text: {
     color: COLORS.text,
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: 12,
   },
   textActive: {
