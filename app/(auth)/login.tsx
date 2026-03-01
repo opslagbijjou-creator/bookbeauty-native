@@ -6,11 +6,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Container from "../../components/ui/Container";
 import Button from "../../components/ui/Button";
 import Card from "../../components/ui/Card";
 import Input from "../../components/ui/Input";
@@ -28,6 +30,8 @@ function getEmailError(email: string) {
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const desktop = width >= 768;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,10 +51,8 @@ export default function LoginScreen() {
       await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
       const role = await getUserRole(user.uid);
 
-      if (role === "company") {
-        router.replace("/(company)/(tabs)/home" as never);
-      } else if (role === "employee") {
-        router.replace("/(company)/(tabs)/bookings" as never);
+      if (role === "company" || role === "employee") {
+        router.replace("/account" as never);
       } else if (role === "admin") {
         router.replace("/(admin)/(tabs)/index" as never);
       } else {
@@ -72,48 +74,62 @@ export default function LoginScreen() {
         keyboardVerticalOffset={24}
       >
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.brand}>
-            <Image source={require("../../assets/logo/logo.png")} style={styles.logo} contentFit="contain" />
-          </View>
-
-          <Card style={styles.card}>
-            <Text style={styles.eyebrow}>Inloggen</Text>
-            <Text style={styles.title}>Open je account zonder de marketplace te verlaten.</Text>
-            <Text style={styles.subtitle}>
-              Je hebt alleen een account nodig voor boeken, opslaan, volgen en je eigen dashboard.
-            </Text>
-
-            {errorText ? <Toast message={errorText} tone="danger" /> : null}
-
-            <Input
-              label="E-mail"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="naam@voorbeeld.nl"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              helperText={!getEmailError(email) ? "Gebruik het e-mailadres van je account." : getEmailError(email)}
-            />
-            <Input
-              label="Wachtwoord"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Minimaal 6 tekens"
-              secureTextEntry
-            />
-
-            <View style={styles.row}>
-              <Button label="Terug" variant="secondary" onPress={() => router.back()} style={styles.button} />
-              <Button
-                label={loading ? "Bezig..." : "Inloggen"}
-                onPress={() => onLogin().catch(() => null)}
-                disabled={!canSubmit || loading}
-                style={styles.button}
+          <Container mobilePadding={16} desktopPadding={24} desktopMaxWidth={620}>
+            <View style={styles.brand}>
+              <Image
+                source={require("../../assets/logo/logo.png")}
+                style={[styles.logo, desktop && styles.logoDesktop]}
+                contentFit="contain"
               />
             </View>
 
-            <Button label="Nog geen account? Maak er een" variant="secondary" onPress={() => router.replace("/(auth)/register" as never)} />
-          </Card>
+            <View style={styles.header}>
+              <Text style={styles.eyebrow}>BookBeauty account</Text>
+              <Text style={[styles.title, !desktop && styles.titleMobile]}>
+                Log in zonder uit de marketplace te vallen.
+              </Text>
+              <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
+                Alleen nodig voor boeken, opslaan, volgen en updates. Browsen blijft openbaar.
+              </Text>
+            </View>
+
+            <Card style={styles.card}>
+              {errorText ? <Toast message={errorText} tone="danger" /> : null}
+
+              <Input
+                label="E-mail"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="naam@voorbeeld.nl"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                helperText={!getEmailError(email) ? "Gebruik het e-mailadres van je account." : getEmailError(email)}
+              />
+              <Input
+                label="Wachtwoord"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Minimaal 6 tekens"
+                secureTextEntry
+              />
+
+              <View style={[styles.row, !desktop && styles.rowStack]}>
+                <Button label="Terug" variant="secondary" onPress={() => router.back()} style={styles.button} />
+                <Button
+                  label={loading ? "Bezig..." : "Inloggen"}
+                  onPress={() => onLogin().catch(() => null)}
+                  disabled={!canSubmit || loading}
+                  style={styles.button}
+                />
+              </View>
+
+              <Button
+                label="Nog geen account? Maak er een"
+                variant="secondary"
+                onPress={() => router.replace("/(auth)/register" as never)}
+              />
+            </Card>
+          </Container>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -128,15 +144,23 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     justifyContent: "center",
-    padding: 18,
-    gap: 18,
+    paddingVertical: 18,
   },
   brand: {
     alignItems: "center",
+    marginBottom: 16,
   },
   logo: {
-    width: 170,
-    height: 44,
+    width: 220,
+    height: 56,
+  },
+  logoDesktop: {
+    width: 250,
+    height: 62,
+  },
+  header: {
+    gap: 8,
+    marginBottom: 14,
   },
   card: {
     gap: 14,
@@ -155,14 +179,26 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -0.6,
   },
+  titleMobile: {
+    fontSize: 24,
+    lineHeight: 28,
+    letterSpacing: -0.4,
+  },
   subtitle: {
     color: COLORS.muted,
     fontSize: 14,
     lineHeight: 22,
   },
+  subtitleMobile: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
   row: {
     flexDirection: "row",
     gap: 10,
+  },
+  rowStack: {
+    flexDirection: "column",
   },
   button: {
     flex: 1,

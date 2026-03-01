@@ -304,17 +304,17 @@ export default function MarketplaceListingScreen({
           scrollYRef.current = event.nativeEvent.contentOffset.y;
         }}
       >
-        <Text style={styles.pageTitle}>{title}</Text>
-        <Text style={styles.pageSubtitle}>{subtitle}</Text>
+        <Text style={[styles.pageTitle, !desktop && styles.pageTitleMobile]}>{title}</Text>
+        <Text style={[styles.pageSubtitle, !desktop && styles.pageSubtitleMobile]}>{subtitle}</Text>
 
-        <View style={styles.searchBar}>
+        <View style={[styles.searchBar, !desktop && styles.searchBarMobile]}>
           <Ionicons name="search" size={18} color={COLORS.muted} />
           <TextInput
             value={draftQuery}
             onChangeText={setDraftQuery}
             placeholder="Zoek op salon, stad of behandeling"
             placeholderTextColor={COLORS.placeholder}
-            style={styles.searchInput}
+            style={[styles.searchInput, !desktop && styles.searchInputMobile]}
           />
         </View>
 
@@ -334,8 +334,10 @@ export default function MarketplaceListingScreen({
           </Text>
         ) : null}
 
-        <View style={styles.resultsHeader}>
-          <Text style={styles.resultsTitle}>{loading ? "Salons laden" : `${items.length} salons`}</Text>
+        <View style={[styles.resultsHeader, !desktop && styles.resultsHeaderMobile]}>
+          <Text style={[styles.resultsTitle, !desktop && styles.resultsTitleMobile]}>
+            {loading ? "Salons laden" : `${items.length} salons`}
+          </Text>
           <Text style={styles.resultsMeta}>
             {filters.priceMax ? `Tot ${formatCurrency(filters.priceMax)} • ` : ""}
             {filters.openNow ? "Nu open • " : ""}
@@ -576,12 +578,23 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -1,
   },
+  pageTitleMobile: {
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: -0.6,
+  },
   pageSubtitle: {
     marginTop: 10,
     color: COLORS.muted,
     fontSize: 16,
     lineHeight: 25,
     maxWidth: 760,
+  },
+  pageSubtitleMobile: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: undefined,
   },
   searchBar: {
     marginTop: 24,
@@ -600,11 +613,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 2,
   },
+  searchBarMobile: {
+    marginTop: 18,
+    minHeight: 56,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+  },
   searchInput: {
     flex: 1,
     color: COLORS.text,
     fontSize: 15,
     fontWeight: "700",
+  },
+  searchInputMobile: {
+    fontSize: 14,
   },
   toolbarBlock: {
     marginTop: 22,
@@ -631,11 +653,20 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 12,
   },
+  resultsHeaderMobile: {
+    marginTop: 22,
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+  },
   resultsTitle: {
     color: COLORS.text,
     fontSize: 28,
     fontWeight: "900",
     letterSpacing: -0.7,
+  },
+  resultsTitleMobile: {
+    fontSize: 24,
+    letterSpacing: -0.4,
   },
   resultsMeta: {
     color: COLORS.muted,
@@ -722,11 +753,11 @@ const styles = StyleSheet.create({
   },
   floatingFilter: {
     position: "absolute",
-    right: 8,
-    bottom: 10,
-    minHeight: 56,
-    paddingHorizontal: 20,
-    borderRadius: 28,
+    right: 12,
+    bottom: 18,
+    minHeight: 50,
+    paddingHorizontal: 18,
+    borderRadius: 25,
     backgroundColor: COLORS.primary,
     flexDirection: "row",
     alignItems: "center",
@@ -743,7 +774,7 @@ const styles = StyleSheet.create({
   },
   floatingFilterText: {
     color: "#ffffff",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
   modalBackdrop: {

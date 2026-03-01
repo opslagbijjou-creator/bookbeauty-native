@@ -71,36 +71,59 @@ export default function HomeScreen() {
       <View style={[styles.heroShell, desktop && styles.heroShellDesktop]}>
         <View style={[styles.hero, desktop && styles.heroDesktop]}>
           <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
-          <Text style={[styles.title, desktop && styles.titleDesktop]}>
+          <Text style={[styles.title, desktop ? styles.titleDesktop : styles.titleMobile]}>
             Ontdek salons die goed voelen voordat je boekt.
           </Text>
-          <Text style={styles.subtitle}>
+          <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
             Scroll door echte media, vergelijk prijzen en vind in seconden een salon die past bij jouw stijl,
             budget en stad.
           </Text>
 
-          <View style={[styles.searchBar, desktop && styles.searchBarDesktop]}>
-            <Ionicons name="search" size={20} color={COLORS.muted} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Zoek op salon, behandeling of stad"
-              placeholderTextColor={COLORS.placeholder}
-              style={styles.searchInput}
-              returnKeyType="search"
-              onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
-            />
-            <Pressable
-              onPress={() => router.push(buildDiscoverHref(query) as never)}
-              style={({ pressed }) => [styles.searchAction, pressed && styles.buttonPressed]}
-            >
-              <Text style={styles.searchActionText}>Ontdek</Text>
-            </Pressable>
-          </View>
+          {desktop ? (
+            <View style={[styles.searchBar, styles.searchBarDesktop]}>
+              <Ionicons name="search" size={20} color={COLORS.muted} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Zoek op salon, behandeling of stad"
+                placeholderTextColor={COLORS.placeholder}
+                style={styles.searchInput}
+                returnKeyType="search"
+                onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
+              />
+              <Pressable
+                onPress={() => router.push(buildDiscoverHref(query) as never)}
+                style={({ pressed }) => [styles.searchAction, pressed && styles.buttonPressed]}
+              >
+                <Text style={styles.searchActionText}>Ontdek</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.searchStack}>
+              <View style={styles.searchField}>
+                <Ionicons name="search" size={20} color={COLORS.muted} />
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Zoek op salon, behandeling of stad"
+                  placeholderTextColor={COLORS.placeholder}
+                  style={styles.searchInput}
+                  returnKeyType="search"
+                  onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
+                />
+              </View>
+              <Pressable
+                onPress={() => router.push(buildDiscoverHref(query) as never)}
+                style={({ pressed }) => [styles.searchAction, styles.searchActionMobile, pressed && styles.buttonPressed]}
+              >
+                <Text style={styles.searchActionText}>Ontdek salons</Text>
+              </Pressable>
+            </View>
+          )}
 
           <CategoryChips
             items={categoryLabels}
-            style={styles.chipsRow}
+            style={[styles.chipsRow, !desktop && styles.chipsRowMobile]}
             onChange={(label) => {
               const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
               if (!category) return;
@@ -108,20 +131,39 @@ export default function HomeScreen() {
             }}
           />
 
-          <View style={styles.metricsRow}>
-            <View style={styles.metric}>
-              <Text style={styles.metricValue}>Publiek</Text>
-              <Text style={styles.metricLabel}>Vrij browsen zonder account</Text>
+          {desktop ? (
+            <View style={styles.metricsRow}>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>Publiek</Text>
+                <Text style={styles.metricLabel}>Vrij browsen zonder account</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>Video-first</Text>
+                <Text style={styles.metricLabel}>Zie sfeer en resultaat direct</Text>
+              </View>
+              <View style={styles.metric}>
+                <Text style={styles.metricValue}>Guest booking</Text>
+                <Text style={styles.metricLabel}>Boek met alleen e-mail</Text>
+              </View>
             </View>
-            <View style={styles.metric}>
-              <Text style={styles.metricValue}>Video-first</Text>
-              <Text style={styles.metricLabel}>Zie sfeer en resultaat direct</Text>
+          ) : (
+            <View style={styles.metricsPanel}>
+              <View style={styles.metricRowCompact}>
+                <Text style={styles.metricValueCompact}>Publiek</Text>
+                <Text style={styles.metricLabelCompact}>Vrij browsen zonder account</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricRowCompact}>
+                <Text style={styles.metricValueCompact}>Video-first</Text>
+                <Text style={styles.metricLabelCompact}>Zie sfeer en resultaat direct</Text>
+              </View>
+              <View style={styles.metricDivider} />
+              <View style={styles.metricRowCompact}>
+                <Text style={styles.metricValueCompact}>Guest booking</Text>
+                <Text style={styles.metricLabelCompact}>Boek met alleen e-mail</Text>
+              </View>
             </View>
-            <View style={styles.metric}>
-              <Text style={styles.metricValue}>Guest booking</Text>
-              <Text style={styles.metricLabel}>Boek met alleen e-mail</Text>
-            </View>
-          </View>
+          )}
         </View>
 
         {desktop ? (
@@ -148,13 +190,18 @@ export default function HomeScreen() {
         ) : null}
       </View>
 
-      <View style={styles.sectionHeader}>
+      <View style={[styles.sectionHeader, !desktop && styles.sectionHeaderMobile]}>
         <View style={styles.sectionCopy}>
           <Text style={styles.sectionEyebrow}>Populaire salons</Text>
-          <Text style={styles.sectionTitle}>Top keuzes die nu veel bekeken worden</Text>
+          <Text style={[styles.sectionTitle, !desktop && styles.sectionTitleMobile]}>
+            Top keuzes die nu veel bekeken worden
+          </Text>
         </View>
 
-        <Pressable onPress={() => router.push("/discover" as never)} style={styles.inlineLink}>
+        <Pressable
+          onPress={() => router.push("/discover" as never)}
+          style={[styles.inlineLink, !desktop && styles.inlineLinkMobile]}
+        >
           <Text style={styles.inlineLinkText}>Bekijk alles</Text>
           <Ionicons name="arrow-forward" size={15} color={COLORS.primary} />
         </Pressable>
@@ -250,12 +297,24 @@ const styles = StyleSheet.create({
     lineHeight: 62,
     maxWidth: 760,
   },
+  titleMobile: {
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -0.8,
+    maxWidth: undefined,
+  },
   subtitle: {
     marginTop: 12,
     color: COLORS.muted,
     fontSize: 17,
     lineHeight: 27,
     maxWidth: 760,
+  },
+  subtitleMobile: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: undefined,
   },
   searchBar: {
     marginTop: 28,
@@ -278,6 +337,21 @@ const styles = StyleSheet.create({
   searchBarDesktop: {
     maxWidth: 760,
   },
+  searchStack: {
+    marginTop: 22,
+    gap: 10,
+  },
+  searchField: {
+    minHeight: 56,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 20,
+    backgroundColor: "#ffffff",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+  },
   searchInput: {
     flex: 1,
     color: COLORS.text,
@@ -292,6 +366,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  searchActionMobile: {
+    width: "100%",
+    minHeight: 52,
+    borderRadius: 18,
+  },
   searchActionText: {
     color: "#ffffff",
     fontSize: 13,
@@ -301,11 +380,41 @@ const styles = StyleSheet.create({
     marginTop: 14,
     paddingBottom: 2,
   },
+  chipsRowMobile: {
+    marginTop: 10,
+  },
   metricsRow: {
     marginTop: 26,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 14,
+  },
+  metricsPanel: {
+    marginTop: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 20,
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  metricRowCompact: {
+    paddingVertical: 10,
+    gap: 3,
+  },
+  metricDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+  },
+  metricValueCompact: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  metricLabelCompact: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   heroAside: {
     width: 320,
@@ -387,6 +496,11 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 14,
   },
+  sectionHeaderMobile: {
+    marginTop: 28,
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+  },
   sectionCopy: {
     gap: 4,
   },
@@ -404,6 +518,11 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -0.7,
   },
+  sectionTitleMobile: {
+    fontSize: 22,
+    lineHeight: 27,
+    letterSpacing: -0.4,
+  },
   inlineLink: {
     minHeight: 42,
     paddingHorizontal: 14,
@@ -412,6 +531,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+  },
+  inlineLinkMobile: {
+    minHeight: 44,
+    paddingHorizontal: 16,
   },
   inlineLinkText: {
     color: COLORS.primary,

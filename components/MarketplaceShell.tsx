@@ -397,27 +397,27 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   mobileTopBar: {
-    paddingTop: 6,
-    paddingBottom: 10,
+    paddingTop: 2,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
     backgroundColor: "rgba(255,255,255,0.94)",
   },
   mobileTopBarRow: {
-    minHeight: 48,
+    minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
   mobileLogoWrap: {
-    minWidth: 74,
+    width: 108,
     minHeight: 40,
     alignItems: "flex-start",
     justifyContent: "center",
   },
   mobileLogo: {
-    width: 82,
-    height: 22,
+    width: 126,
+    height: 32,
   },
   searchDock: {
     flexDirection: "row",
@@ -436,9 +436,9 @@ const styles = StyleSheet.create({
   },
   searchDockMobile: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 22,
-    paddingHorizontal: 14,
+    minHeight: 42,
+    borderRadius: 21,
+    paddingHorizontal: 12,
   },
   searchDockPressed: {
     transform: [{ scale: 0.99 }],
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   searchDockTextMobile: {
-    fontSize: 13,
+    fontSize: 12,
   },
   accountButton: {
     width: 44,
@@ -460,16 +460,16 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
   },
   menuButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: COLORS.surface,
   },
   mobileContent: {
     flex: 1,
-    paddingTop: 14,
+    paddingTop: 8,
     paddingBottom: 22,
   },
   desktopContent: {

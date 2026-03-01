@@ -5,10 +5,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Container from "../../components/ui/Container";
 import { registerCompany, registerCustomer } from "../../lib/authRepo";
 import { registerPushTokenForUser } from "../../lib/pushRepo";
 import { addMyService } from "../../lib/serviceRepo";
@@ -76,6 +79,8 @@ const SERVICE_TEMPLATES: Record<string, DraftService[]> = {
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const desktop = width >= 768;
   const [mode, setMode] = useState<SignupMode>("company");
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -196,7 +201,7 @@ export default function RegisterScreen() {
 
       await registerPushTokenForUser(user.uid, { requestPermission: true }).catch(() => null);
       setSuccessText("Je salon is aangemaakt en staat direct live in ontdekken.");
-      router.replace("/(company)/(tabs)/home" as never);
+      router.replace("/account" as never);
     } catch (error: any) {
       setErrorText(error?.message ?? "Aanmelden mislukt.");
     } finally {
@@ -217,59 +222,69 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
-          <View style={styles.header}>
-            <Text style={styles.eyebrow}>BookBeauty account</Text>
-            <Text style={styles.title}>
-              {mode === "company" ? "Meld je salon aan in een paar rustige stappen." : "Maak je account aan wanneer je wilt boeken."}
-            </Text>
-            <Text style={styles.subtitle}>
-              {mode === "company"
-                ? "Geen admin-gevoel. Gewoon een premium onboarding waarmee je salon direct zichtbaar kan worden."
-                : "Browsen blijft openbaar. Een account is alleen nodig voor boekingen, favorieten en updates."}
-            </Text>
-          </View>
+          <Container mobilePadding={16} desktopPadding={24} desktopMaxWidth={760}>
+            <View style={styles.brand}>
+              <Image
+                source={require("../../assets/logo/logo.png")}
+                style={[styles.logo, desktop && styles.logoDesktop]}
+                contentFit="contain"
+              />
+            </View>
 
-          <Tabs
-            items={["Salon aanmelden", "Klant account"]}
-            active={mode === "company" ? "Salon aanmelden" : "Klant account"}
-            onChange={(value) => {
-              setMode(value === "Salon aanmelden" ? "company" : "customer");
-              setErrorText("");
-              setSuccessText("");
-            }}
-          />
+            <View style={styles.header}>
+              <Text style={styles.eyebrow}>BookBeauty account</Text>
+              <Text style={[styles.title, !desktop && styles.titleMobile]}>
+                {mode === "company" ? "Meld je salon aan in een paar rustige stappen." : "Maak je account aan wanneer je wilt boeken."}
+              </Text>
+              <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
+                {mode === "company"
+                  ? "Een rustige onboarding waarmee je salon direct zichtbaar kan worden."
+                  : "Browsen blijft openbaar. Alleen nodig voor boekingen, favorieten en updates."}
+              </Text>
+            </View>
 
-          {errorText ? <Toast message={errorText} tone="danger" /> : null}
-          {successText ? <Toast message={successText} tone="success" /> : null}
+            <Tabs
+              items={["Salon aanmelden", "Klant account"]}
+              active={mode === "company" ? "Salon aanmelden" : "Klant account"}
+              onChange={(value) => {
+                setMode(value === "Salon aanmelden" ? "company" : "customer");
+                setStep(0);
+                setErrorText("");
+                setSuccessText("");
+              }}
+            />
 
-          {mode === "customer" ? (
-            <Card style={styles.card}>
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Klant account</Text>
-                <Input
-                  label="E-mail"
-                  value={customerEmail}
-                  onChangeText={setCustomerEmail}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  placeholder="naam@voorbeeld.nl"
-                />
-                <Input
-                  label="Wachtwoord"
-                  value={customerPassword}
-                  onChangeText={setCustomerPassword}
-                  secureTextEntry
-                  placeholder="Minimaal 6 tekens"
-                />
-              </View>
+            {errorText ? <Toast message={errorText} tone="danger" /> : null}
+            {successText ? <Toast message={successText} tone="success" /> : null}
 
-              <View style={styles.footerRow}>
-                <Button label="Inloggen" variant="secondary" onPress={() => router.replace("/(auth)/login" as never)} style={styles.footerButton} />
-                <Button label={loading ? "Bezig..." : "Account maken"} onPress={() => onRegisterCustomer().catch(() => null)} style={styles.footerButton} />
-              </View>
-            </Card>
-          ) : (
-            <Card style={styles.card}>
+            {mode === "customer" ? (
+              <Card style={styles.card}>
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Klant account</Text>
+                  <Input
+                    label="E-mail"
+                    value={customerEmail}
+                    onChangeText={setCustomerEmail}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    placeholder="naam@voorbeeld.nl"
+                  />
+                  <Input
+                    label="Wachtwoord"
+                    value={customerPassword}
+                    onChangeText={setCustomerPassword}
+                    secureTextEntry
+                    placeholder="Minimaal 6 tekens"
+                  />
+                </View>
+
+                <View style={[styles.footerRow, !desktop && styles.footerRowStack]}>
+                  <Button label="Inloggen" variant="secondary" onPress={() => router.replace("/(auth)/login" as never)} style={styles.footerButton} />
+                  <Button label={loading ? "Bezig..." : "Account maken"} onPress={() => onRegisterCustomer().catch(() => null)} style={styles.footerButton} />
+                </View>
+              </Card>
+            ) : (
+              <Card style={styles.card}>
               <View style={styles.stepHeader}>
                 {COMPANY_STEPS.map((label, index) => {
                   const active = index <= step;
@@ -393,7 +408,7 @@ export default function RegisterScreen() {
                 </View>
               ) : null}
 
-              <View style={styles.footerRow}>
+              <View style={[styles.footerRow, !desktop && styles.footerRowStack]}>
                 <Button
                   label={step === 0 ? "Terug" : "Vorige"}
                   variant="secondary"
@@ -425,8 +440,9 @@ export default function RegisterScreen() {
                   />
                 )}
               </View>
-            </Card>
-          )}
+              </Card>
+            )}
+          </Container>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -439,11 +455,24 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
   },
   content: {
-    padding: 18,
+    paddingVertical: 18,
     gap: 16,
+  },
+  brand: {
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  logo: {
+    width: 220,
+    height: 56,
+  },
+  logoDesktop: {
+    width: 250,
+    height: 62,
   },
   header: {
     gap: 8,
+    marginBottom: 2,
   },
   eyebrow: {
     color: COLORS.accent,
@@ -459,10 +488,19 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: -0.8,
   },
+  titleMobile: {
+    fontSize: 26,
+    lineHeight: 31,
+    letterSpacing: -0.5,
+  },
   subtitle: {
     color: COLORS.muted,
     fontSize: 15,
     lineHeight: 23,
+  },
+  subtitleMobile: {
+    fontSize: 14,
+    lineHeight: 21,
   },
   card: {
     gap: 16,
@@ -556,6 +594,9 @@ const styles = StyleSheet.create({
   footerRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  footerRowStack: {
+    flexDirection: "column",
   },
   footerButton: {
     flex: 1,
