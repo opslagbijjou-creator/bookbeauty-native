@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   FlatList,
+  LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -98,8 +99,8 @@ function FeedSlide({
   const videoStyle = isWeb ? [styles.absoluteMedia, styles.webContain] : styles.absoluteMedia;
   const compact = viewportWidth < 768;
   const wide = viewportWidth >= 1180;
-  const actionPrimarySize = compact ? 24 : 28;
-  const actionSecondarySize = compact ? 22 : 24;
+  const actionPrimarySize = compact ? 34 : 30;
+  const actionSecondarySize = compact ? 32 : 26;
   const reservedBottom = compact ? 28 : 152;
   const reservedTop = compact ? 12 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
@@ -353,9 +354,9 @@ function FeedSlide({
           style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
         >
           <Ionicons
-            name={liked ? "heart" : "heart-outline"}
+            name={liked ? "heart" : "heart"}
             size={actionPrimarySize}
-            color={liked ? COLORS.accent : "#ffffff"}
+            color="#ffffff"
           />
           <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>{likeBusy ? "..." : String(likeCount)}</Text>
         </Pressable>
@@ -364,7 +365,7 @@ function FeedSlide({
           onPress={onToggleSave}
           style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
         >
-          <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={actionSecondarySize} color="#ffffff" />
+          <Ionicons name={saved ? "bookmark" : "bookmark"} size={actionSecondarySize} color="#ffffff" />
           <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>Bewaar</Text>
         </Pressable>
 
@@ -372,7 +373,7 @@ function FeedSlide({
           onPress={onShare}
           style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
         >
-          <Ionicons name="share-social-outline" size={actionSecondarySize} color="#ffffff" />
+          <Ionicons name="share-social" size={actionSecondarySize} color="#ffffff" />
           <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>Deel</Text>
         </Pressable>
 
@@ -452,12 +453,18 @@ export default function PublicFeedScreen() {
   const [likeCountMap, setLikeCountMap] = useState<Record<string, number>>({});
   const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
   const [failedVideoMap, setFailedVideoMap] = useState<Record<string, boolean>>({});
-  const slideHeight = Math.max(1, height - 76);
+  const [feedViewportHeight, setFeedViewportHeight] = useState(0);
+  const slideHeight = Math.max(1, feedViewportHeight || height - 76);
   const focusPostId = useMemo(() => {
     const raw = Array.isArray(params.post) ? params.post[0] : params.post;
     const clean = String(raw ?? "").trim();
     return clean || null;
   }, [params.post]);
+
+  const onScreenLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.max(1, Math.round(event.nativeEvent.layout.height));
+    setFeedViewportHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
 
   useEffect(() => {
     return subscribeAuth((user) => {
@@ -625,7 +632,7 @@ export default function PublicFeedScreen() {
     <MarketplaceShell active="feed" scroll={false} fullBleed>
       <MarketplaceSeo title={seo.title} description={seo.description} pathname={seo.pathname} />
 
-      <View style={styles.screen}>
+      <View style={styles.screen} onLayout={onScreenLayout}>
         {loading ? (
           <View style={[styles.slide, { height: slideHeight }]} />
         ) : (
@@ -767,31 +774,35 @@ const styles = StyleSheet.create({
     bottom: 138,
     zIndex: 3,
     alignItems: "center",
-    gap: 16,
+    gap: 18,
   },
   actionsRailCompact: {
-    right: 14,
-    bottom: 166,
-    gap: 14,
+    right: 12,
+    bottom: 160,
+    gap: 16,
   },
   iconButton: {
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
+    gap: 7,
   },
   iconButtonCompact: {
-    gap: 4,
+    minWidth: 54,
+    gap: 5,
   },
   iconPressed: {
     transform: [{ scale: 0.98 }],
   },
   iconLabel: {
     color: "#ffffff",
-    fontSize: 11,
-    fontWeight: "800",
+    fontSize: 12,
+    fontWeight: "900",
+    textShadowColor: "rgba(0,0,0,0.42)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
   },
   iconLabelCompact: {
-    fontSize: 10,
+    fontSize: 11,
   },
   overlay: {
     paddingHorizontal: 18,
