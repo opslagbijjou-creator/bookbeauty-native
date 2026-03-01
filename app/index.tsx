@@ -11,6 +11,7 @@ import {
   DEFAULT_MARKETPLACE_CITY,
   DEMO_MARKETPLACE_SALONS,
   MARKETPLACE_CATEGORIES,
+  MARKETPLACE_CITIES,
   MarketplaceSalon,
   buildHomeStructuredData,
   buildHomeSeo,
@@ -34,6 +35,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const seo = buildHomeSeo();
   const homeStructuredData = useMemo(() => buildHomeStructuredData(popularSalons), [popularSalons]);
+  const cityLabels = useMemo(() => MARKETPLACE_CITIES.map((item) => item.label), []);
   const categoryLabels = useMemo(() => MARKETPLACE_CATEGORIES.slice(0, 6).map((item) => item.label), []);
 
   useEffect(() => {
@@ -73,12 +75,12 @@ export default function HomeScreen() {
 
       <View style={[styles.heroShell, desktop && styles.heroShellDesktop]}>
         <View style={[styles.hero, desktop && styles.heroDesktop]}>
-          <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
+          <Text style={styles.eyebrow}>Beauty salons in Nederland</Text>
           <Text style={[styles.title, desktop ? styles.titleDesktop : styles.titleMobile]}>
-            Beauty salons in Nederland – direct online boeken
+            Vind snel een salon die bij je past.
           </Text>
           <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
-            Vind snel een salon die bij je past: reviews, prijzen en beschikbaarheid in één plek.
+            Reviews, prijzen en beschikbaarheid direct op één plek.
           </Text>
 
           {desktop ? (
@@ -101,71 +103,29 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           ) : (
-            <View style={styles.searchStack}>
-              <View style={styles.searchField}>
-                <Ionicons name="search" size={20} color={COLORS.muted} />
-                <TextInput
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Zoek op salon, behandeling of stad"
-                  placeholderTextColor={COLORS.placeholder}
-                  style={styles.searchInput}
-                  returnKeyType="search"
-                  onSubmitEditing={() => router.push(buildDiscoverHref(query) as never)}
-                />
-              </View>
+            <View style={styles.mobileActionRow}>
               <Pressable
-                onPress={() => router.push(buildDiscoverHref(query) as never)}
-                style={({ pressed }) => [styles.searchAction, styles.searchActionMobile, pressed && styles.buttonPressed]}
+                onPress={() => router.push("/discover" as never)}
+                style={({ pressed }) => [styles.mobileHeroPrimary, pressed && styles.buttonPressed]}
               >
-                <Text style={styles.searchActionText}>Ontdek salons</Text>
+                <Text style={styles.mobileHeroPrimaryText}>Ontdek salons</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => router.push("/(auth)/register" as never)}
+                style={({ pressed }) => [styles.mobileHeroSecondary, pressed && styles.buttonPressed]}
+              >
+                <Text style={styles.mobileHeroSecondaryText}>Meld je salon aan</Text>
               </Pressable>
             </View>
           )}
 
-          <CategoryChips
-            items={categoryLabels}
-            style={[styles.chipsRow, !desktop && styles.chipsRowMobile]}
-            onChange={(label) => {
-              const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
-              if (!category) return;
-              router.push(`/salons/${DEFAULT_MARKETPLACE_CITY.slug}/${category.slug}` as never);
-            }}
-          />
-
-          {desktop ? (
-            <View style={styles.metricsRow}>
-              <View style={styles.metric}>
-                <Text style={styles.metricValue}>Publiek</Text>
-                <Text style={styles.metricLabel}>Vrij browsen zonder account</Text>
-              </View>
-              <View style={styles.metric}>
-                <Text style={styles.metricValue}>Video-first</Text>
-                <Text style={styles.metricLabel}>Zie sfeer en resultaat direct</Text>
-              </View>
-              <View style={styles.metric}>
-                <Text style={styles.metricValue}>Guest booking</Text>
-                <Text style={styles.metricLabel}>Boek met alleen e-mail</Text>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.metricsPanel}>
-              <View style={styles.metricRowCompact}>
-                <Text style={styles.metricValueCompact}>Publiek</Text>
-                <Text style={styles.metricLabelCompact}>Vrij browsen zonder account</Text>
-              </View>
-              <View style={styles.metricDivider} />
-              <View style={styles.metricRowCompact}>
-                <Text style={styles.metricValueCompact}>Video-first</Text>
-                <Text style={styles.metricLabelCompact}>Zie sfeer en resultaat direct</Text>
-              </View>
-              <View style={styles.metricDivider} />
-              <View style={styles.metricRowCompact}>
-                <Text style={styles.metricValueCompact}>Guest booking</Text>
-                <Text style={styles.metricLabelCompact}>Boek met alleen e-mail</Text>
-              </View>
-            </View>
-          )}
+          <View style={[styles.trustStrip, desktop && styles.trustStripDesktop]}>
+            <Text style={styles.trustText}>Geen account nodig om te bekijken</Text>
+            <Text style={styles.trustDot}>•</Text>
+            <Text style={styles.trustText}>Echte prijzen en reviews</Text>
+            <Text style={styles.trustDot}>•</Text>
+            <Text style={styles.trustText}>Snel online reserveren</Text>
+          </View>
         </View>
 
         {desktop ? (
@@ -189,6 +149,24 @@ export default function HomeScreen() {
             </Pressable>
           </View>
         ) : null}
+      </View>
+
+      <View style={styles.quickSection}>
+        <Text style={styles.quickEyebrow}>Ontdek per stad</Text>
+        <Text style={styles.quickTitle}>Kies direct je stad</Text>
+        <Text style={styles.quickText}>
+          Kies je stad en ontdek salons bij jou in de buurt. Boek zonder bellen en houd alles overzichtelijk op
+          één plek.
+        </Text>
+        <CategoryChips
+          items={cityLabels}
+          style={styles.quickChips}
+          onChange={(label) => {
+            const city = MARKETPLACE_CITIES.find((item) => item.label === label);
+            if (!city) return;
+            router.push(`/salons/${city.slug}` as never);
+          }}
+        />
       </View>
 
       <View style={[styles.sectionHeader, !desktop && styles.sectionHeaderMobile]}>
@@ -244,13 +222,41 @@ export default function HomeScreen() {
             ))}
       </View>
 
+      <View style={[styles.quickSection, styles.quickSectionSecondary]}>
+        <Text style={styles.quickEyebrow}>Behandelingen</Text>
+        <Text style={styles.quickTitle}>Zoek op behandeling</Text>
+        <Text style={styles.quickText}>Start met een categorie en bekijk direct salons, prijzen en tijden.</Text>
+        <CategoryChips
+          items={categoryLabels}
+          style={styles.quickChips}
+          onChange={(label) => {
+            const category = MARKETPLACE_CATEGORIES.find((item) => item.label === label);
+            if (!category) return;
+            router.push(`/salons/${DEFAULT_MARKETPLACE_CITY.slug}/${category.slug}` as never);
+          }}
+        />
+      </View>
+
       <View style={styles.bottomStrip}>
         <Text style={styles.bottomStripEyebrow}>Waarom BookBeauty</Text>
         <Text style={styles.bottomStripTitle}>Reviews, prijzen en beschikbaarheid in één plek.</Text>
         <Text style={styles.bottomStripText}>
-          Kies je stad en ontdek salons bij jou in de buurt. Boek zonder bellen en houd alles overzichtelijk op
-          één plek.
+          Vergelijk sneller, boek rustiger en houd alles op één plek.
         </Text>
+        <View style={[styles.reasonGrid, desktop && styles.reasonGridDesktop]}>
+          <View style={styles.reasonCard}>
+            <Text style={styles.reasonTitle}>Vergelijk snel</Text>
+            <Text style={styles.reasonText}>Zie direct prijs, rating en beschikbaarheid per salon.</Text>
+          </View>
+          <View style={styles.reasonCard}>
+            <Text style={styles.reasonTitle}>Boek zonder bellen</Text>
+            <Text style={styles.reasonText}>Verstuur je aanvraag direct online wanneer het jou uitkomt.</Text>
+          </View>
+          <View style={styles.reasonCard}>
+            <Text style={styles.reasonTitle}>Alles overzichtelijk</Text>
+            <Text style={styles.reasonText}>Bewaar favorieten en houd je boekingen eenvoudig bij.</Text>
+          </View>
+        </View>
         <Pressable
           onPress={() => router.push("/(auth)/register" as never)}
           style={({ pressed }) => [styles.secondaryAction, pressed && styles.buttonPressed]}
@@ -264,7 +270,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   heroShell: {
-    gap: 24,
+    gap: 20,
   },
   heroShellDesktop: {
     flexDirection: "row",
@@ -272,7 +278,7 @@ const styles = StyleSheet.create({
     gap: 24,
   },
   hero: {
-    paddingTop: 8,
+    paddingTop: 4,
   },
   heroDesktop: {
     flex: 1,
@@ -288,32 +294,32 @@ const styles = StyleSheet.create({
   title: {
     marginTop: 8,
     color: COLORS.text,
-    fontSize: 48,
-    lineHeight: 54,
+    fontSize: 42,
+    lineHeight: 48,
     fontWeight: "700",
-    letterSpacing: -1,
-    maxWidth: 860,
+    letterSpacing: -0.8,
+    maxWidth: 720,
   },
   titleDesktop: {
-    fontSize: 52,
-    lineHeight: 58,
-    maxWidth: 760,
+    fontSize: 50,
+    lineHeight: 56,
+    maxWidth: 700,
   },
   titleMobile: {
-    fontSize: 32,
-    lineHeight: 38,
-    letterSpacing: -0.6,
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: -0.4,
     maxWidth: undefined,
   },
   subtitle: {
-    marginTop: 8,
+    marginTop: 10,
     color: COLORS.muted,
-    fontSize: 15,
-    lineHeight: 22,
-    maxWidth: 640,
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 520,
   },
   subtitleMobile: {
-    marginTop: 10,
+    marginTop: 8,
     fontSize: 14,
     lineHeight: 20,
     maxWidth: undefined,
@@ -341,6 +347,11 @@ const styles = StyleSheet.create({
   searchStack: {
     marginTop: 24,
     gap: 12,
+  },
+  mobileActionRow: {
+    marginTop: 16,
+    flexDirection: "row",
+    gap: 10,
   },
   searchField: {
     minHeight: 52,
@@ -371,57 +382,69 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 18,
   },
+  mobileHeroPrimary: {
+    flex: 1.2,
+    minHeight: 46,
+    borderRadius: 18,
+    backgroundColor: COLORS.text,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mobileHeroPrimaryText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  mobileHeroSecondary: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mobileHeroSecondaryText: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "600",
+  },
   searchActionText: {
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "600",
   },
-  chipsRow: {
-    marginTop: 12,
-    paddingBottom: 4,
-  },
-  chipsRowMobile: {
-    marginTop: 12,
-  },
-  metricsRow: {
-    marginTop: 20,
+  trustStrip: {
+    marginTop: 14,
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
-  },
-  metricsPanel: {
-    marginTop: 16,
-    borderWidth: 0,
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 16,
     backgroundColor: COLORS.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
   },
-  metricRowCompact: {
-    paddingVertical: 8,
-    gap: 2,
+  trustStripDesktop: {
+    alignSelf: "flex-start",
   },
-  metricDivider: {
-    height: 1,
-    backgroundColor: "rgba(17,17,17,0.06)",
-  },
-  metricValueCompact: {
-    color: COLORS.text,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  metricLabelCompact: {
+  trustText: {
     color: COLORS.muted,
     fontSize: 12,
     lineHeight: 18,
+    fontWeight: "500",
+  },
+  trustDot: {
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: "500",
   },
   heroAside: {
     width: 320,
     borderWidth: 0,
-    borderRadius: 20,
+    borderRadius: 18,
     backgroundColor: COLORS.surface,
-    padding: 20,
-    gap: 12,
+    padding: 18,
+    gap: 10,
     alignSelf: "stretch",
   },
   heroAsideEyebrow: {
@@ -433,15 +456,15 @@ const styles = StyleSheet.create({
   },
   heroAsideTitle: {
     color: COLORS.text,
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 20,
+    lineHeight: 25,
     fontWeight: "700",
-    letterSpacing: -0.4,
+    letterSpacing: -0.3,
   },
   heroAsideText: {
     color: COLORS.muted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
   },
   heroAsidePrimary: {
     marginTop: 4,
@@ -472,22 +495,40 @@ const styles = StyleSheet.create({
   },
   metric: {
     minWidth: 180,
-    paddingRight: 4,
-    gap: 2,
   },
-  metricValue: {
+  quickSection: {
+    marginTop: 20,
+    gap: 8,
+  },
+  quickSectionSecondary: {
+    marginTop: 28,
+  },
+  quickEyebrow: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  quickTitle: {
+    color: COLORS.text,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "700",
+    letterSpacing: -0.2,
+  },
+  quickText: {
     color: COLORS.muted,
     fontSize: 13,
-    fontWeight: "600",
-    letterSpacing: -0.1,
+    lineHeight: 19,
+    maxWidth: 620,
   },
-  metricLabel: {
-    color: COLORS.muted,
-    fontSize: 12,
-    lineHeight: 18,
+  quickChips: {
+    paddingTop: 2,
+    paddingBottom: 2,
   },
   sectionHeader: {
-    marginTop: 32,
+    marginTop: 28,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
@@ -495,7 +536,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   sectionHeaderMobile: {
-    marginTop: 24,
+    marginTop: 22,
     alignItems: "flex-start",
     justifyContent: "flex-start",
   },
@@ -511,14 +552,14 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: COLORS.text,
-    fontSize: 28,
-    lineHeight: 32,
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: "700",
-    letterSpacing: -0.5,
+    letterSpacing: -0.3,
   },
   sectionTitleMobile: {
-    fontSize: 20,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 22,
     letterSpacing: -0.2,
   },
   inlineLink: {
@@ -540,7 +581,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   listWrap: {
-    marginTop: 16,
+    marginTop: 14,
     gap: 16,
   },
   listWrapDesktop: {
@@ -573,11 +614,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   bottomStrip: {
-    marginTop: 32,
+    marginTop: 30,
     paddingTop: 4,
     paddingBottom: 8,
-    gap: 8,
-    maxWidth: 760,
+    gap: 10,
+    maxWidth: 860,
   },
   bottomStripEyebrow: {
     color: COLORS.primary,
@@ -588,8 +629,8 @@ const styles = StyleSheet.create({
   },
   bottomStripTitle: {
     color: COLORS.text,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: "700",
     letterSpacing: -0.4,
   },
@@ -597,6 +638,32 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 14,
     lineHeight: 20,
+  },
+  reasonGrid: {
+    marginTop: 2,
+    gap: 10,
+  },
+  reasonGridDesktop: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  reasonCard: {
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 4,
+  },
+  reasonTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  reasonText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   secondaryAction: {
     marginTop: 4,
