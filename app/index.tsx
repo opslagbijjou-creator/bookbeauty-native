@@ -344,24 +344,10 @@ const styles = StyleSheet.create({
   searchBarDesktop: {
     maxWidth: 760,
   },
-  searchStack: {
-    marginTop: 24,
-    gap: 12,
-  },
   mobileActionRow: {
     marginTop: 16,
     flexDirection: "row",
     gap: 10,
-  },
-  searchField: {
-    minHeight: 52,
-    borderWidth: 0,
-    borderRadius: 20,
-    backgroundColor: COLORS.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 16,
   },
   searchInput: {
     flex: 1,
@@ -376,11 +362,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     alignItems: "center",
     justifyContent: "center",
-  },
-  searchActionMobile: {
-    width: "100%",
-    minHeight: 48,
-    borderRadius: 18,
   },
   mobileHeroPrimary: {
     flex: 1.2,
@@ -492,9 +473,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 13,
     fontWeight: "600",
-  },
-  metric: {
-    minWidth: 180,
   },
   quickSection: {
     marginTop: 20,
