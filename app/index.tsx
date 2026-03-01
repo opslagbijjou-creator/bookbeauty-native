@@ -72,11 +72,10 @@ export default function HomeScreen() {
         <View style={[styles.hero, desktop && styles.heroDesktop]}>
           <Text style={styles.eyebrow}>Beauty marketplace voor Nederland</Text>
           <Text style={[styles.title, desktop ? styles.titleDesktop : styles.titleMobile]}>
-            Ontdek salons die goed voelen voordat je boekt.
+            Vind snel een salon die bij je past.
           </Text>
           <Text style={[styles.subtitle, !desktop && styles.subtitleMobile]}>
-            Scroll door echte media, vergelijk prijzen en vind in seconden een salon die past bij jouw stijl,
-            budget en stad.
+            Bekijk direct prijzen, beschikbaarheid en echte resultaten.
           </Text>
 
           {desktop ? (
@@ -169,10 +168,9 @@ export default function HomeScreen() {
         {desktop ? (
           <View style={styles.heroAside}>
             <Text style={styles.heroAsideEyebrow}>Snel starten</Text>
-            <Text style={styles.heroAsideTitle}>Gebruik BookBeauty als een rustige, snelle marketplace.</Text>
+            <Text style={styles.heroAsideTitle}>Zoek rustig, vergelijk snel.</Text>
             <Text style={styles.heroAsideText}>
-              Op desktop navigeer je direct via de vaste zijbalk en vergelijk je sneller meerdere salons naast
-              elkaar.
+              Gebruik de zijbalk om snel tussen ontdekken, feed en aanmeldingen te schakelen.
             </Text>
             <Pressable
               onPress={() => router.push("/discover?city=rotterdam" as never)}
@@ -245,9 +243,9 @@ export default function HomeScreen() {
 
       <View style={styles.bottomStrip}>
         <Text style={styles.bottomStripEyebrow}>Voor salons</Text>
-        <Text style={styles.bottomStripTitle}>Sta direct live en ontvang sneller aanvragen.</Text>
+        <Text style={styles.bottomStripTitle}>Sta zichtbaar voor nieuwe klanten.</Text>
         <Text style={styles.bottomStripText}>
-          Registreer je salon, laad je media in en verschijn meteen in discover zonder een lege marketplace.
+          Meld je salon aan en verschijn direct in discover.
         </Text>
         <Pressable
           onPress={() => router.push("/(auth)/register" as never)}
@@ -262,7 +260,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   heroShell: {
-    gap: 22,
+    gap: 24,
   },
   heroShellDesktop: {
     flexDirection: "row",
@@ -279,176 +277,172 @@ const styles = StyleSheet.create({
   eyebrow: {
     color: COLORS.primary,
     fontSize: 12,
-    fontWeight: "900",
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
   title: {
-    marginTop: 10,
+    marginTop: 8,
     color: COLORS.text,
     fontSize: 48,
     lineHeight: 54,
-    fontWeight: "900",
-    letterSpacing: -1.2,
+    fontWeight: "700",
+    letterSpacing: -1,
     maxWidth: 860,
   },
   titleDesktop: {
-    fontSize: 56,
-    lineHeight: 62,
+    fontSize: 52,
+    lineHeight: 58,
     maxWidth: 760,
   },
   titleMobile: {
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -0.8,
+    fontSize: 32,
+    lineHeight: 38,
+    letterSpacing: -0.6,
     maxWidth: undefined,
   },
   subtitle: {
-    marginTop: 12,
+    marginTop: 8,
     color: COLORS.muted,
-    fontSize: 17,
-    lineHeight: 27,
-    maxWidth: 760,
+    fontSize: 15,
+    lineHeight: 22,
+    maxWidth: 640,
   },
   subtitleMobile: {
     marginTop: 10,
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 20,
     maxWidth: undefined,
   },
   searchBar: {
-    marginTop: 28,
-    minHeight: 68,
+    marginTop: 24,
+    minHeight: 60,
     width: "100%",
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 24,
-    backgroundColor: "#ffffff",
+    borderWidth: 0,
+    borderRadius: 22,
+    backgroundColor: COLORS.surface,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 18,
+    gap: 10,
+    paddingHorizontal: 16,
     shadowColor: "#172330",
-    shadowOpacity: 0.05,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    shadowOpacity: 0.02,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 0,
   },
   searchBarDesktop: {
     maxWidth: 760,
   },
   searchStack: {
-    marginTop: 22,
-    gap: 10,
+    marginTop: 24,
+    gap: 12,
   },
   searchField: {
-    minHeight: 56,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    minHeight: 52,
+    borderWidth: 0,
     borderRadius: 20,
-    backgroundColor: "#ffffff",
+    backgroundColor: COLORS.surface,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     paddingHorizontal: 16,
   },
   searchInput: {
     flex: 1,
     color: COLORS.text,
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 15,
+    fontWeight: "600",
   },
   searchAction: {
-    minHeight: 46,
-    paddingHorizontal: 20,
-    borderRadius: 23,
+    minHeight: 44,
+    paddingHorizontal: 18,
+    borderRadius: 22,
     backgroundColor: COLORS.primary,
     alignItems: "center",
     justifyContent: "center",
   },
   searchActionMobile: {
     width: "100%",
-    minHeight: 52,
+    minHeight: 48,
     borderRadius: 18,
   },
   searchActionText: {
     color: "#ffffff",
     fontSize: 13,
-    fontWeight: "900",
+    fontWeight: "600",
   },
   chipsRow: {
-    marginTop: 14,
-    paddingBottom: 2,
+    marginTop: 12,
+    paddingBottom: 4,
   },
   chipsRowMobile: {
-    marginTop: 10,
+    marginTop: 12,
   },
   metricsRow: {
-    marginTop: 26,
+    marginTop: 20,
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 14,
+    gap: 12,
   },
   metricsPanel: {
-    marginTop: 18,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 20,
-    backgroundColor: "#ffffff",
-    paddingHorizontal: 16,
+    marginTop: 16,
+    borderWidth: 0,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
   metricRowCompact: {
-    paddingVertical: 10,
-    gap: 3,
+    paddingVertical: 8,
+    gap: 2,
   },
   metricDivider: {
     height: 1,
-    backgroundColor: COLORS.border,
+    backgroundColor: "rgba(17,17,17,0.06)",
   },
   metricValueCompact: {
     color: COLORS.text,
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 13,
+    fontWeight: "600",
   },
   metricLabelCompact: {
     color: COLORS.muted,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 18,
   },
   heroAside: {
     width: 320,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 24,
+    borderWidth: 0,
+    borderRadius: 20,
     backgroundColor: COLORS.surface,
-    padding: 22,
+    padding: 20,
     gap: 12,
     alignSelf: "stretch",
   },
   heroAsideEyebrow: {
     color: COLORS.muted,
     fontSize: 11,
-    fontWeight: "900",
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.7,
+    letterSpacing: 0.5,
   },
   heroAsideTitle: {
     color: COLORS.text,
-    fontSize: 26,
-    lineHeight: 31,
-    fontWeight: "900",
-    letterSpacing: -0.7,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "700",
+    letterSpacing: -0.4,
   },
   heroAsideText: {
     color: COLORS.muted,
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   heroAsidePrimary: {
-    marginTop: 8,
-    minHeight: 50,
-    borderRadius: 18,
+    marginTop: 4,
+    minHeight: 46,
+    borderRadius: 16,
     backgroundColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
@@ -456,48 +450,48 @@ const styles = StyleSheet.create({
   heroAsidePrimaryText: {
     color: "#ffffff",
     fontSize: 13,
-    fontWeight: "900",
+    fontWeight: "600",
   },
   heroAsideSecondary: {
-    minHeight: 48,
-    borderRadius: 18,
+    minHeight: 44,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: "#ffffff",
+    borderColor: "rgba(17,17,17,0.08)",
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   },
   heroAsideSecondaryText: {
     color: COLORS.text,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "600",
   },
   metric: {
     minWidth: 180,
-    paddingRight: 6,
-    gap: 3,
+    paddingRight: 4,
+    gap: 2,
   },
   metricValue: {
-    color: COLORS.text,
-    fontSize: 17,
-    fontWeight: "900",
-    letterSpacing: -0.3,
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: -0.1,
   },
   metricLabel: {
     color: COLORS.muted,
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
   },
   sectionHeader: {
-    marginTop: 42,
+    marginTop: 32,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: 14,
+    gap: 12,
   },
   sectionHeaderMobile: {
-    marginTop: 28,
+    marginTop: 24,
     alignItems: "flex-start",
     justifyContent: "flex-start",
   },
@@ -507,48 +501,48 @@ const styles = StyleSheet.create({
   sectionEyebrow: {
     color: COLORS.primary,
     fontSize: 12,
-    fontWeight: "900",
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
   sectionTitle: {
     color: COLORS.text,
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: "900",
-    letterSpacing: -0.7,
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "700",
+    letterSpacing: -0.5,
   },
   sectionTitleMobile: {
-    fontSize: 22,
-    lineHeight: 27,
-    letterSpacing: -0.4,
+    fontSize: 20,
+    lineHeight: 24,
+    letterSpacing: -0.2,
   },
   inlineLink: {
-    minHeight: 42,
+    minHeight: 40,
     paddingHorizontal: 14,
-    borderRadius: 21,
-    backgroundColor: "rgba(23,59,99,0.06)",
+    borderRadius: 20,
+    backgroundColor: COLORS.surface,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
   inlineLinkMobile: {
-    minHeight: 44,
-    paddingHorizontal: 16,
+    minHeight: 40,
+    paddingHorizontal: 14,
   },
   inlineLinkText: {
     color: COLORS.primary,
     fontSize: 13,
-    fontWeight: "900",
+    fontWeight: "600",
   },
   listWrap: {
-    marginTop: 18,
-    gap: 18,
+    marginTop: 16,
+    gap: 16,
   },
   listWrapDesktop: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 18,
+    gap: 16,
     alignItems: "stretch",
   },
   listItem: {
@@ -563,49 +557,49 @@ const styles = StyleSheet.create({
   skeletonCard: {
     borderRadius: 20,
     backgroundColor: "#ffffff",
-    padding: 14,
+    padding: 16,
     shadowColor: "#172330",
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
   },
   skeletonBody: {
-    paddingTop: 14,
-    gap: 10,
+    paddingTop: 12,
+    gap: 8,
   },
   bottomStrip: {
-    marginTop: 40,
-    paddingTop: 6,
-    paddingBottom: 10,
+    marginTop: 32,
+    paddingTop: 4,
+    paddingBottom: 8,
     gap: 8,
     maxWidth: 760,
   },
   bottomStripEyebrow: {
     color: COLORS.primary,
     fontSize: 12,
-    fontWeight: "900",
+    fontWeight: "600",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
   bottomStripTitle: {
     color: COLORS.text,
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: "900",
-    letterSpacing: -0.7,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "700",
+    letterSpacing: -0.4,
   },
   bottomStripText: {
     color: COLORS.muted,
-    fontSize: 15,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 20,
   },
   secondaryAction: {
-    marginTop: 6,
+    marginTop: 4,
     alignSelf: "flex-start",
-    minHeight: 50,
-    paddingHorizontal: 20,
-    borderRadius: 25,
+    minHeight: 46,
+    paddingHorizontal: 18,
+    borderRadius: 23,
     backgroundColor: COLORS.text,
     alignItems: "center",
     justifyContent: "center",
@@ -613,7 +607,7 @@ const styles = StyleSheet.create({
   secondaryActionText: {
     color: "#ffffff",
     fontSize: 13,
-    fontWeight: "900",
+    fontWeight: "600",
   },
   buttonPressed: {
     transform: [{ scale: 0.98 }],
