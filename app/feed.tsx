@@ -102,7 +102,7 @@ function FeedSlide({
   const reservedBottom = compact ? 212 : 152;
   const reservedTop = compact ? 18 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
-  const rightRailAllowance = compact ? 24 : 132;
+  const rightRailAllowance = compact ? 96 : 132;
   const horizontalPadding = compact ? 24 : 56;
   const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
   const targetAspectRatio = usesVideoFrame ? 9 / 16 : 4 / 5;
@@ -718,13 +718,9 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   actionsRailCompact: {
-    left: 18,
-    right: 18,
-    bottom: 146,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 8,
+    right: 14,
+    bottom: 154,
+    gap: 14,
   },
   iconButton: {
     alignItems: "center",
@@ -732,7 +728,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   iconButtonCompact: {
-    minWidth: 58,
     gap: 4,
   },
   iconPressed: {
@@ -771,6 +766,7 @@ const styles = StyleSheet.create({
   },
   copyWrapCompact: {
     gap: 4,
+    paddingRight: 86,
   },
   categoryLabel: {
     color: "rgba(255,255,255,0.82)",

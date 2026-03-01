@@ -227,8 +227,8 @@ const styles = StyleSheet.create({
     height: 28,
   },
   logoCompact: {
-    width: 92,
-    height: 22,
+    width: 108,
+    height: 24,
   },
   logoWide: {
     width: 142,
