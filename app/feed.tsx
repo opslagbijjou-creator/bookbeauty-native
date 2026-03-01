@@ -20,6 +20,7 @@ import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
+import CommentsSheet from "../components/CommentsSheet";
 import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
 import { getUserRole, subscribeAuth } from "../lib/authRepo";
@@ -32,7 +33,12 @@ import {
   getFeedPostPath,
 } from "../lib/marketplace";
 import type { AppRole } from "../lib/roles";
-import { getPostLikeCount, isPostLiked, togglePostLike } from "../lib/socialRepo";
+import {
+  getPostCommentCount,
+  getPostLikeCount,
+  isPostLiked,
+  togglePostLike,
+} from "../lib/socialRepo";
 import { COLORS } from "../lib/ui";
 
 type FeedSlideProps = {
@@ -45,10 +51,12 @@ type FeedSlideProps = {
   saved: boolean;
   likeBusy: boolean;
   likeCount: number;
+  commentCount: number;
   failedVideo: boolean;
   onToggleLike: () => void;
   onToggleSave: () => void;
   onToggleMuted: () => void;
+  onOpenComments: () => void;
   onShare: () => void;
   onOpenSalon: () => void;
   onVideoError: () => void;
@@ -64,15 +72,20 @@ function FeedSlide({
   saved,
   likeBusy,
   likeCount,
+  commentCount,
   failedVideo,
   onToggleLike,
   onToggleSave,
   onToggleMuted,
+  onOpenComments,
   onShare,
   onOpenSalon,
   onVideoError,
 }: FeedSlideProps) {
   const fade = useRef(new Animated.Value(0)).current;
+  const likeBurstOpacity = useRef(new Animated.Value(0)).current;
+  const likeBurstScale = useRef(new Animated.Value(0.76)).current;
+  const lastTapAtRef = useRef(0);
   const videoRef = useRef<Video | null>(null);
   const webVideoRef = useRef<HTMLVideoElement | null>(null);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -99,8 +112,8 @@ function FeedSlide({
   const videoStyle = isWeb ? [styles.absoluteMedia, styles.webContain] : styles.absoluteMedia;
   const compact = viewportWidth < 768;
   const wide = viewportWidth >= 1180;
-  const actionPrimarySize = compact ? 34 : 30;
-  const actionSecondarySize = compact ? 32 : 26;
+  const actionPrimarySize = compact ? 42 : 34;
+  const actionSecondarySize = compact ? 38 : 30;
   const reservedBottom = compact ? 28 : 152;
   const reservedTop = compact ? 12 : 28;
   const availableFrameHeight = Math.max(260, height - reservedBottom - reservedTop);
@@ -119,6 +132,55 @@ function FeedSlide({
   const videoResizeMode = compact && mobileCoverMedia ? ResizeMode.COVER : ResizeMode.CONTAIN;
   const posterFit = compact && mobileCoverMedia ? "cover" : "contain";
   const webVideoStyle = compact && mobileCoverMedia ? styles.webVideoElementCover : styles.webVideoElement;
+  const likedColor = liked ? COLORS.accent : "#ffffff";
+  const savedColor = saved ? COLORS.accent : "#ffffff";
+
+  const triggerLikeBurst = useCallback(() => {
+    likeBurstOpacity.stopAnimation();
+    likeBurstScale.stopAnimation();
+    likeBurstOpacity.setValue(0);
+    likeBurstScale.setValue(0.76);
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(likeBurstOpacity, {
+          toValue: 1,
+          duration: 90,
+          useNativeDriver: true,
+        }),
+        Animated.timing(likeBurstOpacity, {
+          toValue: 0,
+          duration: 280,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.timing(likeBurstScale, {
+          toValue: 1.12,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.spring(likeBurstScale, {
+          toValue: 1.32,
+          friction: 7,
+          tension: 120,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+  }, [likeBurstOpacity, likeBurstScale]);
+
+  const onMediaPress = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapAtRef.current <= 280) {
+      lastTapAtRef.current = 0;
+      triggerLikeBurst();
+      if (!liked && !likeBusy) {
+        onToggleLike();
+      }
+      return;
+    }
+    lastTapAtRef.current = now;
+  }, [liked, likeBusy, onToggleLike, triggerLikeBurst]);
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -207,9 +269,11 @@ function FeedSlide({
         <View style={[styles.mediaBackdropShade, compact && styles.mediaBackdropShadeCompact]} />
 
         <View style={styles.frameWrap}>
-          <View
+          <Pressable
+            onPress={onMediaPress}
             style={[
               styles.mediaFrame,
+              styles.mediaTapZone,
               compact && styles.mediaFrameCompact,
               {
                 width: frameWidth,
@@ -338,7 +402,20 @@ function FeedSlide({
                 <ActivityIndicator color="#ffffff" />
               </View>
             ) : null}
-          </View>
+
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.likeBurst,
+                {
+                  opacity: likeBurstOpacity,
+                  transform: [{ scale: likeBurstScale }],
+                },
+              ]}
+            >
+              <Ionicons name="heart" size={compact ? 94 : 106} color={COLORS.accent} />
+            </Animated.View>
+          </Pressable>
         </View>
       </View>
 
@@ -356,17 +433,41 @@ function FeedSlide({
           <Ionicons
             name={liked ? "heart" : "heart"}
             size={actionPrimarySize}
-            color="#ffffff"
+            color={likedColor}
           />
-          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>{likeBusy ? "..." : String(likeCount)}</Text>
+          <Text
+            style={[
+              styles.iconLabel,
+              compact && styles.iconLabelCompact,
+              liked && styles.iconLabelActive,
+            ]}
+          >
+            {likeBusy ? "..." : String(likeCount)}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          onPress={onOpenComments}
+          style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
+        >
+          <Ionicons name="chatbubble" size={actionSecondarySize} color="#ffffff" />
+          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>{String(commentCount)}</Text>
         </Pressable>
 
         <Pressable
           onPress={onToggleSave}
           style={({ pressed }) => [styles.iconButton, compact && styles.iconButtonCompact, pressed && styles.iconPressed]}
         >
-          <Ionicons name={saved ? "bookmark" : "bookmark"} size={actionSecondarySize} color="#ffffff" />
-          <Text style={[styles.iconLabel, compact && styles.iconLabelCompact]}>Bewaar</Text>
+          <Ionicons name={saved ? "bookmark" : "bookmark"} size={actionSecondarySize} color={savedColor} />
+          <Text
+            style={[
+              styles.iconLabel,
+              compact && styles.iconLabelCompact,
+              saved && styles.iconLabelActive,
+            ]}
+          >
+            Bewaar
+          </Text>
         </Pressable>
 
         <Pressable
@@ -451,8 +552,10 @@ export default function PublicFeedScreen() {
   const [likedMap, setLikedMap] = useState<Record<string, boolean>>({});
   const [savedMap, setSavedMap] = useState<Record<string, boolean>>({});
   const [likeCountMap, setLikeCountMap] = useState<Record<string, number>>({});
+  const [commentCountMap, setCommentCountMap] = useState<Record<string, number>>({});
   const [likeBusyMap, setLikeBusyMap] = useState<Record<string, boolean>>({});
   const [failedVideoMap, setFailedVideoMap] = useState<Record<string, boolean>>({});
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [feedViewportHeight, setFeedViewportHeight] = useState(0);
   const slideHeight = Math.max(1, feedViewportHeight || height - 76);
   const focusPostId = useMemo(() => {
@@ -534,6 +637,17 @@ export default function PublicFeedScreen() {
           nextCounts[item.id] = counts[index];
         });
         setLikeCountMap((prev) => ({ ...prev, ...nextCounts }));
+      })
+      .catch(() => null);
+
+    Promise.all(liveItems.map((item) => getPostCommentCount(item.id).catch(() => 0)))
+      .then((counts) => {
+        if (cancelled) return;
+        const nextCounts: Record<string, number> = {};
+        liveItems.forEach((item, index) => {
+          nextCounts[item.id] = counts[index];
+        });
+        setCommentCountMap((prev) => ({ ...prev, ...nextCounts }));
       })
       .catch(() => null);
 
@@ -650,10 +764,12 @@ export default function PublicFeedScreen() {
                 saved={Boolean(savedMap[item.id])}
                 likeBusy={Boolean(likeBusyMap[item.id])}
                 likeCount={likeCountMap[item.id] ?? 0}
+                commentCount={commentCountMap[item.id] ?? 0}
                 failedVideo={Boolean(failedVideoMap[item.id])}
                 onToggleLike={() => onToggleLike(item).catch(() => null)}
                 onToggleSave={() => onToggleSave(item)}
                 onToggleMuted={() => setMuted((current) => !current)}
+                onOpenComments={() => setCommentsPostId(item.id)}
                 onShare={() => onShareItem(item).catch(() => null)}
                 onOpenSalon={() => router.push(`/salon/${item.companySlug}` as never)}
                 onVideoError={() => {
@@ -685,6 +801,17 @@ export default function PublicFeedScreen() {
           />
         )}
       </View>
+
+      <CommentsSheet
+        visible={Boolean(commentsPostId)}
+        postId={commentsPostId}
+        uid={uid}
+        role={role}
+        onClose={() => setCommentsPostId(null)}
+        onCountChange={(postId, count) => {
+          setCommentCountMap((prev) => ({ ...prev, [postId]: count }));
+        }}
+      />
     </MarketplaceShell>
   );
 }
@@ -730,6 +857,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#06080c",
     overflow: "hidden",
   },
+  mediaTapZone: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
   mediaFrameCompact: {
     width: "100%",
     height: "100%",
@@ -768,6 +899,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.12)",
   },
+  likeBurst: {
+    position: "absolute",
+    top: "50%",
+    left: "50%",
+    marginLeft: -53,
+    marginTop: -53,
+    zIndex: 3,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: COLORS.accent,
+    shadowOpacity: 0.48,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
+  },
   actionsRail: {
     position: "absolute",
     right: 16,
@@ -803,6 +948,9 @@ const styles = StyleSheet.create({
   },
   iconLabelCompact: {
     fontSize: 11,
+  },
+  iconLabelActive: {
+    color: COLORS.accent,
   },
   overlay: {
     paddingHorizontal: 18,
