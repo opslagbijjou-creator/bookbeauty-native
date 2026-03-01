@@ -107,12 +107,17 @@ function FeedSlide({
   const horizontalPadding = compact ? 24 : 56;
   const availableFrameWidth = Math.max(220, viewportWidth - horizontalPadding - rightRailAllowance);
   const targetAspectRatio = usesVideoFrame ? mediaAspectRatio || 9 / 16 : 4 / 5;
-  const mobilePreferredWidth = Math.min(availableFrameWidth, viewportWidth - 24);
+  const mobileCoverMedia = compact && (!mediaAspectRatio || mediaAspectRatio <= 0.9);
   const widthFromHeight = availableFrameHeight * targetAspectRatio;
   const frameWidth = compact
-    ? mobilePreferredWidth
+    ? viewportWidth
     : Math.min(wide ? 720 : 680, availableFrameWidth, widthFromHeight);
-  const frameHeight = Math.min(availableFrameHeight, frameWidth / Math.max(0.01, targetAspectRatio));
+  const frameHeight = compact
+    ? height
+    : Math.min(availableFrameHeight, frameWidth / Math.max(0.01, targetAspectRatio));
+  const videoResizeMode = compact && mobileCoverMedia ? ResizeMode.COVER : ResizeMode.CONTAIN;
+  const posterFit = compact && mobileCoverMedia ? "cover" : "contain";
+  const webVideoStyle = compact && mobileCoverMedia ? styles.webVideoElementCover : styles.webVideoElement;
 
   useEffect(() => {
     setVideoSourceIndex(0);
@@ -204,6 +209,7 @@ function FeedSlide({
           <View
             style={[
               styles.mediaFrame,
+              compact && styles.mediaFrameCompact,
               {
                 width: frameWidth,
                 height: frameHeight,
@@ -215,7 +221,7 @@ function FeedSlide({
                 <Image
                   source={{ uri: item.posterUrl }}
                   style={styles.absoluteMedia}
-                  contentFit="contain"
+                  contentFit={posterFit}
                   transition={0}
                 />
                 {isWeb ? (
@@ -229,7 +235,7 @@ function FeedSlide({
                     playsInline
                     autoPlay={isActive}
                     preload="metadata"
-                    style={styles.webVideoElement as any}
+                    style={webVideoStyle as any}
                     onLoadedMetadata={() => {
                       const player = webVideoRef.current;
                       if (!player) return;
@@ -282,7 +288,7 @@ function FeedSlide({
                     ref={videoRef}
                     source={{ uri: videoUrl }}
                     style={videoStyle}
-                    resizeMode={ResizeMode.CONTAIN}
+                    resizeMode={videoResizeMode}
                     shouldPlay={false}
                     isLooping
                     isMuted={muted}
@@ -318,7 +324,12 @@ function FeedSlide({
                 )}
               </>
             ) : imageUrl ? (
-              <Image source={{ uri: imageUrl }} style={styles.absoluteMedia} contentFit="cover" transition={180} />
+              <Image
+                source={{ uri: imageUrl }}
+                style={styles.absoluteMedia}
+                contentFit={compact ? "cover" : "cover"}
+                transition={180}
+              />
             ) : null}
 
             {canPlayVideo && (!videoReady || isBuffering) ? (
@@ -712,6 +723,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#06080c",
     overflow: "hidden",
   },
+  mediaFrameCompact: {
+    width: "100%",
+    height: "100%",
+  },
   frameMedia: {
     width: "100%",
     height: "100%",
@@ -730,6 +745,14 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
     objectFit: "contain",
+    backgroundColor: "#06080c",
+  },
+  webVideoElementCover: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
     backgroundColor: "#06080c",
   },
   loadingOverlay: {
@@ -781,21 +804,21 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   overlayCompact: {
-    paddingHorizontal: 18,
-    paddingRight: 18,
-    paddingBottom: 34,
+    paddingHorizontal: 16,
+    paddingRight: 16,
+    paddingBottom: 48,
     flexDirection: "column",
     alignItems: "stretch",
     justifyContent: "flex-end",
-    gap: 14,
+    gap: 12,
   },
   copyWrap: {
     flex: 1,
     gap: 6,
   },
   copyWrapCompact: {
-    gap: 4,
-    paddingRight: 86,
+    gap: 6,
+    paddingRight: 82,
   },
   categoryLabel: {
     color: "rgba(255,255,255,0.82)",
@@ -880,8 +903,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ctaCompact: {
-    width: "100%",
-    minHeight: 48,
+    alignSelf: "center",
+    width: "72%",
+    maxWidth: 320,
+    minHeight: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(255,255,255,0.94)",
   },
   ctaText: {
     color: COLORS.text,
