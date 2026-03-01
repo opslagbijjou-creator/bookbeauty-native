@@ -40,6 +40,7 @@ import {
 } from "../../lib/mediaRepo";
 import {
   buildCloudinaryEditedUrl,
+  buildCloudinaryVideoThumbnailUrl,
   type MediaCropPreset,
   type MediaFilterPreset,
 } from "../../lib/mediaEdit";
@@ -109,23 +110,7 @@ function formatHashtags(tags?: string[]): string {
 }
 
 function cloudinaryVideoThumbnailFromUrl(videoUrl: string): string {
-  if (!videoUrl) return "";
-
-  const [rawPath, rawQuery = ""] = videoUrl.split("?");
-  let path = rawPath;
-
-  if (path.includes("/upload/")) {
-    // Keep full frame in thumbnails (no crop/zoom), add letterboxing when needed.
-    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,ar_9:16,w_720,h_1280,q_auto,f_jpg/");
-  }
-
-  if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
-    path = path.replace(/\.(mp4|mov|m4v|webm|avi)$/i, ".jpg");
-  } else if (!/\.(jpg|jpeg|png|webp)$/i.test(path)) {
-    path = `${path}.jpg`;
-  }
-
-  return rawQuery ? `${path}?${rawQuery}` : path;
+  return buildCloudinaryVideoThumbnailUrl(videoUrl);
 }
 
 function getPostThumbnail(post: Pick<FeedPost, "thumbnailUrl" | "videoUrl" | "imageUrl" | "mediaType">): string {
@@ -209,8 +194,11 @@ export default function CompanyStudioScreen() {
 
     const baseVideo = editingItem?.sourceVideoUrl?.trim() || editingItem?.videoUrl?.trim() || "";
     if (!baseVideo) return "";
-    return buildCloudinaryEditedUrl(baseVideo, { cropPreset, filterPreset });
-  }, [uploadMediaType, video?.uri, editingItem, cropPreset, filterPreset]);
+    return buildCloudinaryEditedUrl(baseVideo, {
+      cropPreset: DEFAULT_CROP_PRESET,
+      filterPreset: DEFAULT_FILTER_PRESET,
+    });
+  }, [uploadMediaType, video?.uri, editingItem]);
   const hasLiveVideoPreview = Boolean(previewVideoUri);
   const previewImageUri = useMemo(() => {
     if (uploadMediaType !== "image") return "";
@@ -505,7 +493,7 @@ const trimWindowLeftPx = useMemo(() => {
     setVisibility(post.visibility === "clients_only" || !post.isActive ? "clients" : "public");
     setUploadMediaType(post.mediaType === "image" ? "image" : "video");
     setCropPreset(DEFAULT_CROP_PRESET);
-    setFilterPreset(post.filterPreset ?? DEFAULT_FILTER_PRESET);
+    setFilterPreset(post.mediaType === "video" ? DEFAULT_FILTER_PRESET : post.filterPreset ?? DEFAULT_FILTER_PRESET);
     setVideo(null);
     setImageMedia(null);
     const nextClipStart = Math.max(0, Number(post.clipStartSec ?? 0) || 0);
@@ -522,6 +510,7 @@ const trimWindowLeftPx = useMemo(() => {
 
   function applyPickedMedia(picked: PickedMedia, kind: "video" | "image") {
     setCropPreset(DEFAULT_CROP_PRESET);
+    setFilterPreset(DEFAULT_FILTER_PRESET);
     if (kind === "image") {
       setUploadMediaType("image");
       setVideo(null);
@@ -670,17 +659,22 @@ const trimWindowLeftPx = useMemo(() => {
 
     try {
       const safeCropPreset: MediaCropPreset = DEFAULT_CROP_PRESET;
+      const safeFilterPreset: MediaFilterPreset =
+        selectedMediaType === "video" ? DEFAULT_FILTER_PRESET : filterPreset;
       const { sourceVideoUrl, sourceImageUrl } = await uploadCurrentMediaIfNeeded(uid, selectedMediaType);
       const storyVideoUrl =
         selectedMediaType === "video"
-          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset: safeCropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, {
+              cropPreset: DEFAULT_CROP_PRESET,
+              filterPreset: DEFAULT_FILTER_PRESET,
+            })
           : "";
       const storyImageUrl =
         selectedMediaType === "image"
-          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset: safeFilterPreset })
           : "";
       const storyThumbnail =
-        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(storyVideoUrl) : storyImageUrl;
+        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(sourceVideoUrl || storyVideoUrl) : storyImageUrl;
 
       await addCompanyStory(uid, {
         mediaType: selectedMediaType,
@@ -738,6 +732,8 @@ const trimWindowLeftPx = useMemo(() => {
 
     try {
       const safeCropPreset: MediaCropPreset = DEFAULT_CROP_PRESET;
+      const safeFilterPreset: MediaFilterPreset =
+        selectedMediaType === "video" ? DEFAULT_FILTER_PRESET : filterPreset;
       const nextVisibility = visibility === "public" ? "public" : "clients_only";
       const nextIsActive = visibility === "public";
       const serviceName = selectedService?.name ?? "";
@@ -756,14 +752,17 @@ const trimWindowLeftPx = useMemo(() => {
         : 0;
       const nextVideoUrl =
         selectedMediaType === "video"
-          ? buildCloudinaryEditedUrl(sourceVideoUrl, { cropPreset: safeCropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceVideoUrl, {
+              cropPreset: DEFAULT_CROP_PRESET,
+              filterPreset: DEFAULT_FILTER_PRESET,
+            })
           : "";
       const nextImageUrl =
         selectedMediaType === "image"
-          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset })
+          ? buildCloudinaryEditedUrl(sourceImageUrl, { cropPreset: safeCropPreset, filterPreset: safeFilterPreset })
           : "";
       const nextThumbUrl =
-        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(nextVideoUrl) : nextImageUrl;
+        selectedMediaType === "video" ? cloudinaryVideoThumbnailFromUrl(sourceVideoUrl || nextVideoUrl) : nextImageUrl;
 
       if (selectedMediaType === "video" && !nextVideoUrl) {
         throw new Error("Video ontbreekt.");
@@ -789,7 +788,7 @@ const trimWindowLeftPx = useMemo(() => {
           sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
           cropPreset: safeCropPreset,
-          filterPreset,
+          filterPreset: safeFilterPreset,
           ...(selectedMediaType === "video"
             ? {
                 clipStartSec: uploadClipStartSec,
@@ -824,7 +823,7 @@ const trimWindowLeftPx = useMemo(() => {
           sourceVideoUrl: selectedMediaType === "video" ? sourceVideoUrl : "",
           sourceImageUrl: selectedMediaType === "image" ? sourceImageUrl : "",
           cropPreset: safeCropPreset,
-          filterPreset,
+          filterPreset: safeFilterPreset,
           clipStartSec: uploadClipStartSec,
           clipEndSec: uploadClipEndSec,
           videoDurationSec:
@@ -1180,15 +1179,24 @@ const trimWindowLeftPx = useMemo(() => {
                 </View>
 
                 <View style={styles.fieldWrap}>
-                  <Text style={styles.fieldLabel}>Filter (optioneel)</Text>
+                  <Text style={styles.fieldLabel}>
+                    {uploadMediaType === "video" ? "Filter (alleen voor foto's)" : "Filter (optioneel)"}
+                  </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.serviceRow}>
                     {FILTER_OPTIONS.map((option) => {
                       const active = filterPreset === option.key;
                       return (
                         <Pressable
                           key={option.key}
-                          style={[styles.serviceChip, active && styles.serviceChipActive]}
-                          onPress={() => setFilterPreset(option.key)}
+                          style={[
+                            styles.serviceChip,
+                            active && styles.serviceChipActive,
+                            uploadMediaType === "video" && option.key !== DEFAULT_FILTER_PRESET && styles.disabled,
+                          ]}
+                          onPress={() => {
+                            if (uploadMediaType === "video" && option.key !== DEFAULT_FILTER_PRESET) return;
+                            setFilterPreset(option.key);
+                          }}
                         >
                           <Text style={[styles.serviceChipText, active && styles.serviceChipTextActive]}>
                             {option.label}
@@ -1197,6 +1205,9 @@ const trimWindowLeftPx = useMemo(() => {
                       );
                     })}
                   </ScrollView>
+                  {uploadMediaType === "video" ? (
+                    <Text style={styles.fieldHint}>Video&apos;s worden zonder extra filter opgeslagen om rare crops en zoom te voorkomen.</Text>
+                  ) : null}
                 </View>
 
                 <View style={styles.fieldWrap}>

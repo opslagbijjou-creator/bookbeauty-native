@@ -1,6 +1,6 @@
 import { CompanyPublic, fetchCompanies } from "./companyRepo";
 import { FeedPost, fetchCompanyFeedPublic, fetchFeed, fetchFeedPostById } from "./feedRepo";
-import { buildCloudinaryEditedUrl } from "./mediaEdit";
+import { buildCloudinaryEditedUrl, buildCloudinaryVideoPlaybackUrl, buildCloudinaryVideoThumbnailUrl } from "./mediaEdit";
 import { CompanyService, fetchCompanyServicesPublic } from "./serviceRepo";
 
 export type MarketplaceCity = {
@@ -176,42 +176,7 @@ function mapServiceToMarketplaceService(service: CompanyService): MarketplaceSer
 }
 
 function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
-  if (!videoUrl) return "";
-  const [rawPath, rawQuery = ""] = videoUrl.split("?");
-  if (!rawPath.includes("/upload/")) return "";
-  let path = rawPath;
-
-  if (path.includes("/upload/")) {
-    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,g_auto,ar_9:16,w_720,h_1280,q_auto,f_jpg/");
-  }
-
-  if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
-    path = path.replace(/\.(mp4|mov|m4v|webm|avi)$/i, ".jpg");
-  } else if (!/\.(jpg|jpeg|png|webp)$/i.test(path)) {
-    path = `${path}.jpg`;
-  }
-
-  return rawQuery ? `${path}?${rawQuery}` : path;
-}
-
-const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
-
-function normalizeCloudinaryVideoPlaybackUrl(rawUrl?: string): string {
-  const source = String(rawUrl ?? "").trim();
-  if (!source || !source.includes("/upload/")) return source;
-  if (!source.includes("/video/upload/") && !/\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source)) return source;
-
-  const [rawPath, rawQuery = ""] = source.split("?");
-  const marker = "/upload/";
-  const markerIndex = rawPath.indexOf(marker);
-  if (markerIndex < 0) return source;
-
-  const basePath = rawPath.slice(0, markerIndex + marker.length);
-  const suffixPath = rawPath.slice(markerIndex + marker.length);
-  if (suffixPath.startsWith(`${CLOUDINARY_TRANSCODE_STEP}/`)) return source;
-
-  const nextPath = `${basePath}${CLOUDINARY_TRANSCODE_STEP}/${suffixPath}`;
-  return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
+  return buildCloudinaryVideoThumbnailUrl(videoUrl ?? "");
 }
 
 function buildMarketplaceVideoCandidates(post: FeedPost): string[] {
@@ -222,12 +187,12 @@ function buildMarketplaceVideoCandidates(post: FeedPost): string[] {
     : "";
 
   const candidates = [
-    normalizeCloudinaryVideoPlaybackUrl(rawEdited),
-    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
-    normalizeCloudinaryVideoPlaybackUrl(rawSource),
+    buildCloudinaryVideoPlaybackUrl(rawSource),
+    rawSource,
+    buildCloudinaryVideoPlaybackUrl(rawEdited),
+    buildCloudinaryVideoPlaybackUrl(editedFromSource),
     rawEdited,
     editedFromSource,
-    rawSource,
   ].filter(Boolean);
 
   const unique: string[] = [];

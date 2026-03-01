@@ -36,6 +36,7 @@ import {
   uploadUriToStorage,
   type PickedMedia,
 } from "../../../lib/mediaRepo";
+import { buildCloudinaryVideoThumbnailUrl } from "../../../lib/mediaEdit";
 import { fetchCompanyServicesPublic, CompanyService } from "../../../lib/serviceRepo";
 import { CATEGORIES, COLORS } from "../../../lib/ui";
 
@@ -75,26 +76,18 @@ function formatDate(ms?: number): string {
 }
 
 function cloudinaryVideoThumbnailFromUrl(videoUrl: string): string {
-  if (!videoUrl) return "";
-
-  const [rawPath, rawQuery = ""] = videoUrl.split("?");
-  let path = rawPath;
-
-  if (path.includes("/upload/")) {
-    // Keep full frame in thumbnails (no crop/zoom), add letterboxing when needed.
-    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,ar_9:16,w_540,h_960,q_auto,f_jpg/");
-  }
-
-  if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
-    path = path.replace(/\.(mp4|mov|m4v|webm|avi)$/i, ".jpg");
-  } else if (!/\.(jpg|jpeg|png|webp)$/i.test(path)) {
-    path = `${path}.jpg`;
-  }
-
-  return rawQuery ? `${path}?${rawQuery}` : path;
+  return buildCloudinaryVideoThumbnailUrl(videoUrl);
 }
 
 function previewForPost(post: FeedPost): string {
+  if (post.mediaType === "video") {
+    return (
+      cloudinaryVideoThumbnailFromUrl(post.sourceVideoUrl || post.videoUrl) ||
+      post.thumbnailUrl?.trim() ||
+      post.imageUrl?.trim() ||
+      ""
+    );
+  }
   if (post.thumbnailUrl?.trim()) return post.thumbnailUrl.trim();
   if (post.imageUrl?.trim()) return post.imageUrl.trim();
   return cloudinaryVideoThumbnailFromUrl(post.videoUrl);

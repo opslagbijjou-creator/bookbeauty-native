@@ -20,6 +20,63 @@ function isCloudinaryUrl(url: string): boolean {
   return url.includes("/upload/");
 }
 
+function splitCloudinaryUploadUrl(source: string): { basePath: string; suffixPath: string; rawQuery: string } | null {
+  const [rawPath, rawQuery = ""] = source.split("?");
+  const marker = "/upload/";
+  const markerIndex = rawPath.indexOf(marker);
+  if (markerIndex < 0) return null;
+
+  return {
+    basePath: rawPath.slice(0, markerIndex + marker.length),
+    suffixPath: rawPath.slice(markerIndex + marker.length),
+    rawQuery,
+  };
+}
+
+function isLikelyCloudinaryTransformSegment(segment: string): boolean {
+  if (!segment || /^v\d+$/.test(segment)) return false;
+  if (segment.includes(",")) return true;
+
+  return /^(a_|ac_|af_|ar_|b_|bo_|c_|co_|d_|dn_|e_|eo_|f_|fl_|fn_|fps_|g_|h_|ki_|l_|o_|p_|pg_|q_|r_|so_|sp_|t_|u_|vc_|vs_|w_|x_|y_|z_)/.test(
+    segment
+  );
+}
+
+function normalizeCloudinarySuffix(suffixPath: string): string {
+  const segments = suffixPath.split("/").filter(Boolean);
+  let firstAssetIndex = 0;
+
+  while (
+    firstAssetIndex < segments.length &&
+    isLikelyCloudinaryTransformSegment(segments[firstAssetIndex])
+  ) {
+    firstAssetIndex += 1;
+  }
+
+  return segments.slice(firstAssetIndex).join("/");
+}
+
+function buildCloudinaryUrl(rawUrl: string, transformSegment?: string): string {
+  const source = String(rawUrl ?? "").trim();
+  if (!source) return "";
+
+  const parsed = splitCloudinaryUploadUrl(source);
+  if (!parsed) return source;
+
+  const normalizedSuffix = normalizeCloudinarySuffix(parsed.suffixPath);
+  if (!normalizedSuffix) return source;
+
+  const nextPath = transformSegment
+    ? `${parsed.basePath}${transformSegment}/${normalizedSuffix}`
+    : `${parsed.basePath}${normalizedSuffix}`;
+
+  return parsed.rawQuery ? `${nextPath}?${parsed.rawQuery}` : nextPath;
+}
+
+export function stripCloudinaryTransforms(rawUrl: string): string {
+  return buildCloudinaryUrl(rawUrl);
+}
+
 function buildPadToAspectTransform(cropPreset: MediaCropPreset): string {
   if (cropPreset === "original") return "";
 
@@ -58,21 +115,38 @@ export function buildCloudinaryEditedUrl(rawUrl: string, options: MediaEditOptio
 
   transforms.push(...buildFilterTransforms(filterPreset));
 
-  // If nothing to do, return original
-  if (!transforms.length) return source;
+  return buildCloudinaryUrl(source, transforms.length ? transforms.join(",") : undefined);
+}
 
-  const [rawPath, rawQuery = ""] = source.split("?");
-  const marker = "/upload/";
-  const markerIndex = rawPath.indexOf(marker);
-  if (markerIndex < 0) return source;
+const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
+const CLOUDINARY_VERTICAL_STILL_STEP = "so_1,c_pad,b_black,g_auto,ar_9:16,w_720,h_1280,q_auto,f_jpg";
 
-  const basePath = rawPath.slice(0, markerIndex + marker.length);
-  const suffixPath = rawPath.slice(markerIndex + marker.length);
+export function buildCloudinaryVideoPlaybackUrl(rawUrl: string): string {
+  const source = String(rawUrl ?? "").trim();
+  if (!source) return "";
+  if (!isCloudinaryUrl(source)) return source;
 
-  // IMPORTANT: do NOT stack transforms if already transformed
-  // If the suffix already starts with something like "c_", "e_", "f_", etc.
-  // you can choose to keep stacking, but this keeps it clean:
-  const nextPath = `${basePath}${transforms.join(",")}/${suffixPath}`;
+  return buildCloudinaryUrl(source, CLOUDINARY_TRANSCODE_STEP);
+}
 
-  return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
+export function buildCloudinaryVideoThumbnailUrl(rawUrl: string): string {
+  const source = String(rawUrl ?? "").trim();
+  if (!source) return "";
+  if (!isCloudinaryUrl(source)) return "";
+
+  const normalizedSource = stripCloudinaryTransforms(source);
+  const parsed = splitCloudinaryUploadUrl(normalizedSource);
+  if (!parsed) return "";
+
+  let assetSuffix = normalizeCloudinarySuffix(parsed.suffixPath);
+  if (!assetSuffix) return "";
+
+  if (/\.(mp4|mov|m4v|webm|avi)$/i.test(assetSuffix)) {
+    assetSuffix = assetSuffix.replace(/\.(mp4|mov|m4v|webm|avi)$/i, ".jpg");
+  } else if (!/\.(jpg|jpeg|png|webp)$/i.test(assetSuffix)) {
+    assetSuffix = `${assetSuffix}.jpg`;
+  }
+
+  const nextPath = `${parsed.basePath}${CLOUDINARY_VERTICAL_STILL_STEP}/${assetSuffix}`;
+  return parsed.rawQuery ? `${nextPath}?${parsed.rawQuery}` : nextPath;
 }

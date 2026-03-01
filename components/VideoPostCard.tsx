@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { AVPlaybackStatus, ResizeMode, Video } from "expo-av";
 import { Image } from "expo-image";
 import { FeedPost } from "../lib/feedRepo";
-import { buildCloudinaryEditedUrl } from "../lib/mediaEdit";
+import { buildCloudinaryEditedUrl, buildCloudinaryVideoPlaybackUrl } from "../lib/mediaEdit";
 
 type VideoPostCardProps = {
   post: FeedPost;
@@ -25,25 +25,6 @@ type VideoPostCardProps = {
 };
 
 let globalWebMuted = true;
-const CLOUDINARY_TRANSCODE_STEP = "f_mp4,vc_h264,ac_aac,q_auto,a_auto";
-
-function normalizeCloudinaryVideoPlaybackUrl(rawUrl: string): string {
-  const source = String(rawUrl ?? "").trim();
-  if (!source || !source.includes("/upload/")) return source;
-  if (!source.includes("/video/upload/") && !/\.(mp4|mov|m4v|webm|avi)(\?|$)/i.test(source)) return source;
-
-  const [rawPath, rawQuery = ""] = source.split("?");
-  const marker = "/upload/";
-  const markerIndex = rawPath.indexOf(marker);
-  if (markerIndex < 0) return source;
-
-  const basePath = rawPath.slice(0, markerIndex + marker.length);
-  const suffixPath = rawPath.slice(markerIndex + marker.length);
-  if (suffixPath.startsWith(`${CLOUDINARY_TRANSCODE_STEP}/`)) return source;
-
-  const nextPath = `${basePath}${CLOUDINARY_TRANSCODE_STEP}/${suffixPath}`;
-  return rawQuery ? `${nextPath}?${rawQuery}` : nextPath;
-}
 
 function buildVideoCandidates(
   rawVideoInput: string,
@@ -59,12 +40,12 @@ function buildVideoCandidates(
     : "";
 
   const candidates = [
+    buildCloudinaryVideoPlaybackUrl(rawSourceVideo),
     rawSourceVideo,
+    buildCloudinaryVideoPlaybackUrl(rawVideo),
     rawVideo,
+    buildCloudinaryVideoPlaybackUrl(editedFromSource),
     editedFromSource,
-    normalizeCloudinaryVideoPlaybackUrl(rawSourceVideo),
-    normalizeCloudinaryVideoPlaybackUrl(rawVideo),
-    normalizeCloudinaryVideoPlaybackUrl(editedFromSource),
   ].filter(Boolean);
 
   const unique: string[] = [];

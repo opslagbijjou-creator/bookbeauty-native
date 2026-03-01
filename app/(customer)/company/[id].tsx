@@ -12,6 +12,7 @@ import { getUserRole } from "../../../lib/authRepo";
 import { CompanyPublic, fetchCompanyById } from "../../../lib/companyRepo";
 import { fetchCompanyFeedPublic, FeedPost } from "../../../lib/feedRepo";
 import { auth } from "../../../lib/firebase";
+import { buildCloudinaryVideoPlaybackUrl, buildCloudinaryVideoThumbnailUrl } from "../../../lib/mediaEdit";
 import { AppRole } from "../../../lib/roles";
 import { CompanyService, fetchCompanyServicesPublic } from "../../../lib/serviceRepo";
 import {
@@ -40,22 +41,7 @@ const categoryIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
 };
 
 function cloudinaryVideoThumbnailFromUrl(videoUrl?: string): string {
-  if (!videoUrl) return "";
-  const [rawPath, rawQuery = ""] = videoUrl.split("?");
-  let path = rawPath;
-
-  if (path.includes("/upload/")) {
-    // Keep full frame in thumbnails (no crop/zoom), add letterboxing when needed.
-    path = path.replace("/upload/", "/upload/so_1,c_pad,b_black,ar_9:16,w_540,h_960,q_auto,f_jpg/");
-  }
-
-  if (/\.(mp4|mov|m4v|webm|avi)$/i.test(path)) {
-    path = path.replace(/\.(mp4|mov|m4v|webm|avi)$/i, ".jpg");
-  } else if (!/\.(jpg|jpeg|png|webp)$/i.test(path)) {
-    path = `${path}.jpg`;
-  }
-
-  return rawQuery ? `${path}?${rawQuery}` : path;
+  return buildCloudinaryVideoThumbnailUrl(videoUrl ?? "");
 }
 
 function videoPreviewText(item: FeedPost): string {
@@ -65,6 +51,14 @@ function videoPreviewText(item: FeedPost): string {
 }
 
 function feedPreviewImage(item: FeedPost): string {
+  if (item.mediaType === "video") {
+    return (
+      cloudinaryVideoThumbnailFromUrl(item.sourceVideoUrl || item.videoUrl) ||
+      item.thumbnailUrl?.trim() ||
+      item.imageUrl?.trim() ||
+      ""
+    );
+  }
   if (item.thumbnailUrl?.trim()) return item.thumbnailUrl.trim();
   if (item.imageUrl?.trim()) return item.imageUrl.trim();
   return cloudinaryVideoThumbnailFromUrl(item.videoUrl);
@@ -74,7 +68,7 @@ function storyPreviewMedia(story: CompanyStory): string {
   if (story.mediaType === "image") {
     return story.imageUrl || story.thumbnailUrl || "";
   }
-  return story.videoUrl || story.thumbnailUrl || "";
+  return story.thumbnailUrl || cloudinaryVideoThumbnailFromUrl(story.videoUrl) || "";
 }
 
 export default function CompanyProfileScreen() {
@@ -614,7 +608,7 @@ export default function CompanyProfileScreen() {
               {currentStory ? (
                 currentStory.mediaType === "video" && currentStory.videoUrl ? (
                   <Video
-                    source={{ uri: currentStory.videoUrl }}
+                    source={{ uri: buildCloudinaryVideoPlaybackUrl(currentStory.videoUrl) }}
                     style={styles.storyMedia}
                     resizeMode={ResizeMode.CONTAIN}
                     shouldPlay
