@@ -1,11 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { subscribeAuth } from "../lib/authRepo";
-import { auth } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
 import { getDefaultCityPath } from "../lib/marketplace";
 
@@ -26,6 +24,7 @@ const MENU_ITEMS: MenuItem[] = [
   { key: "home", label: "Home", href: "/" },
   { key: "discover", label: "Ontdek salons", href: "/discover" },
   { key: "feed", label: "Feed", href: "/feed" },
+  { key: "account", label: "Mijn account", href: "/account" },
   { key: "register", label: "Meld je salon gratis aan", href: "/(auth)/register" },
 ];
 
@@ -37,13 +36,6 @@ export default function MarketplaceShell({
 }: MarketplaceShellProps) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [hasSession, setHasSession] = useState(Boolean(auth.currentUser?.uid));
-
-  useEffect(() => {
-    return subscribeAuth((user) => {
-      setHasSession(Boolean(user?.uid));
-    });
-  }, []);
 
   function openRoute(href: string) {
     setMenuOpen(false);
@@ -61,10 +53,6 @@ export default function MarketplaceShell({
       <View style={styles.screen}>
         <View style={styles.topBar}>
           <View style={styles.topBarRow}>
-            <Pressable onPress={() => setMenuOpen(true)} style={styles.sideButton}>
-              <Ionicons name="menu-outline" size={24} color={COLORS.text} />
-            </Pressable>
-
             <Pressable onPress={() => router.push("/" as never)} style={styles.logoWrap}>
               <Image
                 source={require("../assets/logo/logo.png")}
@@ -73,12 +61,16 @@ export default function MarketplaceShell({
               />
             </Pressable>
 
-            <Pressable onPress={() => router.push("/account" as never)} style={styles.sideButton}>
-              <Ionicons
-                name={hasSession ? "person-circle-outline" : "person-outline"}
-                size={24}
-                color={COLORS.text}
-              />
+            <Pressable
+              onPress={() => router.push("/discover" as never)}
+              style={({ pressed }) => [styles.searchDock, pressed && styles.searchDockPressed]}
+            >
+              <Ionicons name="search" size={16} color={COLORS.muted} />
+              <Text style={styles.searchDockText}>Zoek salon of stad</Text>
+            </Pressable>
+
+            <Pressable onPress={() => setMenuOpen(true)} style={styles.sideButton}>
+              <Ionicons name="menu-outline" size={24} color={COLORS.text} />
             </Pressable>
           </View>
         </View>
@@ -98,7 +90,7 @@ export default function MarketplaceShell({
         <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
           <View style={styles.menuRoot}>
             <View style={styles.menuPanel}>
-              <Text style={styles.menuKicker}>Menu</Text>
+              <Text style={styles.menuKicker}>Navigatie</Text>
               <Text style={styles.menuTitle}>BookBeauty marketplace</Text>
 
               <View style={styles.menuList}>
@@ -154,43 +146,69 @@ const styles = StyleSheet.create({
   },
   topBar: {
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    backgroundColor: "#ffffff",
+    borderBottomColor: "rgba(232,225,215,0.9)",
+    backgroundColor: "rgba(255,255,255,0.92)",
     paddingHorizontal: 18,
-    paddingTop: 6,
+    paddingTop: 8,
     paddingBottom: 12,
   },
   topBarRow: {
-    minHeight: 48,
+    minHeight: 54,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: 12,
   },
   sideButton: {
     width: 44,
     height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "rgba(23,35,48,0.04)",
   },
   logoWrap: {
-    flex: 1,
     minHeight: 44,
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "center",
   },
   logo: {
-    width: 148,
-    height: 30,
+    width: 130,
+    height: 28,
+  },
+  searchDock: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(23,35,48,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(232,225,215,0.9)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14,
+    shadowColor: "#172330",
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 1,
+  },
+  searchDockPressed: {
+    transform: [{ scale: 0.99 }],
+  },
+  searchDockText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    fontWeight: "700",
   },
   content: {
     flex: 1,
     width: "100%",
-    maxWidth: 1180,
+    maxWidth: 1280,
     alignSelf: "center",
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 24,
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 28,
   },
   contentFullBleed: {
     maxWidth: undefined,
@@ -200,7 +218,7 @@ const styles = StyleSheet.create({
   },
   menuRoot: {
     flex: 1,
-    flexDirection: "row",
+    flexDirection: "row-reverse",
   },
   menuBackdrop: {
     flex: 1,
@@ -213,8 +231,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingTop: 24,
     paddingBottom: 28,
-    borderRightWidth: 1,
-    borderRightColor: COLORS.border,
+    borderLeftWidth: 1,
+    borderLeftColor: COLORS.border,
   },
   menuKicker: {
     color: COLORS.primary,

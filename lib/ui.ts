@@ -1,17 +1,17 @@
 export const COLORS = {
-  bg: "#f4f7fb",
+  bg: "#f6f4ef",
   card: "#ffffff",
-  border: "#e4eaf2",
-  text: "#172230",
-  muted: "#66758a",
-  placeholder: "#93a1b3",
-  primary: "#0f4c81",
-  primarySoft: "#e8f1fb",
+  border: "#e8e1d7",
+  text: "#1b2330",
+  muted: "#6f7887",
+  placeholder: "#98a0ae",
+  primary: "#173b63",
+  primarySoft: "#eef3fa",
   danger: "#c24164",
   success: "#1f8a5b",
-  surface: "#eef3f9",
-  accent: "#f2b6c8",
-  accentSoft: "#fdeef3",
+  surface: "#efe9e0",
+  accent: "#d88fa4",
+  accentSoft: "#f9edf1",
 };
 
 export const CATEGORIES = [
@@ -22,7 +22,6 @@ export const CATEGORIES = [
   "Make-up",
   "Massage",
   "Spa",
-  "Barber",
   "Overig",
 ] as const;
 

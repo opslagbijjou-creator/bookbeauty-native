@@ -44,7 +44,7 @@ export default function CategoryChips({
               }
               onChange?.(item);
             }}
-            style={[styles.chip, selected && styles.chipActive]}
+            style={({ pressed }) => [styles.chip, selected && styles.chipActive, pressed && styles.chipPressed]}
           >
             {icon ? (
               <Ionicons
@@ -67,24 +67,33 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   row: {
-    gap: 8,
-    paddingVertical: 2,
+    gap: 10,
+    paddingVertical: 4,
     alignItems: "center",
   },
   chip: {
-    minHeight: 38,
+    minHeight: 44,
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: "#ffffff",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    shadowColor: "#182330",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   chipActive: {
-    backgroundColor: COLORS.text,
-    borderColor: COLORS.text,
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  chipPressed: {
+    transform: [{ scale: 0.98 }],
   },
   icon: {
     marginRight: 6,
@@ -92,7 +101,7 @@ const styles = StyleSheet.create({
   text: {
     color: COLORS.text,
     fontWeight: "800",
-    fontSize: 12,
+    fontSize: 13,
   },
   textActive: {
     color: "#fff",
