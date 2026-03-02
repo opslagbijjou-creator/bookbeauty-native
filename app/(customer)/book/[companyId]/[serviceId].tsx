@@ -389,7 +389,7 @@ export default function BookServiceScreen() {
 
         const action = await askDoubleBookingAction(warning);
         if (action === "view_booking") {
-          router.push(`/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(warning.bookingId)}` as never);
+          router.push(`/account-bookings?bookingId=${encodeURIComponent(warning.bookingId)}` as never);
           return;
         }
         if (action === "change_date" || action === "cancel") {
@@ -407,7 +407,7 @@ export default function BookServiceScreen() {
         "Je afspraak staat nu als aanvraag open. De salon kan deze accepteren, afwijzen of een ander tijdstip voorstellen."
       );
       router.replace(
-        `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(result.bookingId)}` as never
+        `/account-bookings?bookingId=${encodeURIComponent(result.bookingId)}` as never
       );
     } catch (error: any) {
       const fallbackMessage = error?.message ?? "Kon boekingsaanvraag niet versturen.";

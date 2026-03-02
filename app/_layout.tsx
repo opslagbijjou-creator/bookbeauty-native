@@ -38,16 +38,16 @@ function AppBootstrapEffects() {
     if (role === "company") {
       router.push(
         (encodedBookingId
-          ? `/(company)/(tabs)/bookings?bookingId=${encodedBookingId}`
-          : "/(company)/notifications") as never
+          ? `/account?section=bookings&bookingId=${encodedBookingId}`
+          : "/account?section=bookings") as never
       );
       return;
     }
     if (role === "customer") {
       router.push(
         (encodedBookingId
-          ? `/(customer)/(tabs)/bookings?bookingId=${encodedBookingId}`
-          : "/(customer)/notifications") as never
+          ? `/account-bookings?bookingId=${encodedBookingId}`
+          : "/account-bookings") as never
       );
       return;
     }

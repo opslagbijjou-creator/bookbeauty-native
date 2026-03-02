@@ -61,8 +61,8 @@ function isBookingNotification(type: CustomerNotification["type"]): boolean {
 
 function routeForNotification(item: CustomerNotification): string | null {
   if (!isBookingNotification(item.type)) return null;
-  if (item.bookingId) return `/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(item.bookingId)}`;
-  return "/(customer)/(tabs)/bookings";
+  if (item.bookingId) return `/account-bookings?bookingId=${encodeURIComponent(item.bookingId)}`;
+  return "/account-bookings";
 }
 
 export default function CustomerNotificationsScreen() {

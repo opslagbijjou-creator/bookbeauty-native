@@ -198,7 +198,7 @@ export default function BookingRequestModal({
     onClose();
 
     if (auth.currentUser?.uid) {
-      router.push("/(customer)/(tabs)/bookings" as never);
+      router.push("/account-bookings" as never);
       return;
     }
 

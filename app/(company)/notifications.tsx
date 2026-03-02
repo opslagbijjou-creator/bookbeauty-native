@@ -35,8 +35,8 @@ function formatWhen(timestampMs: number): string {
 
 function routeForNotification(item: CompanyNotification): string | null {
   if (!item.type.startsWith("booking_")) return null;
-  if (item.bookingId) return `/(company)/(tabs)/bookings?bookingId=${encodeURIComponent(item.bookingId)}`;
-  return "/(company)/(tabs)/bookings";
+  if (item.bookingId) return `/account?section=bookings&bookingId=${encodeURIComponent(item.bookingId)}`;
+  return "/account?section=bookings";
 }
 
 export default function CompanyNotificationsScreen() {

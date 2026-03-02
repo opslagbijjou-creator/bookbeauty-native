@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import MarketplaceSeo from "../components/MarketplaceSeo";
 import MarketplaceShell from "../components/MarketplaceShell";
-import { fetchCustomerBookings, type Booking } from "../lib/bookingRepo";
+import { fetchCustomerBookingsByIdentity, type Booking } from "../lib/bookingRepo";
 import { auth } from "../lib/firebase";
 import { COLORS } from "../lib/ui";
 
@@ -23,11 +23,14 @@ function formatDateTime(row: Booking): string {
 
 export default function AccountBookingsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ bookingId?: string }>();
   const [items, setItems] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const activeBookingId = String(params.bookingId ?? "").trim();
 
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
+    const uid = auth.currentUser?.uid ?? "";
+    const email = auth.currentUser?.email ?? "";
     if (!uid) {
       setLoading(false);
       setItems([]);
@@ -37,7 +40,7 @@ export default function AccountBookingsScreen() {
     let cancelled = false;
     setLoading(true);
 
-    fetchCustomerBookings(uid)
+    fetchCustomerBookingsByIdentity(uid, email)
       .then((rows) => {
         if (cancelled) return;
         setItems(rows);
@@ -86,7 +89,7 @@ export default function AccountBookingsScreen() {
         ) : items.length ? (
           <View style={styles.list}>
             {items.map((row) => (
-              <View key={row.id} style={styles.row}>
+              <View key={row.id} style={[styles.row, row.id === activeBookingId && styles.rowActive]}>
                 <View style={styles.copy}>
                   <Text style={styles.company}>{row.companyName}</Text>
                   <Text style={styles.meta}>{row.serviceName}</Text>
@@ -156,6 +159,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  rowActive: {
+    borderColor: "rgba(215,138,169,0.32)",
+    backgroundColor: "rgba(215,138,169,0.06)",
   },
   copy: {
     flex: 1,

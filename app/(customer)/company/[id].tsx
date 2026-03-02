@@ -252,14 +252,9 @@ export default function CompanyProfileScreen() {
     : `${ratingCount}/${ratingMinReviews} reviews`;
   const bookingTotal = Math.max(0, Number(company?.bookingCountTotal ?? 0));
   const canUseCustomerActions = !uid || role === "customer";
-  const isBusinessViewer = role === "company" || role === "employee" || role === "admin";
   const hasStories = stories.length > 0;
   const currentStory = hasStories ? stories[Math.min(storyIndex, stories.length - 1)] : null;
-  const openFeedRoute = id
-    ? isBusinessViewer
-      ? (`/(company)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
-      : (`/(customer)/(tabs)/feed?companyId=${id}&origin=company-profile` as const)
-    : "";
+  const openFeedRoute = id ? (`/feed?companyId=${id}&origin=company-profile` as const) : "";
 
   function openStoryViewer() {
     if (!hasStories) return;

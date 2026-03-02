@@ -1019,6 +1019,39 @@ export async function fetchCustomerBookings(customerId: string): Promise<Booking
   return sortBookingsByCreatedDesc(normalizeBookingRows(rows));
 }
 
+export async function fetchCustomerBookingsByIdentity(
+  customerId: string,
+  customerEmail?: string
+): Promise<Booking[]> {
+  const cleanCustomerId = customerId.trim();
+  const cleanEmail = String(customerEmail ?? "").trim().toLowerCase();
+
+  if (!cleanCustomerId && !cleanEmail) return [];
+
+  const requests: Promise<QueryDocumentSnapshot<DocumentData>[]>[] = [];
+
+  if (cleanCustomerId) {
+    requests.push(
+      getDocs(query(collection(db, "bookings"), where("customerId", "==", cleanCustomerId))).then((snap) => snap.docs)
+    );
+  }
+
+  if (cleanEmail) {
+    requests.push(
+      getDocs(query(collection(db, "bookings"), where("customerEmail", "==", cleanEmail))).then((snap) => snap.docs)
+    );
+  }
+
+  const groups = await Promise.all(requests);
+  const byId = new Map<string, Booking>();
+
+  groups.flat().forEach((row) => {
+    byId.set(row.id, toBooking(row.id, row.data()));
+  });
+
+  return sortBookingsByCreatedDesc(normalizeBookingRows([...byId.values()]));
+}
+
 export async function fetchInfluencerCommissionSummary(influencerId: string): Promise<InfluencerCommissionSummary> {
   const cleanInfluencerId = influencerId.trim();
   if (!cleanInfluencerId) {

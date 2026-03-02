@@ -179,7 +179,7 @@ export default function CheckInScreen() {
   useEffect(() => {
     if (!checkedInDone) return;
     const timeout = setTimeout(() => {
-      router.replace(`/(customer)/(tabs)/bookings?bookingId=${encodeURIComponent(bookingId)}` as never);
+      router.replace(`/account-bookings?bookingId=${encodeURIComponent(bookingId)}` as never);
     }, 2000);
     return () => clearTimeout(timeout);
   }, [bookingId, checkedInDone, router]);
@@ -235,7 +235,7 @@ export default function CheckInScreen() {
             ) : null}
             <Pressable
               style={styles.secondaryBtn}
-              onPress={() => router.replace("/(customer)/(tabs)/bookings" as never)}
+              onPress={() => router.replace("/account-bookings" as never)}
             >
               <Ionicons name="calendar-outline" size={16} color={COLORS.danger} />
               <Text style={styles.secondaryBtnText}>Naar mijn boekingen</Text>

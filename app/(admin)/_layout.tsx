@@ -18,9 +18,9 @@ export default function AdminStackLayout() {
       const role = await getUserRole(user.uid);
       if (role === "admin") return;
       if (role === "company" || role === "employee") {
-        router.replace("/(company)/(tabs)/home" as never);
+        router.replace("/account" as never);
       } else {
-        router.replace("/(customer)/(tabs)" as never);
+        router.replace("/account" as never);
       }
     });
 

@@ -14,7 +14,7 @@ export default function CompanyStackLayout() {
 
       const role = await getUserRole(user.uid);
       if (role === "customer" || role === "influencer") {
-        router.replace("/(customer)/(tabs)" as never);
+        router.replace("/account" as never);
       } else if (role === "admin") {
         router.replace("/(admin)/(tabs)" as never);
       }

@@ -19,11 +19,11 @@ export default function CustomerStackLayout() {
         router.replace("/(admin)/(tabs)" as never);
       } else if (role === "company") {
         if (!isPublicCatalogRoute) {
-          router.replace("/(company)/(tabs)/home" as never);
+          router.replace("/account" as never);
         }
       } else if (role === "employee") {
         if (!isPublicCatalogRoute) {
-          router.replace("/(company)/(tabs)/bookings" as never);
+          router.replace("/account?section=bookings" as never);
         }
       }
     });
